@@ -7,6 +7,11 @@ const { avaliarMemoriaUniversal, detectarIdentidadeProdutoUniversal } = require(
 const { analisarBeneficiosUniversal } = require("./beneficios.service");
 const { avaliarDestinoUniversal } = require("./destino.service");
 const { decidirOfertaUniversal, calcularPrioridadeUniversal } = require("./decisao.service");
+const {
+  construirMetadataIntelligenceV1,
+  avaliarIntelligenceV1Global,
+  modoGlobalIntelligenceV1
+} = require("./foundation-v1.service");
 
 module.exports = {
   avaliarOfertaUniversal,
@@ -20,5 +25,8 @@ module.exports = {
   analisarBeneficiosUniversal,
   avaliarDestinoUniversal,
   decidirOfertaUniversal,
-  calcularPrioridadeUniversal
+  calcularPrioridadeUniversal,
+  construirMetadataIntelligenceV1,
+  avaliarIntelligenceV1Global,
+  modoGlobalIntelligenceV1
 };

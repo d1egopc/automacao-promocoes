@@ -1,0 +1,223 @@
+{
+  "cases": [
+    {
+      "id": "perfume_slogan",
+      "offer": {
+        "marketplace": "mercadolivre",
+        "titulo": "O Cara do Perfume trouxe pra você",
+        "produtoId": "MLB123456789",
+        "identityConfirmed": true,
+        "identitySource": "api_oficial",
+        "categoria": "Diversos",
+        "metadata": {
+          "produto": {
+            "produtoId": "MLB123456789",
+            "tituloOficial": "Perfume Dior Sauvage Eau de Toilette 100ml"
+          }
+        }
+      },
+      "expected": {
+        "title": "Perfume Dior Sauvage Eau de Toilette 100ml",
+        "principal": "Perfumaria, Farmácia e Beleza",
+        "affinities": [],
+        "classificationStatus": "resolved",
+        "safetyClass": "general"
+      }
+    },
+    {
+      "id": "fishing_pants_male",
+      "offer": {
+        "marketplace": "shopee",
+        "tituloOficial": "Calça masculina para pesca em poliamida UPF 50 secagem rápida",
+        "productId": "99887766",
+        "identityConfirmed": true,
+        "identitySource": "api_oficial",
+        "categoria": "Diversos"
+      },
+      "expected": {
+        "principal": "Pesca e Camping",
+        "affinities": ["Roupas e Moda Masculina"],
+        "classificationStatus": "resolved",
+        "safetyClass": "general"
+      }
+    },
+    {
+      "id": "fishing_pants_female",
+      "offer": {
+        "marketplace": "aliexpress",
+        "tituloOficial": "Calça feminina para pesca em poliamida UV 50 impermeável",
+        "productId": "100500778899",
+        "identityConfirmed": true,
+        "identitySource": "api_oficial",
+        "categoria": "Diversos"
+      },
+      "expected": {
+        "principal": "Pesca e Camping",
+        "affinities": ["Roupas e Moda Feminina"],
+        "classificationStatus": "resolved",
+        "safetyClass": "general"
+      }
+    },
+    {
+      "id": "gamer_mouse",
+      "offer": {
+        "marketplace": "amazon",
+        "tituloOficial": "Mouse Gamer Kysona Jupiter X Ultra 26000 DPI",
+        "productId": "B0ABCDEFG1",
+        "identityConfirmed": true,
+        "identitySource": "pagina_oficial",
+        "categoria": "Gamer e Hardware"
+      },
+      "expected": {
+        "principal": "Periféricos",
+        "affinities": ["Gamer e Hardware"],
+        "classificationStatus": "resolved",
+        "safetyClass": "general"
+      }
+    },
+    {
+      "id": "motherboard",
+      "offer": {
+        "marketplace": "kabum",
+        "tituloOficial": "Placa-mãe ASUS TUF Gaming B650M Plus WiFi AM5",
+        "productId": "987654",
+        "identityConfirmed": true,
+        "identitySource": "pagina_oficial",
+        "categoria": "Gamer e Hardware"
+      },
+      "expected": {
+        "principal": "Computadores e Notebook",
+        "affinities": ["Gamer e Hardware"],
+        "classificationStatus": "resolved",
+        "safetyClass": "general"
+      }
+    },
+    {
+      "id": "split_air_conditioner",
+      "offer": {
+        "marketplace": "magalu",
+        "tituloOficial": "Ar-condicionado Split Inverter Samsung WindFree 12000 BTU 220V",
+        "productId": "240144700",
+        "identityConfirmed": true,
+        "identitySource": "pagina_oficial",
+        "categoria": "Eletrodomésticos"
+      },
+      "expected": {
+        "principal": "Climatização e Ventilação",
+        "affinities": ["Eletrodomésticos"],
+        "classificationStatus": "resolved",
+        "safetyClass": "general"
+      }
+    },
+    {
+      "id": "fan",
+      "offer": {
+        "marketplace": "mercadolivre",
+        "tituloOficial": "Ventilador de Mesa Mondial 40 cm 6 Pás 127V",
+        "produtoId": "MLB223344556",
+        "identityConfirmed": true,
+        "identitySource": "api_oficial",
+        "categoria": "Climatização e Ventilação"
+      },
+      "expected": {
+        "principal": "Climatização e Ventilação",
+        "affinities": [],
+        "classificationStatus": "resolved",
+        "safetyClass": "general"
+      }
+    },
+    {
+      "id": "camping_lantern",
+      "offer": {
+        "marketplace": "shopee",
+        "tituloOficial": "Lanterna LED recarregável para camping 2000 lumens",
+        "productId": "55667788",
+        "identityConfirmed": true,
+        "identitySource": "api_oficial",
+        "categoria": "Iluminação e Elétrica"
+      },
+      "expected": {
+        "principal": "Pesca e Camping",
+        "affinities": ["Iluminação e Elétrica"],
+        "classificationStatus": "resolved",
+        "safetyClass": "general"
+      }
+    },
+    {
+      "id": "thermal_cooler_24v",
+      "offer": {
+        "marketplace": "aliexpress",
+        "tituloOficial": "Cooler térmico 24 V para camping com capacidade 20 litros",
+        "productId": "100500112233",
+        "identityConfirmed": true,
+        "identitySource": "api_oficial",
+        "categoria": "Pesca e Camping"
+      },
+      "expected": {
+        "principal": "Pesca e Camping",
+        "affinities": [],
+        "classificationStatus": "resolved",
+        "safetyClass": "general"
+      }
+    },
+    {
+      "id": "adult_product",
+      "offer": {
+        "marketplace": "amazon",
+        "tituloOficial": "Vibrador adulto recarregável em silicone",
+        "productId": "B0ADULT001",
+        "identityConfirmed": true,
+        "identitySource": "pagina_oficial",
+        "categoria": "Diversos"
+      },
+      "expected": {
+        "principal": "Diversos",
+        "affinities": [],
+        "classificationStatus": "resolved",
+        "safetyClass": "adult",
+        "reservedCommercialCategory": "Sex Shop +18"
+      }
+    },
+    {
+      "id": "common_uncertain",
+      "offer": {
+        "marketplace": "magalu",
+        "tituloOficial": "Acessório modelo QX série 2026",
+        "productId": "9988123",
+        "identityConfirmed": true,
+        "identitySource": "pagina_oficial",
+        "categoria": "Diversos"
+      },
+      "expected": {
+        "principal": "Diversos",
+        "affinities": [],
+        "classificationStatus": "uncertain",
+        "safetyClass": "general"
+      }
+    },
+    {
+      "id": "identity_divergent",
+      "offer": {
+        "marketplace": "mercadolivre",
+        "tituloOficial": "Mouse sem fio modelo X",
+        "produtoId": "MLB111111111",
+        "identityConfirmed": true,
+        "identitySource": "api_oficial",
+        "categoria": "Periféricos",
+        "metadata": {
+          "produto": {
+            "produtoId": "MLB222222222",
+            "sku": "SKU-A"
+          }
+        },
+        "sku": "SKU-B"
+      },
+      "expected": {
+        "principal": "Periféricos",
+        "affinities": [],
+        "classificationStatus": "rejected",
+        "safetyClass": "general"
+      }
+    }
+  ]
+}

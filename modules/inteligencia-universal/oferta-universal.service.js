@@ -7,6 +7,7 @@ const { analisarBeneficiosUniversal } = require("./beneficios.service");
 const { avaliarDestinoUniversal } = require("./destino.service");
 const { decidirOfertaUniversal, calcularPrioridadeUniversal } = require("./decisao.service");
 const { calcularValorEfetivo } = require("./valor-efetivo.service");
+const { avaliarIntelligenceV1Global } = require("./foundation-v1.service");
 
 function montarTemplateInput(ofertaUniversal = {}, score = {}, beneficios = {}) {
   return {
@@ -66,6 +67,20 @@ function avaliarOfertaUniversal(oferta = {}, contexto = {}) {
   const decisao = decidirOfertaUniversal({ validacao, score, memoria, destino, beneficios });
   logs.push({ etapa: "decisao", status: decisao.status, motivo: decisao.motivo, prioridade });
 
+  // Fase A: o shadow e global, passivo e fail-open. Ele nao altera a oferta
+  // usada por destino/decisao e so aparece no retorno quando ativado globalmente.
+  const intelligenceV1Shadow = avaliarIntelligenceV1Global(ofertaUniversal);
+  if (intelligenceV1Shadow.mode === "shadow") {
+    logs.push({
+      etapa: "intelligence_v1_shadow",
+      status: intelligenceV1Shadow.applied ? "observada" : "indisponivel",
+      motivo: intelligenceV1Shadow.error || intelligenceV1Shadow.metadata?.category?.reason || "shadow_passivo",
+      classificationStatus: intelligenceV1Shadow.metadata?.classificationStatus || null,
+      safetyClass: intelligenceV1Shadow.metadata?.safety?.class || null,
+      eligibilityAuthoritative: false
+    });
+  }
+
   return {
     ok: decisao.ok,
     status: decisao.status,
@@ -81,7 +96,8 @@ function avaliarOfertaUniversal(oferta = {}, contexto = {}) {
     memoria,
     destino,
     templateInput: montarTemplateInput(ofertaUniversal, score, beneficios),
-    logs
+    logs,
+    ...(intelligenceV1Shadow.mode === "shadow" ? { intelligenceV1Shadow } : {})
   };
 }
 

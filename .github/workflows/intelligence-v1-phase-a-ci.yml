@@ -1,0 +1,66 @@
+name: Intelligence V1 Phase A CI only
+
+on:
+  push:
+    branches:
+      - validation/intelligence-v1-phase-a-20261107
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Static contract
+        run: |
+          node --check modules/inteligencia-universal/foundation-v1.service.js
+          node --check modules/inteligencia-universal/oferta-universal.service.js
+          node --check modules/inteligencia-universal/index.js
+          npm run audit:encoding
+      - name: Intelligence V1 Phase A focal contract
+        run: node --test tests/intelligence-v1-phase-a.test.cjs
+      - name: Category and Universal compatibility
+        run: |
+          node --test \
+            tests/diversos-v4.test.cjs \
+            tests/diversos-integracao.test.cjs \
+            tests/classificador-diversos-20261028.test.cjs \
+            tests/classificador-copy-focal.test.cjs \
+            tests/classificador-universal-v3.test.cjs \
+            tests/classificador-v3-evidencia-marketplace.test.cjs \
+            tests/classificador-v3-magalu-evidencia.test.cjs \
+            tests/classificador-v3-legacy-parity.test.cjs
+          node tests/inteligencia-universal-decisao.test.js
+          node tests/categorias-reducao-diversos.test.js
+          node tests/classificador-universal-v2-categorias.test.js
+      - name: Six marketplace and downstream preservation
+        run: |
+          node tests/engine-v2-marketplaces-fidelidade.test.js
+          node tests/link-conversao-ocorrencia-marketplaces.test.js
+          node tests/contrato-comercial-final-universal.test.js
+          node tests/imagem-link-contrato-universal.test.js
+          node tests/template-universal-visual-contract.test.js
+          node tests/dynamic-link-resolvers.test.js
+          node tests/redirect-resolver-shortlinks-seguros.test.js
+          node tests/teleradar-handoff.test.js
+          node tests/clonador-grupos-foundation.test.js
+          node tests/destino-geral-distributor.test.js
+      - name: Guardian against published base
+        run: node scripts/guardian-v1.cjs validate --base c8765343215232cb976efc4f70679f72c4287e87 --source "$GITHUB_SHA" --report "$RUNNER_TEMP/intelligence-v1-phase-a-guardian.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: intelligence-v1-phase-a-evidence
+          path: ${{ runner.temp }}/intelligence-v1-phase-a-guardian.json
