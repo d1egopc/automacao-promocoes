@@ -1,0 +1,124 @@
+name: Intelligence V1 A B C D release candidate CI only
+
+on:
+  push:
+    branches:
+      - validation/intelligence-v1-release-candidate-abcd-20261107
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: intelligence-v1-release-candidate-abcd
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: intelligence_v1_release_candidate
+          POSTGRES_USER: intelligence_v1_release_ci
+          POSTGRES_PASSWORD: intelligence_v1_release_disposable
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U intelligence_v1_release_ci -d intelligence_v1_release_candidate"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      MAIN_BASE_SHA: c8765343215232cb976efc4f70679f72c4287e87
+      PHASE_A_SHA: 84d150cbd9ec5c28f12a4f34021347a397a4ec99
+      PHASE_B_SHA: deded1b13f6792203ac6a51ec99fc4164ef1940d
+      PHASE_C_SHA: 887e0d7c29b6321d7e6bd25cb134cf4155f75294
+      PHASE_D_SHA: c0de0901c5222c2e5471e515e412ad4a438c3b55
+      DATABASE_URL: ""
+      INTELLIGENCE_MEMORY_TEST_DATABASE_URL: postgresql://intelligence_v1_release_ci:intelligence_v1_release_disposable@127.0.0.1:5432/intelligence_v1_release_candidate
+      OPTIMUS_INTELLIGENCE_V1_MODE: "off"
+      OPTIMUS_INTELLIGENCE_V1_DISABLED: "1"
+      OPTIMUS_INTELLIGENCE_V1_MEMORY_MODE: "off"
+      OPTIMUS_INTELLIGENCE_V1_MEMORY_DISABLED: "1"
+      OPTIMUS_INTELLIGENCE_V1_ROUTING_MODE: "off"
+      OPTIMUS_INTELLIGENCE_V1_ROUTING_DISABLED: "1"
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Prove immutable A B C D chain and test-only release delta
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_REF" = refs/heads/validation/intelligence-v1-release-candidate-abcd-20261107
+          test -z "${DATABASE_URL:-}"
+          node --version | grep -Eq '^v24\.'
+          git merge-base --is-ancestor "$MAIN_BASE_SHA" "$PHASE_A_SHA"
+          git merge-base --is-ancestor "$PHASE_A_SHA" "$PHASE_B_SHA"
+          git merge-base --is-ancestor "$PHASE_B_SHA" "$PHASE_C_SHA"
+          git merge-base --is-ancestor "$PHASE_C_SHA" "$PHASE_D_SHA"
+          git merge-base --is-ancestor "$PHASE_D_SHA" HEAD
+          test "$(git rev-list --count "$PHASE_D_SHA"..HEAD)" = "1"
+          changed="$(git diff --name-only "$PHASE_D_SHA"..HEAD | sort)"
+          expected="$(printf '%s\n' \
+            .github/workflows/intelligence-v1-release-candidate-ci.yml \
+            tests/intelligence-v1-release-candidate.test.cjs | sort)"
+          test "$changed" = "$expected"
+          git diff --check "$MAIN_BASE_SHA"..HEAD
+          npm ci
+      - name: Static scope and release safety
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --check tests/intelligence-v1-release-candidate.test.cjs
+          ! git diff --name-only "$PHASE_D_SHA"..HEAD | grep -Eq '^(modules|index\.js|marketplaces|frontend)/'
+          ! grep -Eq 'Sex Shop \+18' marketplaces/inteligencia/categorias-globais.js
+          npm run audit:encoding
+      - name: Integrated A B C D and release gates
+        run: |
+          node --test \
+            tests/intelligence-v1-release-candidate.test.cjs \
+            tests/intelligence-v1-phase-a.test.cjs \
+            tests/intelligence-v1-memory.test.cjs \
+            tests/intelligence-v1-phase-c.test.cjs \
+            tests/intelligence-v1-phase-d.test.cjs
+          node tests/intelligence-v1-memory.postgres.test.cjs
+      - name: RIO Distributor Executor targets ACK fairness and dedup
+        run: |
+          node tests/destino-geral-distributor.test.js
+          node tests/destinos-compatibilidade-kabum-awin.test.js
+          node tests/engine-fanout-universal-v2.test.js
+          node tests/fila-fanout-destinos-estado.test.js
+          node tests/engine-distributor-origem-fairness.test.js
+          node tests/universal-flow-queue-executor.test.js
+          node tests/anti-repeticao-executor.test.js
+      - name: Six marketplaces and commercial truth
+        run: |
+          node tests/link-conversao-ocorrencia-marketplaces.test.js
+          node tests/contrato-comercial-final-universal.test.js
+          node tests/radar-commercial-fidelity.test.cjs
+          node tests/magalu-clonador-universal-e2e.test.js
+      - name: Auto Clean preservation
+        run: node --test tests/auto-clean-candidate-fairness.test.js
+      - name: Guardian for every stacked phase
+        run: |
+          node scripts/guardian-v1.cjs validate --base "$MAIN_BASE_SHA" --source "$PHASE_A_SHA" --report "$RUNNER_TEMP/intelligence-v1-phase-a-guardian.json"
+          node scripts/guardian-v1.cjs validate --base "$PHASE_A_SHA" --source "$PHASE_B_SHA" --report "$RUNNER_TEMP/intelligence-v1-phase-b-guardian.json"
+          node scripts/guardian-v1.cjs validate --base "$PHASE_B_SHA" --source "$PHASE_C_SHA" --report "$RUNNER_TEMP/intelligence-v1-phase-c-guardian.json"
+          node scripts/guardian-v1.cjs validate --base "$PHASE_C_SHA" --source "$PHASE_D_SHA" --report "$RUNNER_TEMP/intelligence-v1-phase-d-guardian.json"
+          node scripts/guardian-v1.cjs validate --base "$PHASE_D_SHA" --source "$GITHUB_SHA" --report "$RUNNER_TEMP/intelligence-v1-release-candidate-guardian.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: intelligence-v1-release-candidate-evidence
+          path: ${{ runner.temp }}/intelligence-v1-*-guardian.json
