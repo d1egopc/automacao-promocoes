@@ -1,6 +1,7 @@
 "use strict";
-const {randomBytes,createHmac}=require("node:crypto");
+const {createHmac}=require("node:crypto");
 const {sanitizarTraceRef}=require("../telemetria/trace-ref");
+const {operationalRef}=require("../telemetria/operational-ref");
 const MAX_MS=300000,NEXT_BOOTSTRAP_ARM_MS=86400000,NEXT_BOOTSTRAP_CAPTURE_MS=1800000,MAX_CALLS=1000,MAX_RECORDS=64,MAX_GENERATIONS=4,RETENTION_MS=900000,MAX_MESSAGES=10,MAX_BOOTSTRAP_SIGNALS=1000,MAX_CONTINUOUS_GENERATIONS=512,MAX_CONTINUOUS_MESSAGES=500,MAX_BOOTSTRAP_ROWS=512,MAX_GROUP_ROWS=512;
 const REASONS=new Set(["socket_stale","user_inactive","buffer_recovery_suppressed","from_me","not_group","accepted","mensagem_nao_monitoravel","other","group_not_monitored","stale_message","wrong_upsert_type","no_links","marketplace_unidentified","duplicate","ignored","rejected","consumer_error","engine_error","engine_not_awaited","radar_monitoramento_inativo","fora_do_horario_monitoramento","sessao_whatsapp_nao_monitorada","grupo_whatsapp_nao_monitorado","whatsapp_upsert_historico","whatsapp_timestamp_ausente","radar_ativacao_invalida","whatsapp_mensagem_anterior_ativacao","whatsapp_mensagem_anterior_janela","remotejid_ausente","origem_tipo_invalida","grupo_ou_chat_ausente","captura_sem_tempo_factual","tamanho_maximo_atingido","usuario_inativo","workspace_mismatch"]);
 const TARGET_GROUP_ID="120363408782037034@g.us",TARGET_SESSION_ID="admin_Zoiao Claro";
@@ -15,7 +16,7 @@ function exactGroupId(value){
  for(const candidate of candidates){if(typeof candidate!=="string"&&typeof candidate!=="number")continue;const id=String(candidate).trim();if(GROUP_ID.test(id))return id;}
  return "";
 }
-function resolveConfiguredObservationGroups({workspaceId,sessionId,sessionBelongsToWorkspace,sessionWorkspaceId,actualGroupIds,radarConfig,resolveRadarSessionId,messengerProfiles}={}){
+function resolveConfiguredObservationGroups({workspaceId,sessionId,sessionBelongsToWorkspace,sessionWorkspaceId,actualGroupIds,radarConfig,resolveRadarSessionId,messengerProfiles,clonadorSources}={}){
  if(!WORKSPACE_ID.test(String(workspaceId||""))||!SESSION_ID.test(String(sessionId||""))||sessionBelongsToWorkspace!==true||
   sessionWorkspaceId&&sessionWorkspaceId!==workspaceId||!Array.isArray(actualGroupIds))return [];
  const actual=new Set(actualGroupIds.map(exactGroupId).filter(Boolean));if(!actual.size)return [];
@@ -47,6 +48,11 @@ function resolveConfiguredObservationGroups({workspaceId,sessionId,sessionBelong
    for(const group of selected)add(group);
   }
  }
+ for(const source of Array.isArray(clonadorSources)?clonadorSources:[]){
+  if(source?.ativo===false||String(source?.clienteId||source?.cliente_id||"")!==workspaceId||
+   String(source?.sessaoId||source?.sessao_id||"")!==sessionId)continue;
+  add(source?.grupoJid||source?.grupo_jid||source?.grupoId||source?.remoteJid);
+ }
  return tooManyGroups?[]:[...groups];
 }
 // Categories describe the public stanza tag, not its private content/purpose.
@@ -54,11 +60,11 @@ const CONTROL_TAGS=new Set(["iq","ack","receipt","notification","presence","chat
 const SYNC_TAGS=new Set(["ib","success"]);
 const UPDATES=new Set(["notify","append","replace","read","other"]);
 const GROUP_COUNTERS=Object.freeze(["upsertNotify","upsertAppend","upsertOther","fromMeTrue","fromMeFalse","fromMeUnknown","buffered","emitCompleted","callback","listener","radar","radarAccepted","radarRejected","mensageiroGerente","mensageiroComando","mensageiroAtendimento"]);
-function createIngressBoundaryObservation({now=Date.now,setTimer=setTimeout,clearTimer=clearTimeout,secret=randomBytes(32),journal=null,resolveContinuousScope=()=>({verified:false,groupIds:[]})}={}) {
+function createIngressBoundaryObservation({now=Date.now,setTimer=setTimeout,clearTimer=clearTimeout,secret=null,reference=operationalRef,journal=null,resolveContinuousScope=()=>({verified:false,groupIds:[]})}={}) {
  let run=null,timer=null;const bindings=new Map();
- const ref=(kind,value)=>createHmac("sha256",secret).update(`${kind}:${value}`).digest("hex").slice(0,16);
- const sessionReference=(workspaceId,sessionId)=>ref("session",run?.mode==="continuous"?`${workspaceId}:${sessionId}`:sessionId);
- const groupReference=(workspaceId,sessionId,groupId)=>ref("group",run?.mode==="continuous"?`${workspaceId}:${sessionId}:${groupId}`:groupId);
+ const ref=(kind,...values)=>secret?createHmac("sha256",secret).update(`${kind}:${values.join(":")}`).digest("hex").slice(0,16):reference(kind,...values);
+ const sessionReference=(workspaceId,sessionId)=>run?.mode==="continuous"?ref("session",workspaceId,sessionId):ref("session",sessionId);
+ const groupReference=(workspaceId,sessionId,groupId)=>run?.mode==="continuous"?ref("group",workspaceId,sessionId,groupId):ref("group",groupId);
  const safe=fn=>{try{fn();}catch{/* diagnostic never changes dispatch */}};
  function stop(reason="manual") {
   if(!run?.active)return status();run.active=false;run.finishedAt=now();run.reason=reason;
@@ -96,7 +102,7 @@ function createIngressBoundaryObservation({now=Date.now,setTimer=setTimeout,clea
   if(!target||groupId&&(!String(groupId).endsWith("@g.us")||Array.isArray(target.groupIds)&&!target.groupIds.includes(groupId)))return null;
   return target;
  }
-const JOURNAL_STAGE_MAP=Object.freeze({socket_current:"listener_registered",socket_replaced:"listener_removed",listener_registered:"listener_registered",listener_removed:"listener_removed",listeners_removed:"listener_removed",buffer_active:"buffer_state",buffer_released:"buffer_state",emit_attempt:"emit_attempt",emit_completed:"emit_completed",message_node:"message_node",callback:"callback",listener:"listener",radar_entry:"radar",radar_result:"radar_result",early:"listener_gate",mensageiro_gerente:"mensageiro_gerente",mensageiro_comando:"mensageiro_comando",mensageiro_atendimento:"mensageiro_atendimento"});
+const JOURNAL_STAGE_MAP=Object.freeze({socket_current:"listener_registered",socket_replaced:"listener_removed",listener_registered:"listener_registered",listener_removed:"listener_removed",listeners_removed:"listener_removed",buffer_active:"buffer_state",buffer_released:"buffer_state",emit_attempt:"emit_attempt",emit_completed:"emit_completed",message_node:"message_node",callback:"callback",listener:"listener",radar_entry:"radar",radar_result:"radar_result",clonador_result:"clonador_result",early:"listener_gate",mensageiro_gerente:"mensageiro_gerente",mensageiro_comando:"mensageiro_comando",mensageiro_atendimento:"mensageiro_atendimento"});
  function persist(b,{stage,groupId,messageId,traceRef,upsertType,fromMe,reason,decision,operation,offlineAttribute,syncState,count,buffering,explicitHold,pendingWorks}={}){
   if(run?.mode!=="continuous"||!journal?.append)return;
   const target=targetFor(b.workspaceId,b.sessionId,groupId);if(!target)return;
@@ -184,7 +190,7 @@ const JOURNAL_STAGE_MAP=Object.freeze({socket_current:"listener_registered",sock
   if(counters[kind])groupCounter(b.workspaceId,b.sessionId,groupId,counters[kind]);
   if(kind==="emit_attempt"&&bufferState===true)groupCounter(b.workspaceId,b.sessionId,groupId,"buffered");
   if(kind==="radar_result")groupCounter(b.workspaceId,b.sessionId,groupId,decision==="accepted"?"radarAccepted":"radarRejected");
-  const journalStage=({emit_attempt:"emit_attempt",emit_completed:"emit_completed",callback:"callback",listener:"listener",radar:"radar",radar_entry:"radar",result:"radar_result",radar_result:"radar_result",early:"listener_gate",mensageiro_gerente:"mensageiro_gerente",mensageiro_comando:"mensageiro_comando",mensageiro_atendimento:"mensageiro_atendimento"})[kind]||"listener";
+  const journalStage=({emit_attempt:"emit_attempt",emit_completed:"emit_completed",callback:"callback",listener:"listener",radar:"radar",radar_entry:"radar",result:"radar_result",radar_result:"radar_result",clonador_result:"clonador_result",early:"listener_gate",mensageiro_gerente:"mensageiro_gerente",mensageiro_comando:"mensageiro_comando",mensageiro_atendimento:"mensageiro_atendimento"})[kind]||"listener";
   persist(b,{stage:journalStage,groupId,messageId:id,traceRef:row.traceRef,upsertType:row.upsertType,fromMe:row.fromMe,reason:safeReason||undefined,decision:safeDecision||undefined,buffering:bufferState});
  }
  function packetStage(kind,ctx,packet){
@@ -289,7 +295,7 @@ const JOURNAL_STAGE_MAP=Object.freeze({socket_current:"listener_registered",sock
   else if(["wrapper","callback"].includes(kind))persist(b,{stage:kind,decision:"received"});
   buffering(b);
  }
- function snapshot(b){const buffered=buffering(b),c={...b.counters},p=physical(b);let messageReceiver="UNKNOWN";safe(()=>{if(typeof b.sock.ws?.listenerCount==="function")messageReceiver=b.sock.ws.listenerCount("CB:message")>0?"PRESENT":"ABSENT";});return {generation:b.generation,workspaceRef:ref("workspace",b.workspaceId),sessionRef:ref("session",b.sessionId),isCurrent:run.mode==="continuous"?run.currentBySession?.get(b.sessionId)===b:run.current===b,buffering:buffered,listener:p,socketCoverage:b.wsOriginal?"public_emit_observed":"unavailable",counters:c,bootstrap:b.bootstrap?{...b.bootstrap,offlineBatch:{...b.bootstrap.offlineBatch},offlineAttribute:{...b.bootstrap.offlineAttribute},offlineTasks:{...b.bootstrap.offlineTasks},synchronization:{...b.bootstrap.synchronization},buffer:{...b.bootstrap.buffer,flushesByReason:{...b.bootstrap.buffer.flushesByReason}},delivery:{...b.bootstrap.delivery},records:b.bootstrap.records.map(x=>({...x}))}:null,
+ function snapshot(b){const buffered=buffering(b),c={...b.counters},p=physical(b);let messageReceiver="UNKNOWN";safe(()=>{if(typeof b.sock.ws?.listenerCount==="function")messageReceiver=b.sock.ws.listenerCount("CB:message")>0?"PRESENT":"ABSENT";});return {generation:b.generation,workspaceRef:ref("workspace",b.workspaceId),sessionRef:sessionReference(b.workspaceId,b.sessionId),isCurrent:run.mode==="continuous"?run.currentBySession?.get(b.sessionId)===b:run.current===b,buffering:buffered,listener:p,socketCoverage:b.wsOriginal?"public_emit_observed":"unavailable",counters:c,bootstrap:b.bootstrap?{...b.bootstrap,offlineBatch:{...b.bootstrap.offlineBatch},offlineAttribute:{...b.bootstrap.offlineAttribute},offlineTasks:{...b.bootstrap.offlineTasks},synchronization:{...b.bootstrap.synchronization},buffer:{...b.bootstrap.buffer,flushesByReason:{...b.bootstrap.buffer.flushesByReason}},delivery:{...b.bootstrap.delivery},records:b.bootstrap.records.map(x=>({...x}))}:null,
   messageReceiver,synchronization:{lastPublicSignal:b.lastSyncSignal,pendingNotificationsObserved:typeof b.sock.__optimusMessengerLiveReady==="boolean"?b.sock.__optimusMessengerLiveReady:null,initialSyncState:"UNAVAILABLE_PUBLIC_INTERFACE"},failureCoverage:{decodeFailures:null,decryptFailures:null,reason:"no_dedicated_public_failure_event; socket/stream errors and dispatch throws are distinct"},
   distinction:c.wrapperCalls?c.callbackCalls?c.radarEntries?"radar_reached":c.earlyReturns?"early_return_observed":"callback_without_radar":"wrapper_without_callback":c.emitAttempts?c.emitCompleted>0&&c.bufferedAccepted===c.emitCompleted&&!c.emitErrors&&b.buffering?"buffer_retained_observed":p.state==="ABSENT"?"listener_absent_observed":"emit_without_wrapper_unknown":"no_upsert_emit_observed_not_transport_proof"};}
  function status(){

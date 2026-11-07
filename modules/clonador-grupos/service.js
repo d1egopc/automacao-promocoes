@@ -574,7 +574,9 @@ function criarServicoClonadorGrupos(deps = {}) {
       validadas.push(await validarFonte(clienteId, fonte));
     }
 
-    return { ok: true, fontes: await repo.substituirFontes(clienteId, validadas) };
+    const fontesSalvas = await repo.substituirFontes(clienteId, validadas);
+    try { deps.onFontesChanged?.(clienteId, fontesSalvas); } catch (_) { /* observability never changes configuration */ }
+    return { ok: true, fontes: fontesSalvas };
   }
 
   async function listarDestinosElegiveis(req) {

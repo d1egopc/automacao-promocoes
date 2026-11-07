@@ -333,6 +333,20 @@ function criarRepositorioClonadorGrupos(opcoes = {}) {
     return resultado.rows.map(normalizarFonte);
   }
 
+  // Read-only bootstrap for the bounded ingress observer. It intentionally
+  // does not call prepararSchema(): missing/unavailable storage fails closed.
+  async function listarFontesAtivasObservacao({ limite = 512 } = {}) {
+    const max = Math.max(1, Math.min(512, Number(limite) || 512));
+    const resultado = await executar(`
+      SELECT id, cliente_id, sessao_id, grupo_jid, grupo_nome, ativo, criado_em, atualizado_em
+        FROM clonador_grupos_fontes
+       WHERE ativo = TRUE
+       ORDER BY cliente_id, sessao_id, id
+       LIMIT $1
+    `, [max], query);
+    return resultado.rows.map(normalizarFonte);
+  }
+
   async function substituirFontes(clienteId = "", fontes = []) {
     await pronto();
     const cliente = texto(clienteId);
@@ -1001,6 +1015,7 @@ function criarRepositorioClonadorGrupos(opcoes = {}) {
     lerConfig,
     salvarConfig,
     listarFontes,
+    listarFontesAtivasObservacao,
     substituirFontes,
     listarDestinos,
     substituirDestinos,

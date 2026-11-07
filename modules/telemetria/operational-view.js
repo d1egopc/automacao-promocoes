@@ -5,6 +5,7 @@ const telemetry = require("./telemetria.service");
 const admin = require("../observabilidade/admin.service");
 const { queryEngineShadow } = require("../engine/database");
 const { extrairTraceRef } = require("./trace-ref");
+const { operationalRef } = require("./operational-ref");
 const salt = crypto.randomBytes(32);
 const ref = (value) =>
   value
@@ -336,7 +337,9 @@ function createOperationalView({
             : attachment
               ? "COMPROVADO"
               : "INDISPONIVEL",
-        socketRef: ref(socket && target.sessionId),
+        socketRef: socket && target.sessionId
+          ? operationalRef("session", target.workspaceId, target.sessionId)
+          : null,
         generation: Number(target.generation) || null,
       },
       report,
@@ -447,7 +450,7 @@ function createOperationalView({
         .filter((item) => !client || item.workspaceId === client)
         .map((item) => ({
           workspaceId: code(item.workspaceId),
-          sessionRef: ref(item.sessionId),
+          sessionRef: operationalRef("session", item.workspaceId, item.sessionId),
           source: "current_socket + sessoesMeta in memory",
           ownershipSource: "session_metadata_loaded_from_persistence",
           workspaceCapturedByCallback: "DESCONHECIDO",

@@ -26,8 +26,11 @@ const { createIngressBoundaryObservation, resolveConfiguredObservationGroups } =
 const { createIngressObservationJournal } = require("./modules/whatsapp/ingress-observation-journal");
 const whatsappIngressScopeCache = new Map();
 const whatsappIngressRadarRevision = new Map();
+const whatsappIngressClonadorSources = new Map();
+const whatsappIngressClonadorRevision = new Map();
 const MAX_WHATSAPP_INGRESS_SCOPE_CACHE = 2048;
 const MAX_WHATSAPP_INGRESS_RADAR_REVISIONS = 2048;
+const MAX_WHATSAPP_INGRESS_CLONADOR_WORKSPACES = 2048;
 const whatsappIngressJournal = createIngressObservationJournal({ directory: "/var/log/optimus/garimpei-sensor" });
 const whatsappIngressBoundary = createIngressBoundaryObservation({ journal: whatsappIngressJournal, resolveContinuousScope: resolverEscopoContinuoObservacaoIngressWhatsapp });
 whatsappIngressBoundary.startContinuous(); // Dynamic scope is resolved from each owned session's current Radar/Messenger configuration.
@@ -18562,6 +18565,30 @@ function invalidarEscopoObservacaoIngressWhatsapp(clienteId = "", sessaoId = "")
   }
 }
 
+function atualizarFontesClonadorObservacaoIngress(fontes = [], { substituirTudo = false, clienteId = "" } = {}) {
+  const workspaceAlvo = String(clienteId || "").trim();
+  const porWorkspace = new Map();
+  for (const fonte of Array.isArray(fontes) ? fontes : []) {
+    const workspace = String(fonte?.clienteId || fonte?.cliente_id || "").trim();
+    const sessaoId = String(fonte?.sessaoId || fonte?.sessao_id || "").trim();
+    const grupoJid = String(fonte?.grupoJid || fonte?.grupo_jid || "").trim();
+    if (!workspace || !sessaoId || !/^\d+(?:-\d+)?@g\.us$/.test(grupoJid) || fonte?.ativo === false) continue;
+    if (!porWorkspace.has(workspace)) porWorkspace.set(workspace, []);
+    porWorkspace.get(workspace).push({ clienteId: workspace, sessaoId, grupoJid, ativo: true });
+  }
+  const afetados = substituirTudo
+    ? new Set([...whatsappIngressClonadorSources.keys(), ...porWorkspace.keys()])
+    : new Set([workspaceAlvo].filter(Boolean));
+  if (substituirTudo) whatsappIngressClonadorSources.clear();
+  for (const workspace of afetados) {
+    whatsappIngressClonadorSources.set(workspace, porWorkspace.get(workspace) || []);
+    whatsappIngressClonadorRevision.set(workspace, (whatsappIngressClonadorRevision.get(workspace) || 0) + 1);
+    invalidarEscopoObservacaoIngressWhatsapp(workspace);
+  }
+  while (whatsappIngressClonadorSources.size > MAX_WHATSAPP_INGRESS_CLONADOR_WORKSPACES) whatsappIngressClonadorSources.delete(whatsappIngressClonadorSources.keys().next().value);
+  while (whatsappIngressClonadorRevision.size > MAX_WHATSAPP_INGRESS_CLONADOR_WORKSPACES) whatsappIngressClonadorRevision.delete(whatsappIngressClonadorRevision.keys().next().value);
+}
+
 function resolverEscopoContinuoObservacaoIngressWhatsapp({ workspaceId, sessionId } = {}) {
   const workspace = String(workspaceId || "").trim();
   const session = String(sessionId || "").trim();
@@ -18575,10 +18602,11 @@ function resolverEscopoContinuoObservacaoIngressWhatsapp({ workspaceId, sessionI
   const radarRevision = whatsappIngressRadarRevision.get(workspace) || 0;
   const messengerRevision = Number.isSafeInteger(mensageiroV3Routes?.store?.state?.revision)
     ? mensageiroV3Routes.store.state.revision : -1;
+  const clonadorRevision = whatsappIngressClonadorRevision.get(workspace) || 0;
   const key = JSON.stringify([workspace, session]);
   const cached = whatsappIngressScopeCache.get(key);
   if (cached && cached.meta === meta && cached.actualGroups === actualGroups &&
-      cached.radarRevision === radarRevision && cached.messengerRevision === messengerRevision) {
+      cached.radarRevision === radarRevision && cached.messengerRevision === messengerRevision && cached.clonadorRevision === clonadorRevision) {
     whatsappIngressScopeCache.delete(key);
     whatsappIngressScopeCache.set(key, cached);
     return cached.scope;
@@ -18625,10 +18653,11 @@ function resolverEscopoContinuoObservacaoIngressWhatsapp({ workspaceId, sessionI
               String(sessoesMeta[candidate].workspaceId || sessoesMeta[candidate].clienteId).trim() === workspace)));
         return candidates.size === 1 ? [...candidates][0] : "";
       },
-      messengerProfiles
+      messengerProfiles,
+      clonadorSources: whatsappIngressClonadorSources.get(workspace) || []
     })
   };
-  whatsappIngressScopeCache.set(key, { meta, actualGroups, radarRevision, messengerRevision, scope });
+  whatsappIngressScopeCache.set(key, { meta, actualGroups, radarRevision, messengerRevision, clonadorRevision, scope });
   while (whatsappIngressScopeCache.size > MAX_WHATSAPP_INGRESS_SCOPE_CACHE) whatsappIngressScopeCache.delete(whatsappIngressScopeCache.keys().next().value);
   return scope;
 }
@@ -27195,6 +27224,15 @@ function iniciarMensageiroV3Scheduler() {
 // =============== ROTA DO CLONADOR DE GRUPOS =================
 
 const clonadorGruposRepository = criarRepositorioClonadorGrupos();
+async function carregarFontesClonadorObservacaoIngress() {
+  try {
+    const fontes = await clonadorGruposRepository.listarFontesAtivasObservacao({ limite: 512 });
+    atualizarFontesClonadorObservacaoIngress(fontes, { substituirTudo: true });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
 const clonadorGruposService = criarServicoClonadorGrupos({
   repository: clonadorGruposRepository,
   exigirCapturaFactualCandidata: true,
@@ -27213,6 +27251,7 @@ const clonadorGruposService = criarServicoClonadorGrupos({
   extrairTextoMensagem: extrairTextoMensagemRadar,
   extrairLinksMensagem: extrairLinksRadar,
   solicitarProcessamentoBridge: solicitarCicloEntradaClonador,
+  onFontesChanged: (clienteId, fontes) => atualizarFontesClonadorObservacaoIngress(fontes, { clienteId }),
   logger: console
 });
 const clonadorGruposBridge = criarBridgeClonadorGrupos({
@@ -34868,7 +34907,7 @@ registrarListenerUnicoSocket({
         decision: execucaoAtendimento?.ok === false ? "error" : execucaoAtendimento?.resultado?.ok === true ? "accepted" : execucaoAtendimento?.resultado?.ignorada ? "ignored" : "rejected",
         reason: execucaoAtendimento?.ok === false ? "consumer_error" : execucaoAtendimento?.resultado?.motivo || "other" }); } catch { /* diagnostics only */ }
 
-      await executarConsumidorMensagemIsolado({
+      const execucaoClonador = await executarConsumidorMensagemIsolado({
         consumidor: "clonador_grupos",
         contexto: contextoListenerCobertura,
         executar: async () => {
@@ -34890,6 +34929,16 @@ registrarListenerUnicoSocket({
           });
         }
       });
+      const resultadoClonador = execucaoClonador?.resultado;
+      try { whatsappIngressBoundary.mark("clonador_result", {
+        workspaceId: clienteIdMensageiro,
+        sessionId: id,
+        sock,
+        emitter: whatsappIngressEmitter,
+        message: mensagem,
+        decision: execucaoClonador?.ok === false ? "error" : resultadoClonador?.capturada === true ? "accepted" : resultadoClonador?.capturada === false ? "ignored" : "unknown",
+        reason: execucaoClonador?.ok === false ? "consumer_error" : resultadoClonador?.motivo || "other"
+      }); } catch { /* diagnostics only */ }
     } catch (e) {
       coberturaRadar.registrar("listener_erro_mensagem", {
         coberturaTraceId: coberturaRadar.criarCoberturaTraceId(mensagemAtualCobertura, {
@@ -35678,8 +35727,10 @@ setInterval(() => {
   decairConfiancaCupons();
 }, 4 * 60 * 60 * 1000);
 
-  setTimeout(() => {
+  setTimeout(async () => {
     console.log("[WHATSAPP] Reconectando sesses WhatsApp automaticamente...");
+
+await carregarFontesClonadorObservacaoIngress();
 
 const decisoesReconexaoBoot = enumerarSessoesReconexaoBoot({
   sessoesMeta,
