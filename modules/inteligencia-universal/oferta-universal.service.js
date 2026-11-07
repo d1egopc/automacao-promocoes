@@ -8,6 +8,7 @@ const { avaliarDestinoUniversal } = require("./destino.service");
 const { decidirOfertaUniversal, calcularPrioridadeUniversal } = require("./decisao.service");
 const { calcularValorEfetivo } = require("./valor-efetivo.service");
 const { avaliarIntelligenceV1Global } = require("./foundation-v1.service");
+const { scheduleMemoryObservation } = require("./memory-v1.service");
 
 function montarTemplateInput(ofertaUniversal = {}, score = {}, beneficios = {}) {
   return {
@@ -70,14 +71,28 @@ function avaliarOfertaUniversal(oferta = {}, contexto = {}) {
   // Fase A: o shadow e global, passivo e fail-open. Ele nao altera a oferta
   // usada por destino/decisao e so aparece no retorno quando ativado globalmente.
   const intelligenceV1Shadow = avaliarIntelligenceV1Global(ofertaUniversal);
+  let intelligenceV1Memory = { mode: "off", scheduled: false, reason: "memory_not_observed" };
   if (intelligenceV1Shadow.mode === "shadow") {
+    try {
+      intelligenceV1Memory = intelligenceV1Shadow.applied
+        ? scheduleMemoryObservation({
+          offer: ofertaUniversal,
+          metadata: intelligenceV1Shadow.metadata,
+          workspaceId: contexto.clienteId || ofertaUniversal.clienteId || oferta.clienteId || ""
+        })
+        : { mode: "off", scheduled: false, reason: "intelligence_shadow_unavailable" };
+    } catch {
+      intelligenceV1Memory = { mode: "off", scheduled: false, reason: "memory_shadow_unavailable" };
+    }
     logs.push({
       etapa: "intelligence_v1_shadow",
       status: intelligenceV1Shadow.applied ? "observada" : "indisponivel",
       motivo: intelligenceV1Shadow.error || intelligenceV1Shadow.metadata?.category?.reason || "shadow_passivo",
       classificationStatus: intelligenceV1Shadow.metadata?.classificationStatus || null,
       safetyClass: intelligenceV1Shadow.metadata?.safety?.class || null,
-      eligibilityAuthoritative: false
+      eligibilityAuthoritative: false,
+      memoryMode: intelligenceV1Memory.mode,
+      memoryScheduled: intelligenceV1Memory.scheduled === true
     });
   }
 
@@ -97,7 +112,9 @@ function avaliarOfertaUniversal(oferta = {}, contexto = {}) {
     destino,
     templateInput: montarTemplateInput(ofertaUniversal, score, beneficios),
     logs,
-    ...(intelligenceV1Shadow.mode === "shadow" ? { intelligenceV1Shadow } : {})
+    ...(intelligenceV1Shadow.mode === "shadow"
+      ? { intelligenceV1Shadow: { ...intelligenceV1Shadow, memory: intelligenceV1Memory } }
+      : {})
   };
 }
 

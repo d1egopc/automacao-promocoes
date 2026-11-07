@@ -12,6 +12,13 @@ const {
   avaliarIntelligenceV1Global,
   modoGlobalIntelligenceV1
 } = require("./foundation-v1.service");
+const {
+  memoryMode,
+  buildMemoryRecord,
+  readThroughMemoryV1,
+  scheduleMemoryObservation,
+  memoryRuntimeStatus
+} = require("./memory-v1.service");
 
 module.exports = {
   avaliarOfertaUniversal,
@@ -28,5 +35,10 @@ module.exports = {
   calcularPrioridadeUniversal,
   construirMetadataIntelligenceV1,
   avaliarIntelligenceV1Global,
-  modoGlobalIntelligenceV1
+  modoGlobalIntelligenceV1,
+  memoryMode,
+  buildMemoryRecord,
+  readThroughMemoryV1,
+  scheduleMemoryObservation,
+  memoryRuntimeStatus
 };
