@@ -132,11 +132,12 @@ jobs:
           test -n "$postgres_id"
 
           pg_query() {
-            docker exec "$postgres_id" sh -lc \
-              'psql -X -qAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+            docker exec "$postgres_id" sh -c \
+              'user="${POSTGRES_USER:-postgres}"; db="${POSTGRES_DB:-$user}"; exec psql -X -qAt -v ON_ERROR_STOP=1 -U "$user" -d "$db" -f -' \
               <<<"$1"
           }
 
+          printf 'POSTGRES_DEEP_QUERY=STARTED\n'
           pg_version="$(pg_query "SELECT current_setting('server_version');")"
           pg_major="$(pg_query "SELECT current_setting('server_version_num')::int / 10000;")"
           test "$pg_major" = 17
