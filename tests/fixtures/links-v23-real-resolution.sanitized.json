@@ -10,6 +10,15 @@
     "modules/radar/redirect/safe-redirect-http.js": "5d087d985c0af141bf5f458d5bb06e62063bcd0db0d29960e7e8f9b5ff35a340",
     "marketplaces/amazon/parser.js": "04e440d55c913f809aed705a00ed201574bdd9edca428a168edecde91bce5c21"
   },
+  "compatibleAdditiveSourceHashes": {
+    "modules/radar/redirect/redirect-resolver.js": [
+      {
+        "sha256": "beef144d8696374abb3ac56e9d0a93629e3329091bee6fd0a493918acf2fbdb7",
+        "scope": "magalu_onelink_strict_additive",
+        "evidenceTest": "tests/magalu-clonador-universal-e2e.test.js"
+      }
+    ]
+  },
   "definitions": {
     "resolved": "bounded public transport plus unique first-party factual product proof aligned with returned product URL; never HTTP 200 alone",
     "productIdentified": "proof available in a fully read document, even if old resolver left destination at social/shortlink",

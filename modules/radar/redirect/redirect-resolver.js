@@ -12,6 +12,11 @@ const {
 const {
   extrairProvaIdentidadeMercadoLivreHtml, extrairTransporteShowProductMercadoLivreHtml
 } = require("../mercadolivre-social-identidade");
+const {
+  sanitizarUrlOneLinkMagalu,
+  sanitizarUrlProdutoMagalu,
+  produtoIdUrlMagalu
+} = require("../../local-worker/magalu-identity.contract");
 
 const resolversRegistrados = [];
 const METODOS_FAMILIA_INTELIGENTE = new Set(["http_redirect", "html_contextual", "html_static_base64"]);
@@ -49,7 +54,10 @@ function detectarMarketplaceRedirect(url = "") {
   if (host.includes("aliexpress.")) return "aliexpress";
   if (host === "kabum.com.br" || host.endsWith(".kabum.com.br")) return "awin";
   if (host === "awin1.com" || host.endsWith(".awin1.com") || host === "awin.com" || host.endsWith(".awin.com")) return "awin";
-  if (host === "magazineluiza.com" || host.endsWith(".magazineluiza.com") || host === "magalu.com" || host.endsWith(".magalu.com")) return "magalu";
+  if (host === "magazineluiza.com" || host.endsWith(".magazineluiza.com") ||
+    host === "magazineluiza.com.br" || host.endsWith(".magazineluiza.com.br") ||
+    host === "magazinevoce.com.br" || host.endsWith(".magazinevoce.com.br") ||
+    host === "magalu.com" || host.endsWith(".magalu.com")) return "magalu";
   return "";
 }
 
@@ -762,6 +770,54 @@ async function resolverAmazonDivulguei(urlOriginal = "", contexto = {}) {
   return resultado;
 }
 
+async function resolverOneLinkMagalu(urlOriginal = "", contexto = {}) {
+  const origem = sanitizarUrlOneLinkMagalu(urlOriginal);
+  if (!origem) {
+    return resultadoIdentidadeNaoComprovada(
+      urlOriginal,
+      { metodo: "validacao_onelink" },
+      "magalu_onelink_invalido"
+    );
+  }
+
+  // OneLink e uma origem oficial conhecida, mas cada salto continua sujeito a
+  // DNS publico, timeout, limite de corpo e limite de redirects. Nenhuma
+  // credencial ou cookie da workspace e enviado nessa resolucao.
+  const resultado = await resolverHttpGenerico(origem, {
+    ...contexto,
+    secureDynamic: true,
+    maxRedirects: Math.min(5, Math.max(1, Number(contexto.maxRedirects || 5)))
+  });
+  const candidata = sanitizarUrlProdutoMagalu(resultado.urlExpandida || resultado.urlFinal || "");
+  const produtoId = produtoIdUrlMagalu(candidata);
+  const houveRedirectHttp = resultado.metodo === "http_redirect" &&
+    candidata && candidata !== origem;
+
+  if (!resultado.ok || !houveRedirectHttp || !produtoId) {
+    return resultadoIdentidadeNaoComprovada(
+      origem,
+      resultado,
+      resultado.ok ? "magalu_onelink_sem_produto_confirmado" : (resultado.motivo || "magalu_onelink_nao_resolvido")
+    );
+  }
+
+  return {
+    ...resultado,
+    ok: true,
+    urlOriginal: origem,
+    urlFinal: candidata,
+    urlExpandida: candidata,
+    marketplaceDetectado: "magalu",
+    status: "resolvido",
+    motivo: "magalu_onelink_produto_confirmado",
+    produtoConfirmado: true,
+    provaProduto: {
+      origem: "redirect_http_oficial",
+      chave: `magalu:${produtoId}`
+    }
+  };
+}
+
 function codigoPromozone(url = "") {
   try {
     const partes = new URL(url).pathname.split("/").filter(Boolean);
@@ -1080,6 +1136,12 @@ registrarResolverRedirect({
   resolver: resolverAmazonDivulguei
 });
 
+registrarResolverRedirect({
+  nome: "magalu_onelink",
+  dominios: ["magazineluiza.onelink.me"],
+  resolver: resolverOneLinkMagalu
+});
+
 module.exports = {
   diagnosticarAwinKabum,
   detectarMarketplaceRedirect,
@@ -1096,6 +1158,7 @@ module.exports = {
   reconhecerLinkAliExpressRedirect,
   resolverAOferta,
   resolverAmazonDivulguei,
+  resolverOneLinkMagalu,
   resolverRedirectClonador,
   resolverHttpGenerico,
   resolverPromozone,
