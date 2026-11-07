@@ -19,6 +19,12 @@ const {
   scheduleMemoryObservation,
   memoryRuntimeStatus
 } = require("./memory-v1.service");
+const {
+  CLASSIFIER_VERSION,
+  CANONICAL_CATEGORY_IDS,
+  canonicalCategoryId,
+  classifyMulticategoryShadow
+} = require("./classification-v1.service");
 
 module.exports = {
   avaliarOfertaUniversal,
@@ -40,5 +46,9 @@ module.exports = {
   buildMemoryRecord,
   readThroughMemoryV1,
   scheduleMemoryObservation,
-  memoryRuntimeStatus
+  memoryRuntimeStatus,
+  CLASSIFIER_VERSION,
+  CANONICAL_CATEGORY_IDS,
+  canonicalCategoryId,
+  classifyMulticategoryShadow
 };

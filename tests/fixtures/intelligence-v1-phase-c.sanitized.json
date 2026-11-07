@@ -1,0 +1,82 @@
+{
+  "cases": [
+    {
+      "id": "meli_split_air_conditioner",
+      "offer": {
+        "marketplace": "mercadolivre",
+        "tituloOficial": "Ar-condicionado Split Inverter Samsung WindFree 12000 BTU 220V",
+        "produtoId": "MLB300000001",
+        "identityConfirmed": true,
+        "identitySource": "api_oficial",
+        "categoria": "Eletrodomésticos"
+      },
+      "principal": "Climatização e Ventilação",
+      "affinities": ["Eletrodomésticos"]
+    },
+    {
+      "id": "shopee_fishing_pants_male",
+      "offer": {
+        "marketplace": "shopee",
+        "tituloOficial": "Calça masculina para pesca em poliamida UPF 50",
+        "productId": "88000001",
+        "identityConfirmed": true,
+        "identitySource": "api_oficial",
+        "categoria": "Roupas e Moda Masculina"
+      },
+      "principal": "Pesca e Camping",
+      "affinities": ["Roupas e Moda Masculina"]
+    },
+    {
+      "id": "aliexpress_fishing_pants_female",
+      "offer": {
+        "marketplace": "aliexpress",
+        "tituloOficial": "Calça feminina de pesca impermeável UV50",
+        "productId": "1005008000001",
+        "identityConfirmed": true,
+        "identitySource": "feed_oficial",
+        "categoria": "Roupas e Moda Feminina"
+      },
+      "principal": "Pesca e Camping",
+      "affinities": ["Roupas e Moda Feminina"]
+    },
+    {
+      "id": "amazon_gamer_mouse",
+      "offer": {
+        "marketplace": "amazon",
+        "tituloOficial": "Mouse Gamer Kysona Jupiter X Ultra 26000 DPI",
+        "productId": "B0PHASEC01",
+        "identityConfirmed": true,
+        "identitySource": "pagina_oficial",
+        "categoria": "Periféricos"
+      },
+      "principal": "Periféricos",
+      "affinities": ["Gamer e Hardware"]
+    },
+    {
+      "id": "kabum_gaming_motherboard",
+      "offer": {
+        "marketplace": "kabum",
+        "tituloOficial": "Placa-mãe ASUS TUF Gaming B650M Plus WiFi AM5",
+        "productId": "700001",
+        "identityConfirmed": true,
+        "identitySource": "pagina_oficial",
+        "categoria": "Gamer e Hardware"
+      },
+      "principal": "Computadores e Notebook",
+      "affinities": ["Gamer e Hardware"]
+    },
+    {
+      "id": "magalu_fan",
+      "offer": {
+        "marketplace": "magalu",
+        "tituloOficial": "Ventilador de Mesa Mondial 40 cm 6 Pás 127V",
+        "productId": "240155500",
+        "identityConfirmed": true,
+        "identitySource": "marketplace_oficial",
+        "categoria": "Climatização e Ventilação"
+      },
+      "principal": "Climatização e Ventilação",
+      "affinities": []
+    }
+  ]
+}
