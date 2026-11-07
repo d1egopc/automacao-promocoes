@@ -118,3 +118,75 @@ jobs:
           printf 'HTTP=PASS internal=%s public=%s\n' "$internal_http" "$public_http"
           printf 'ROLLBACK_TAG=%s count=%s tag=%s image=%s immutable_image_present=PASS\n' "$rollback_status" "$recovery_count" "$recovery_tag" "$active_image"
           printf 'PREFLIGHT=PASS\n'
+
+      - name: Inspect PostgreSQL, Intelligence flags and natural pipeline evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          backend=optimus-backend
+          compose=/opt/optimus/infra/compose.yml
+          release=/opt/optimus/infra/backend-release.yml
+          compose_args=(-f "$compose")
+          test ! -r "$release" || compose_args+=(-f "$release")
+          postgres_id="$(docker compose "${compose_args[@]}" ps -q postgres)"
+          test -n "$postgres_id"
+
+          pg_query() {
+            docker exec "$postgres_id" sh -lc \
+              'psql -X -qAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+              <<<"$1"
+          }
+
+          pg_version="$(pg_query "SELECT current_setting('server_version');")"
+          pg_major="$(pg_query "SELECT current_setting('server_version_num')::int / 10000;")"
+          test "$pg_major" = 17
+          pg_capacity="$(pg_query "SELECT current_setting('max_connections') || '|' || count(*) || '|' || count(*) FILTER (WHERE state='active') || '|' || count(*) FILTER (WHERE state='idle') || '|' || count(*) FILTER (WHERE wait_event_type='Lock') FROM pg_stat_activity WHERE datname=current_database();")"
+          pg_ungranted_locks="$(pg_query "SELECT count(*) FROM pg_locks WHERE NOT granted;")"
+          pg_oldest_xact_seconds="$(pg_query "SELECT COALESCE(floor(max(extract(epoch FROM (clock_timestamp()-xact_start))))::bigint,0) FROM pg_stat_activity WHERE datname=current_database() AND xact_start IS NOT NULL AND pid<>pg_backend_pid();")"
+          memory_table="$(pg_query "SELECT COALESCE(to_regclass('public.intelligence_product_memory')::text,'absent');")"
+
+          flag_value() {
+            local name="$1" line value
+            line="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$backend" | awk -F= -v key="$name" '$1==key {print; exit}')"
+            if test -z "$line"; then
+              printf 'ABSENT'
+              return
+            fi
+            value="${line#*=}"
+            case "$value" in
+              off|OFF|0|1|shadow|SHADOW|active|ACTIVE) printf '%s' "$value" ;;
+              *) printf 'PRESENT_UNRECOGNIZED' ;;
+            esac
+          }
+          foundation_mode="$(flag_value OPTIMUS_INTELLIGENCE_V1_MODE)"
+          foundation_disabled="$(flag_value OPTIMUS_INTELLIGENCE_V1_DISABLED)"
+          memory_mode="$(flag_value OPTIMUS_INTELLIGENCE_V1_MEMORY_MODE)"
+          memory_disabled="$(flag_value OPTIMUS_INTELLIGENCE_V1_MEMORY_DISABLED)"
+          routing_mode="$(flag_value OPTIMUS_INTELLIGENCE_V1_ROUTING_MODE)"
+          routing_disabled="$(flag_value OPTIMUS_INTELLIGENCE_V1_ROUTING_DISABLED)"
+
+          table_exists() {
+            test "$(pg_query "SELECT to_regclass('public.$1') IS NOT NULL;")" = t
+          }
+          captures='unavailable'
+          jobs='unavailable'
+          offers='unavailable'
+          queue='unavailable'
+          if table_exists engine_eventos_brutos; then
+            captures="$(pg_query "SELECT count(*) FILTER (WHERE capturado_em>=now()-interval '60 minutes') || '|' || count(*) FILTER (WHERE capturado_em>=now()-interval '24 hours') || '|' || COALESCE(to_char(max(capturado_em) AT TIME ZONE 'UTC','YYYY-MM-DD_HH24:MI:SS_UTC'),'none') FROM engine_eventos_brutos;")"
+          fi
+          if table_exists engine_jobs_cliente; then
+            jobs="$(pg_query "SELECT count(*) FILTER (WHERE criado_em>=now()-interval '60 minutes') || '|' || count(*) FILTER (WHERE criado_em>=now()-interval '24 hours') || '|' || COALESCE(to_char(max(atualizado_em) AT TIME ZONE 'UTC','YYYY-MM-DD_HH24:MI:SS_UTC'),'none') FROM engine_jobs_cliente;")"
+          fi
+          if table_exists engine_ofertas; then
+            offers="$(pg_query "SELECT count(*) FILTER (WHERE criada_em>=now()-interval '60 minutes') || '|' || count(*) FILTER (WHERE criada_em>=now()-interval '24 hours') || '|' || COALESCE(to_char(max(atualizada_em) AT TIME ZONE 'UTC','YYYY-MM-DD_HH24:MI:SS_UTC'),'none') FROM engine_ofertas;")"
+          fi
+          if table_exists engine_universal_queue_destinations; then
+            queue="$(pg_query "SELECT count(*) FILTER (WHERE updated_at>=now()-interval '60 minutes') || '|' || count(*) FILTER (WHERE updated_at>=now()-interval '24 hours') || '|' || count(*) FILTER (WHERE confirmed_at>=now()-interval '24 hours') || '|' || count(*) FILTER (WHERE status='send_started') || '|' || count(*) FILTER (WHERE status='ambiguous') || '|' || COALESCE(to_char(max(updated_at) AT TIME ZONE 'UTC','YYYY-MM-DD_HH24:MI:SS_UTC'),'none') FROM engine_universal_queue_destinations;")"
+          fi
+
+          printf 'POSTGRES_DEEP=PASS version=%s capacity=max|total|active|idle|lock_waiters:%s ungranted_locks=%s oldest_xact_seconds=%s\n' "$pg_version" "$pg_capacity" "$pg_ungranted_locks" "$pg_oldest_xact_seconds"
+          printf 'INTELLIGENCE_TABLE=%s\n' "$memory_table"
+          printf 'INTELLIGENCE_FLAGS=foundation_mode:%s foundation_disabled:%s memory_mode:%s memory_disabled:%s routing_mode:%s routing_disabled:%s\n' "$foundation_mode" "$foundation_disabled" "$memory_mode" "$memory_disabled" "$routing_mode" "$routing_disabled"
+          printf 'PIPELINE_NATURAL=captures_60m|24h|latest:%s jobs_60m|24h|latest:%s offers_60m|24h|latest:%s queue_updated_60m|24h|confirmed24h|send_started_now|ambiguous_now|latest:%s\n' "$captures" "$jobs" "$offers" "$queue"
+          printf 'DEEP_PREFLIGHT=PASS\n'
