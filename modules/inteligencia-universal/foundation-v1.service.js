@@ -1,8 +1,10 @@
 const crypto = require("crypto");
 
-const { categoriaExiste } = require("../../marketplaces/inteligencia/categorias-globais");
-const { classificarCategoriaUniversal } = require("./categoria.service");
 const { normalizarMarketplace, texto } = require("./normalizacao.service");
+const {
+  CLASSIFIER_VERSION,
+  classifyMulticategoryShadow
+} = require("./classification-v1.service");
 
 const INTELLIGENCE_V1_SCHEMA_VERSION = "optimus-intelligence-v1-phase-a";
 const INTELLIGENCE_V1_MODES = Object.freeze({ OFF: "off", SHADOW: "shadow" });
@@ -172,9 +174,11 @@ function resolverTituloFactualIntelligenceV1(oferta = {}, identidade = resolverI
   const radarMirror = objeto(metadata.radarMirror);
   const candidatos = [
     ["api_feed_oficial", oferta.tituloOficial],
+    ["api_feed_oficial", raw.tituloOficial],
     ["api_feed_oficial", produto.tituloOficial],
     ["api_feed_oficial", produto.titleOfficial],
     ["pagina_oficial", oferta.tituloPagina],
+    ["pagina_oficial", raw.tituloPagina],
     ["pagina_oficial", produto.tituloPagina],
     ["extension_verified", extension.titulo],
     ["local_worker_verified", localWorker.titulo],
@@ -272,104 +276,8 @@ function resolverSafetyClassIntelligenceV1(oferta = {}, tituloFactual = {}) {
   });
 }
 
-function categoriasUnicas(principal, candidatas = []) {
-  return [...new Set(candidatas)]
-    .filter(categoria => categoriaExiste(categoria) && categoria !== "Diversos" && categoria !== principal);
-}
-
-function categoriasPorNaturezaV1(titulo = "") {
-  const t = normalizarComparacao(titulo);
-  if (/\bperfume\b|\beau de (?:toilette|parfum)\b|\bbody splash\b/.test(t)) {
-    return { principal: "Perfumaria, Farmácia e Beleza", afinidades: [], reason: "perfume_confirmed" };
-  }
-  if (/\bcalca\b/.test(t) && /\bpesca\b/.test(t) && /\b(?:masculina|masculino|homem)\b/.test(t)) {
-    return { principal: "Pesca e Camping", afinidades: ["Roupas e Moda Masculina"], reason: "fishing_menswear_confirmed" };
-  }
-  if (/\bcalca\b/.test(t) && /\bpesca\b/.test(t) && /\b(?:feminina|feminino|mulher)\b/.test(t)) {
-    return { principal: "Pesca e Camping", afinidades: ["Roupas e Moda Feminina"], reason: "fishing_womenswear_confirmed" };
-  }
-  if (/\bmouse\b/.test(t) && /\bgamer\b/.test(t)) {
-    return { principal: "Periféricos", afinidades: ["Gamer e Hardware"], reason: "gamer_mouse_confirmed" };
-  }
-  if (/\bplaca mae\b/.test(t)) {
-    return { principal: "Computadores e Notebook", afinidades: ["Gamer e Hardware"], reason: "motherboard_confirmed" };
-  }
-  if (/\bar condicionado\b/.test(t) && /\bsplit\b/.test(t)) {
-    return { principal: "Climatização e Ventilação", afinidades: ["Eletrodomésticos"], reason: "split_air_conditioner_confirmed" };
-  }
-  if (/\bventilador\b/.test(t)) {
-    return { principal: "Climatização e Ventilação", afinidades: [], reason: "fan_confirmed" };
-  }
-  if (/\blanterna\b/.test(t) && /\b(?:camping|acampamento|outdoor)\b/.test(t)) {
-    return { principal: "Pesca e Camping", afinidades: ["Iluminação e Elétrica"], reason: "camping_lantern_confirmed" };
-  }
-  if (/\blanterna\b/.test(t)) {
-    return { principal: "Iluminação e Elétrica", afinidades: [], reason: "generic_lantern_confirmed" };
-  }
-  if (/\bcooler termico\b/.test(t) && /\b(?:camping|acampamento|outdoor)\b/.test(t)) {
-    const afinidades = /\b(?:veicular|automotivo)\b/.test(t) ? ["Automotivo"] : [];
-    return { principal: "Pesca e Camping", afinidades, reason: "camping_thermal_cooler_confirmed" };
-  }
-  return null;
-}
-
 function resolverClassificacaoIntelligenceV1(oferta = {}, identidade, tituloFactual, safety) {
-  const categoriaAtual = texto(oferta.categoria);
-  const fallback = categoriaExiste(categoriaAtual) ? categoriaAtual : "Diversos";
-
-  if (identidade.divergent) {
-    return Object.freeze({
-      status: CLASSIFICATION_STATUS.REJECTED,
-      principal: fallback,
-      affinities: [],
-      reason: "identity_or_sku_divergent",
-      confidence: "rejected"
-    });
-  }
-  if (!identidade.confirmed || !tituloFactual.factual) {
-    return Object.freeze({
-      status: CLASSIFICATION_STATUS.PENDING,
-      principal: fallback,
-      affinities: [],
-      reason: !identidade.confirmed ? "identity_unconfirmed" : "factual_title_unavailable",
-      confidence: "unconfirmed"
-    });
-  }
-  if (safety.class === SAFETY_CLASS.ADULT) {
-    return Object.freeze({
-      status: CLASSIFICATION_STATUS.RESOLVED,
-      principal: fallback,
-      affinities: [],
-      reason: "adult_commercial_category_reserved_not_enabled",
-      confidence: "high"
-    });
-  }
-
-  const natureza = categoriasPorNaturezaV1(tituloFactual.title);
-  if (natureza) {
-    return Object.freeze({
-      status: CLASSIFICATION_STATUS.RESOLVED,
-      principal: natureza.principal,
-      affinities: categoriasUnicas(natureza.principal, natureza.afinidades),
-      reason: natureza.reason,
-      confidence: "high"
-    });
-  }
-
-  const classificada = classificarCategoriaUniversal({
-    ...oferta,
-    titulo: tituloFactual.title,
-    nome: tituloFactual.title
-  });
-  const principal = categoriaExiste(classificada.categoria) ? classificada.categoria : fallback;
-  const incerta = principal === "Diversos" || classificada.baixaConfianca === true;
-  return Object.freeze({
-    status: incerta ? CLASSIFICATION_STATUS.UNCERTAIN : CLASSIFICATION_STATUS.RESOLVED,
-    principal,
-    affinities: [],
-    reason: incerta ? "category_evidence_insufficient" : (classificada.motivo || "legacy_classifier_confirmed"),
-    confidence: incerta ? "low" : (classificada.confianca || "heuristic")
-  });
+  return classifyMulticategoryShadow({ offer: oferta, identity: identidade, factualTitle: tituloFactual, safety });
 }
 
 function construirMetadataIntelligenceV1(oferta = {}) {
@@ -386,9 +294,11 @@ function construirMetadataIntelligenceV1(oferta = {}) {
     category: Object.freeze({
       principal: classificacao.principal,
       affinities: Object.freeze([...classificacao.affinities]),
+      categoriasAfinidade: Object.freeze([...classificacao.affinities]),
+      evidence: Object.freeze([...(classificacao.evidence || [])]),
       reason: classificacao.reason,
       confidence: classificacao.confidence,
-      classifierVersion: INTELLIGENCE_V1_SCHEMA_VERSION
+      classifierVersion: CLASSIFIER_VERSION
     }),
     safety,
     eligibilityAuthoritative: false,
