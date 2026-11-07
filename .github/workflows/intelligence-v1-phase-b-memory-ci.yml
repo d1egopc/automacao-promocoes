@@ -1,0 +1,117 @@
+name: Intelligence V1 Phase B memory CI only
+
+on:
+  push:
+    branches:
+      - validation/intelligence-v1-phase-b-memory-20261107
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: intelligence-v1-phase-b-memory
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: intelligence_v1_memory_fixture
+          POSTGRES_USER: intelligence_v1_memory_ci
+          POSTGRES_PASSWORD: intelligence_v1_memory_disposable
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U intelligence_v1_memory_ci -d intelligence_v1_memory_fixture"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      BASE_SHA: 84d150cbd9ec5c28f12a4f34021347a397a4ec99
+      DATABASE_URL: ""
+      INTELLIGENCE_MEMORY_TEST_DATABASE_URL: postgresql://intelligence_v1_memory_ci:intelligence_v1_memory_disposable@127.0.0.1:5432/intelligence_v1_memory_fixture
+      OPTIMUS_INTELLIGENCE_V1_MEMORY_MODE: "off"
+      OPTIMUS_INTELLIGENCE_V1_MEMORY_DISABLED: "1"
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Prove isolated scope and locked dependencies
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_REF" = refs/heads/validation/intelligence-v1-phase-b-memory-20261107
+          test -z "${DATABASE_URL:-}"
+          node --version | grep -Eq '^v24\.'
+          git merge-base --is-ancestor "$BASE_SHA" HEAD
+          git diff --check "$BASE_SHA"..HEAD
+          changed="$(git diff --name-only "$BASE_SHA"..HEAD | sort)"
+          expected="$(printf '%s\n' \
+            .github/workflows/intelligence-v1-phase-b-memory-ci.yml \
+            modules/inteligencia-universal/index.js \
+            modules/inteligencia-universal/intelligence-product-memory.additive.sql \
+            modules/inteligencia-universal/memory-v1.repository.js \
+            modules/inteligencia-universal/memory-v1.service.js \
+            modules/inteligencia-universal/oferta-universal.service.js \
+            tests/intelligence-v1-memory.postgres.test.cjs \
+            tests/intelligence-v1-memory.test.cjs | sort)"
+          test "$changed" = "$expected"
+          npm ci
+      - name: Static and bootstrap isolation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --check modules/inteligencia-universal/memory-v1.repository.js
+          node --check modules/inteligencia-universal/memory-v1.service.js
+          node --check modules/inteligencia-universal/oferta-universal.service.js
+          node --check tests/intelligence-v1-memory.test.cjs
+          node --check tests/intelligence-v1-memory.postgres.test.cjs
+          ! grep -q 'intelligence-product-memory' modules/engine/universal-runtime-bootstrap.js
+          ! grep -q 'intelligence_product_memory' modules/engine/schema.sql
+          npm run audit:encoding
+      - name: Phase B focal and PostgreSQL 17
+        run: |
+          node --test tests/intelligence-v1-memory.test.cjs
+          node tests/intelligence-v1-memory.postgres.test.cjs
+      - name: Phase A and category preservation
+        run: |
+          node --test \
+            tests/intelligence-v1-phase-a.test.cjs \
+            tests/diversos-v4.test.cjs \
+            tests/diversos-integracao.test.cjs \
+            tests/classificador-universal-v3.test.cjs \
+            tests/classificador-v3-evidencia-marketplace.test.cjs \
+            tests/classificador-v3-magalu-evidencia.test.cjs \
+            tests/classificador-v3-legacy-parity.test.cjs
+          node tests/inteligencia-universal-decisao.test.js
+          node tests/categorias-reducao-diversos.test.js
+          node tests/classificador-universal-v2-categorias.test.js
+      - name: Six marketplace and downstream preservation
+        run: |
+          node tests/link-conversao-ocorrencia-marketplaces.test.js
+          node tests/contrato-comercial-final-universal.test.js
+          node tests/imagem-link-contrato-universal.test.js
+          node tests/dynamic-link-resolvers.test.js
+          node tests/redirect-resolver-shortlinks-seguros.test.js
+          node tests/teleradar-handoff.test.js
+          node tests/clonador-grupos-foundation.test.js
+          node tests/destino-geral-distributor.test.js
+      - name: Guardian against Phase A candidate
+        run: node scripts/guardian-v1.cjs validate --base "$BASE_SHA" --source "$GITHUB_SHA" --report "$RUNNER_TEMP/intelligence-v1-phase-b-guardian.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: intelligence-v1-phase-b-evidence
+          path: ${{ runner.temp }}/intelligence-v1-phase-b-guardian.json
