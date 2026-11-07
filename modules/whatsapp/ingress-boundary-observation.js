@@ -212,7 +212,7 @@ const JOURNAL_STAGE_MAP=Object.freeze({socket_current:"listener_registered",sock
   catch{b.counters.frameMetadataUnavailable++;}
   const kind=tag==="message"?"messageFrames":CONTROL_TAGS.has(tag)?"controlFrames":SYNC_TAGS.has(tag)?"syncFrames":"otherFrames";
   b.counters[kind]++;
-  if(kind==="messageFrames")safe(()=>{const target=targetNode(frame,b);if(target===true){b.counters.targetMessageFrames++;const attrs=Object.getOwnPropertyDescriptor(frame,"attrs")?.value;const groupId=Object.getOwnPropertyDescriptor(attrs||{},"from")?.value;persist(b,{stage:"ws_frame",groupId});}if(target===null)b.counters.messageFramesUnattributed++;});
+  if(kind==="messageFrames")safe(()=>{const target=targetNode(frame,b);if(target===true){b.counters.targetMessageFrames++;const attrs=Object.getOwnPropertyDescriptor(frame,"attrs")?.value;const groupId=Object.getOwnPropertyDescriptor(attrs||{},"from")?.value;const messageId=Object.getOwnPropertyDescriptor(attrs||{},"id")?.value;persist(b,{stage:"ws_frame",groupId,messageId:typeof messageId==="string"?messageId:undefined});}if(target===null)b.counters.messageFramesUnattributed++;});
  }
  function trackSocket({workspaceId,sessionId,generation,sock}={}) {
   if(!active())return false;
@@ -262,7 +262,7 @@ const JOURNAL_STAGE_MAP=Object.freeze({socket_current:"listener_registered",sock
     if(counter&&Object.hasOwn(b.counters,counter))b.counters[counter]++;
     if(args[0]==="frame")observeFrame(b,args[1]);
     if(args[0]==="message"&&(ArrayBuffer.isView(args[1])||args[1] instanceof ArrayBuffer))b.counters.wsBinaryMessages++;
-    if(args[0]==="CB:message"&&targetNode(args[1],b)===true){b.counters.targetMessageNodes++;const attrs=Object.getOwnPropertyDescriptor(args[1],"attrs")?.value;const groupId=Object.getOwnPropertyDescriptor(attrs||{},"from")?.value;persist(b,{stage:"message_node",groupId});}
+    if(args[0]==="CB:message"&&targetNode(args[1],b)===true){b.counters.targetMessageNodes++;const attrs=Object.getOwnPropertyDescriptor(args[1],"attrs")?.value;const groupId=Object.getOwnPropertyDescriptor(attrs||{},"from")?.value;const messageId=Object.getOwnPropertyDescriptor(attrs||{},"id")?.value;persist(b,{stage:"message_node",groupId,messageId:typeof messageId==="string"?messageId:undefined});}
    if(args[0]==="CB:success")b.lastSyncSignal="AUTHENTICATED";
    if(args[0]==="CB:ib,,offline"){b.lastSyncSignal="OFFLINE_COMPLETION_DISPATCHED";b.counters.offlineCompletionEvents++;persist(b,{stage:"offline_batch",operation:"cb_offline_received"});}
    });try{return Reflect.apply(original,this,args);}catch(error){if(observing&&active())safe(()=>{b.counters.publicDispatchThrows++;if(args[0]==="frame")b.counters.frameDispatchThrows++;if(args[0]==="CB:message")b.counters.messageDispatchThrows++;});throw error;}};

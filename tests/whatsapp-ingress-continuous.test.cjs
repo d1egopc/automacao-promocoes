@@ -111,6 +111,8 @@ test("continuous stages correlate notify/append, fromMe, Radar and Messenger wit
   assert.equal(observer.startContinuous().ok, true);
   const sock = socket();
   assert.equal(observer.trackSocket({ workspaceId: "admin", sessionId: "admin_Zoiao Claro", generation: 1, sock }), true);
+  const rawMessageId = "msg-node-to-upsert";
+  sock.ws.emit("CB:message", { tag: "message", attrs: { from: GROUP_A, id: rawMessageId } });
   const handler = ({ messages, type }) => {
     observer.mark("callback", { workspaceId: "admin", sessionId: "admin_Zoiao Claro", sock, emitter: sock.ev, messages, upsertType: type });
     for (const item of messages) {
@@ -121,6 +123,7 @@ test("continuous stages correlate notify/append, fromMe, Radar and Messenger wit
     }
   };
   sock.ev.on("messages.upsert", handler);
+  sock.ev.emit("messages.upsert", { type: "notify", messages: [message(rawMessageId, GROUP_A, false)] });
   sock.ev.emit("messages.upsert", { type: "notify", messages: [message("msg-a", GROUP_A, false)] });
   sock.ev.emit("messages.upsert", { type: "append", messages: [message("msg-b", GROUP_A, true)] });
 
@@ -128,19 +131,24 @@ test("continuous stages correlate notify/append, fromMe, Radar and Messenger wit
   assert.equal(status.state, "active");
   assert.equal(status.mode, "continuous");
   assert.equal(status.expiresAt, null);
-  assert.equal(status.generations[0].counters.callbackCalls, 2);
-  assert.equal(status.generations[0].counters.radarEntries, 2);
-  assert.equal(status.generations[0].counters.mensageiroGerenteCalls, 2);
-  assert.equal(status.groupStats[0].counts.upsertNotify, 1);
+  assert.equal(status.generations[0].counters.callbackCalls, 3);
+  assert.equal(status.generations[0].counters.radarEntries, 3);
+  assert.equal(status.generations[0].counters.mensageiroGerenteCalls, 3);
+  assert.equal(status.groupStats[0].counts.upsertNotify, 2);
   assert.equal(status.groupStats[0].counts.upsertAppend, 1);
-  assert.equal(status.groupStats[0].counts.fromMeFalse, 1);
+  assert.equal(status.groupStats[0].counts.fromMeFalse, 2);
   assert.equal(status.groupStats[0].counts.fromMeTrue, 1);
-  assert.equal(status.messages.length, 2);
+  assert.equal(status.messages.length, 3);
   assert.ok(status.messages.every(row => /^[a-f0-9]{16}$/.test(row.messageRef) && !JSON.stringify(row).includes("120363")));
   const serialized = JSON.stringify({ status, persisted });
   for (const forbidden of [GROUP_A, "admin_Zoiao Claro", "msg-a", "PRIVATE MESSAGE BODY"]) assert.equal(serialized.includes(forbidden), false, forbidden);
   assert.ok(persisted.some(row => row.stage === "radar_result" && row.decision === "accepted"));
   assert.ok(persisted.some(row => row.stage === "mensageiro_gerente" && row.decision === "ignored"));
+  const messageNode = persisted.find(row => row.stage === "message_node");
+  const emitAttempt = persisted.find(row => row.stage === "emit_attempt" && row.eventRef === messageNode?.eventRef);
+  assert.match(messageNode?.eventRef || "", /^[a-f0-9]{16}$/);
+  assert.ok(emitAttempt, "the sanitized node identity must correlate with the later messages.upsert emission");
+  assert.equal(JSON.stringify({ messageNode, emitAttempt }).includes(rawMessageId), false);
   assert.equal(status.groupStats[0].sessionRef, persisted.find(row => row.stage === "callback").sessionRef);
   assert.equal(status.groupStats[0].groupRef, status.scope[0].groups.find(ref => ref === status.groupStats[0].groupRef));
   observer.stop("test_complete");
