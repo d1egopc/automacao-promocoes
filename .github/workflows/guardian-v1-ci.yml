@@ -1,689 +1,117 @@
-name: Guardian V1 CI only
+name: Hostinger VPS Read-Only Preflight Temporary
 
 on:
-  push:
-    branches:
-      - validation/guardian-v1-*
-      - validation/mensageiro-v4-20261025
-      - validation/mensageiro-v4-canary-runtime-20261025
-      - validation/mensageiro-v4-ingress-probe-20261026
-      - validation/v4-admin-observation-20261026
-      - validation/baileys-buffer-servcel-20261026
-      - validation/baileys-buffer-packaging-20261026
-      - validation/radar-magalu-ingress-observer-20261026
-      - validation/radar-ingress-correlation-20261106
-      - validation/telemetria-operacional-20261027
-      - validation/telemetria-v11-panel-first-20261027
-      - validation/magalu-recovery-20261027
-      - validation/magalu-firstparty-worker-v3-20261027
-      - validation/classificador-universal-v3-20261027
-      - feature/landing-page-v1-*
-      - validation/landing-v13-media-buttons-20261025
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: hostinger-vps-readonly-preflight
+  cancel-in-progress: false
+
 jobs:
-  saas-fix1-postgres:
-    if: startsWith(github.ref, 'refs/heads/validation/guardian-v1-saas-fix1-') || startsWith(github.ref, 'refs/heads/validation/guardian-v1-me-hotfix-') || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_DB: optimus_universal_fixture
-          POSTGRES_HOST_AUTH_METHOD: trust
-        ports:
-          - 55433:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d optimus_universal_fixture"
-          --health-interval 5s --health-timeout 5s --health-retries 10
+  preflight:
+    name: Read-only production baseline on srv1947615
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
-      - name: SaaS read-only and Google login failure injection
-        run: |
-          test -z "${DATABASE_URL:-}"
-          node --test \
-            tests/saas-fix1-readonly-auth.test.cjs \
-            tests/saas-fundacao-v1.test.js \
-            tests/saas-beta-config-v1.test.js \
-            tests/saas-jornada-cadastro-v1.test.js \
-            tests/saas-assinatura-v1.test.js \
-            tests/saas-renovacao-assinatura-v1.test.js \
-            tests/saas-paywall-pre-dashboard-v1.test.js \
-            tests/financeiro-mercadopago-pix-v1.test.js \
-            tests/financeiro-checkout-pix-publico-v1.test.js \
-            tests/admin-auth-estrito.test.js \
-            tests/admin-credit-topup-contract.test.js \
-            tests/higiene-saas-conservadora.test.js \
-            tests/workspace-registry-engine-v2.test.js \
-            tests/executor-relogio-multiworkspace.test.js
-          node --check index.js
-      - name: Google Auth HTTP integration
-        if: ${{ !cancelled() }}
-        env:
-          DATABASE_URL: postgresql://postgres@127.0.0.1:55433/optimus_universal_fixture
-          PGSSLMODE: disable
+      - name: Verify exact runner and production topology
+        shell: bash
         run: |
           set -euo pipefail
-          if [[ ! -e /data ]]; then
-            sudo install -d -m 0755 -o "$USER" -g "$(id -gn)" /data
+          test "$RUNNER_NAME" = "srv1947615"
+          test -r /opt/optimus/infra/compose.yml
+          test -d /opt/optimus/data
+          test -S /var/run/docker.sock
+          docker version --format 'docker_server={{.Server.Version}}' >/dev/null
+          printf 'RUNNER=PASS name=%s host=%s topology=PASS docker_read=PASS\n' "$RUNNER_NAME" "$(hostname)"
+
+      - name: Inspect active runtime without mutations
+        shell: bash
+        run: |
+          set -euo pipefail
+          backend=optimus-backend
+          compose=/opt/optimus/infra/compose.yml
+          release=/opt/optimus/infra/backend-release.yml
+
+          active_image="$(docker inspect -f '{{.Image}}' "$backend")"
+          [[ "$active_image" =~ ^sha256:[0-9a-f]{64}$ ]]
+          test "$(docker image inspect -f '{{.Id}}' "$active_image")" = "$active_image"
+
+          backend_status="$(docker inspect -f '{{.State.Status}}' "$backend")"
+          backend_oom="$(docker inspect -f '{{.State.OOMKilled}}' "$backend")"
+          backend_restarts="$(docker inspect -f '{{.RestartCount}}' "$backend")"
+          backend_started="$(docker inspect -f '{{.State.StartedAt}}' "$backend")"
+          backend_image_ref="$(docker inspect -f '{{.Config.Image}}' "$backend")"
+          test "$backend_status" = running
+          test "$backend_oom" = false
+
+          source_active="$(docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$backend")"
+          if [[ ! "$source_active" =~ ^[0-9a-f]{40}$ ]] && [[ "$backend_image_ref" =~ local/optimus-backend:([0-9a-f]{40})- ]]; then
+            source_active="${BASH_REMATCH[1]}"
+          elif [[ ! "$source_active" =~ ^[0-9a-f]{40}$ ]]; then
+            source_active=NAO_COMPROVADO
+            while IFS= read -r tag; do
+              if [[ "$tag" =~ ^local/optimus-backend:([0-9a-f]{40})- ]]; then
+                source_active="${BASH_REMATCH[1]}"
+                break
+              fi
+            done < <(docker image inspect -f '{{range .RepoTags}}{{println .}}{{end}}' "$active_image")
           fi
-          test -w /data
-          mkdir -p "$RUNNER_TEMP/saas-fix1-google-v3"
-          MENSAGEIRO_V3_DATA_DIR="$RUNNER_TEMP/saas-fix1-google-v3" \
-          node tests/saas-google-login-v1.test.js
-          MENSAGEIRO_V3_DATA_DIR="$RUNNER_TEMP/saas-fix1-google-v3" \
-          node tests/saas-me-readonly-v1.test.js
+          [[ "$source_active" =~ ^[0-9a-f]{40}$ ]]
 
-      - name: Password recovery HTTP integration
-        if: ${{ !cancelled() }}
-        env:
-          DATABASE_URL: postgresql://postgres@127.0.0.1:55433/optimus_universal_fixture
-          PGSSLMODE: disable
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/saas-fix1-recovery-v3"
-          MENSAGEIRO_V3_DATA_DIR="$RUNNER_TEMP/saas-fix1-recovery-v3" \
-          node tests/saas-recuperacao-senha-v1.test.js
-
-      - name: Universal credit ledger regression on PostgreSQL 17
-        if: ${{ !cancelled() }}
-        env:
-          UF_TEST_PG_PORT: "55433"
-          UF_TEST_PG_EXPECTED_SERVER_PORT: "5432"
-          UF_TEST_PG_EXPECTED_DATA_DIR: /var/lib/postgresql/data
-        run: |
-          set -euo pipefail
-          test -z "${DATABASE_URL:-}"
-          export UF_TEST_PG_EXPECTED_SERVER_HOST="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' '${{ job.services.postgres.id }}')"
-          test -n "$UF_TEST_PG_EXPECTED_SERVER_HOST"
-          node tests/universal-flow-credits.postgres.js
-
-  rio-p0-postgres:
-    if: startsWith(github.ref, 'refs/heads/validation/guardian-v1-rio-p0-')
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_DB: optimus_universal_fixture
-          POSTGRES_HOST_AUTH_METHOD: trust
-        ports:
-          - 55433:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d optimus_universal_fixture"
-          --health-interval 5s --health-timeout 5s --health-retries 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
-      - name: Read-only preflight and financial contract regressions
-        run: |
-          set -euo pipefail
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          test -z "${DATABASE_URL:-}"
-          node --check index.js
-          node --check modules/engine/universal-credit-eligibility.service.js
-          node --test tests/universal-credit-preflight.test.cjs \
-            tests/saas-cortesia-v1.test.cjs \
-            tests/saas-fundacao-v1.test.js \
-            tests/saas-renovacao-assinatura-v1.test.js \
-            tests/financeiro-mercadopago-pix-v1.test.js \
-            tests/universal-flow-queue-executor.test.js \
-            tests/universal-flow-queue-preflight.test.js
-      - name: Universal preflight, ledger, concurrency and expiry on PostgreSQL 17
-        env:
-          UF_TEST_PG_PORT: "55433"
-          UF_TEST_PG_EXPECTED_SERVER_PORT: "5432"
-          UF_TEST_PG_EXPECTED_DATA_DIR: /var/lib/postgresql/data
-        run: |
-          set -euo pipefail
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          test -z "${DATABASE_URL:-}"
-          export UF_TEST_PG_EXPECTED_SERVER_HOST="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' '${{ job.services.postgres.id }}')"
-          test -n "$UF_TEST_PG_EXPECTED_SERVER_HOST"
-          node tests/universal-credit-preflight.postgres.js
-          node tests/saas-cortesia-v1.postgres.js
-          node tests/universal-credit-sources.postgres.js
-          node tests/universal-flow-credits.postgres.js
-          node tests/universal-flow-expired-fresh.postgres.js
-
-  validate:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
-      - name: AliExpress Radar shortlink candidate - isolated importer and workspace proof
-        if: github.ref == 'refs/heads/validation/guardian-v1-ali-magalu-recovery-20261031'
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          test -z "${DATABASE_URL:-}"
-          node tests/aliexpress-shortlink-radar-candidate.test.cjs
-          node tests/aliexpress-shortlink-multitenancy-candidate.test.cjs
-          node tests/aliexpress-manual-importador.test.js
-          node tests/aliexpress-afiliacao-workspace.test.js
-          node tests/aliexpress-app-moedas-contrato.test.js
-          node tests/redirect-resolver-shortlinks-seguros.test.js
-          node tests/magalu-engine-importer.test.js
-          node tests/magalu-v2-golden-path.test.js
-      - name: Diversos integration - isolated replay and commercial invariants
-        if: github.ref == 'refs/heads/validation/guardian-v1-diversos-integracao-20261029'
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          test -z "${DATABASE_URL:-}"
-          base=5dd99da80233ab9a49162e02e215b75982e3da28
-          git merge-base --is-ancestor "$base" HEAD
-          git diff --exit-code "$base" HEAD -- index.js modules/radar modules/teleradar modules/clonador-grupos modules/fila modules/executor modules/mensageiro modules/telemetria utils optimus-capture marketplaces/shopee marketplaces/amazon marketplaces/aliexpress marketplaces/magalu marketplaces/mercadolivre package.json package-lock.json .github/workflows/deploy-backend-vps.yml scripts/deploy-backend-vps-manual.sh
-          test "$(git diff --name-only "$base" HEAD -- modules)" = modules/engine/importer/importer.service.js
-          node --test tests/diversos-integracao.test.cjs tests/classificador-diversos-20261028.test.cjs
-          mkdir -p "$RUNNER_TEMP/diversos-base" "$RUNNER_TEMP/diversos-reports"
-          git archive "$base" | tar -x -C "$RUNNER_TEMP/diversos-base"
-          node tests/classificador-diversos-replay.cjs --baseline "$RUNNER_TEMP/diversos-base" --out "$RUNNER_TEMP/diversos-reports/focal.json"
-          node tests/diversos-integracao-replay.cjs --baseline "$RUNNER_TEMP/diversos-base" --out "$RUNNER_TEMP/diversos-reports/real40.json"
-          node --expose-gc tests/classificador-v3-replay.cjs --baseline "$RUNNER_TEMP/diversos-base" --benchmark --out "$RUNNER_TEMP/diversos-reports/v3.json"
-          node tests/diversos-engine-materialization-benchmark.cjs --out "$RUNNER_TEMP/diversos-reports/engine-materialization.json"
-      - name: Preserve isolated Diversos replays
-        if: always() && github.ref == 'refs/heads/validation/guardian-v1-diversos-integracao-20261029'
-        uses: actions/upload-artifact@v4
-        with:
-          name: diversos-integration-replays
-          path: ${{ runner.temp }}/diversos-reports/*.json
-          if-no-files-found: error
-      - name: Garimpei reconciled release - preserve published Shopee and exact sensor
-        if: github.ref == 'refs/heads/validation/guardian-v1-garimpei-release-20261028'
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          test -z "${DATABASE_URL:-}"
-          git merge-base --is-ancestor 711f864885710e03324735abbdef708d2f6f6d19 HEAD
-          git merge-base --is-ancestor 58ac3d19840bb25c8f72bb29e5ac60128a148bd4 HEAD
-          git diff --exit-code 868a0cf2d176bb06c014443100b0384269d73016 HEAD -- marketplaces/shopee/importar.js modules/engine/importer/adapters/shopee.adapter.js
-          git diff --exit-code ee8f56360e8e943ada9ba360566ef12b2bf107d7 HEAD -- index.js modules/radar modules/telemetria scripts/garimpei-infra-guard.py scripts/garimpei-journal-cleanup.py docs/infra
-          git diff --exit-code 58ac3d19840bb25c8f72bb29e5ac60128a148bd4 HEAD -- modules/engine modules/teleradar modules/clonador-grupos modules/fila modules/executor modules/mensageiro modules/mensageiro-v3 modules/mensageiro-v4 utils marketplaces optimus-capture package.json package-lock.json
-          python3 -B tests/garimpei-infra-fixtures.py -v
-          node --test tests/garimpei-infra.test.cjs tests/garimpei-compose-integration.test.cjs tests/radar-ingress-observation-v1.test.cjs tests/radar-garimpei-observation.test.cjs tests/radar-garimpei-sensor24h.test.cjs tests/telemetria-operacional.test.cjs tests/telemetria-prepared-input.test.cjs tests/telemetria-permanent-contract.test.cjs
-          node --test tests/shopee-contextual-recovery.test.cjs tests/shopee-recovery-limits.test.cjs
-          node tests/whatsapp-socket-listener-baileys-real.test.cjs
-          node tests/whatsapp-socket-listener-lifecycle.test.js
-          node scripts/benchmark-garimpei-sensor24h.cjs
-      - name: Garimpei infrastructure - closed mount and retention on Linux
-        if: github.ref == 'refs/heads/validation/guardian-v1-garimpei-infra-20261028'
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          test -z "${DATABASE_URL:-}"
-          python3 -B tests/garimpei-infra-fixtures.py -v
-          node --test tests/garimpei-infra.test.cjs tests/radar-garimpei-sensor24h.test.cjs tests/radar-garimpei-observation.test.cjs tests/radar-ingress-observation-v1.test.cjs
-          node scripts/benchmark-garimpei-sensor24h.cjs
-          git diff --exit-code 711f864885710e03324735abbdef708d2f6f6d19 HEAD -- index.js modules utils marketplaces optimus-capture package.json package-lock.json
-          node --test tests/garimpei-compose-integration.test.cjs
-      - name: Garimpei 24h sensor - privacy, bounded journal and on-demand read
-        if: github.ref == 'refs/heads/validation/guardian-v1-garimpei-sensor24h-20261028'
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          test -z "${DATABASE_URL:-}"
-          node --test tests/radar-ingress-observation-v1.test.cjs tests/radar-garimpei-observation.test.cjs tests/radar-garimpei-sensor24h.test.cjs tests/telemetria-operacional.test.cjs tests/telemetria-prepared-input.test.cjs tests/telemetria-permanent-contract.test.cjs
-          node scripts/benchmark-garimpei-sensor24h.cjs
-          node tests/whatsapp-socket-listener-baileys-real.test.cjs
-          node tests/whatsapp-socket-listener-lifecycle.test.js
-          git diff --exit-code 12589a07843954fb6ea858f34da4c56861e64f8a HEAD -- modules/engine modules/teleradar modules/clonador-grupos modules/fila modules/executor modules/mensageiro modules/mensageiro-v3 modules/mensageiro-v4 optimus-capture utils package.json package-lock.json .github/workflows/deploy-backend-vps.yml
-      - name: Garimpei passive observation - exact target and isolated fixtures
-        if: github.ref == 'refs/heads/validation/guardian-v1-garimpei-observation-20261028'
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          test -z "${DATABASE_URL:-}"
-          node --test tests/radar-ingress-observation-v1.test.cjs tests/radar-garimpei-observation.test.cjs tests/telemetria-operacional.test.cjs tests/telemetria-prepared-input.test.cjs tests/telemetria-permanent-contract.test.cjs
-          node tests/whatsapp-socket-listener-baileys-real.test.cjs
-          node tests/whatsapp-socket-listener-lifecycle.test.js
-          git diff --exit-code 12589a07843954fb6ea858f34da4c56861e64f8a HEAD -- modules/engine modules/teleradar modules/clonador-grupos modules/fila modules/executor modules/mensageiro modules/mensageiro-v3 modules/mensageiro-v4 optimus-capture utils package.json package-lock.json .github/workflows/deploy-backend-vps.yml
-      - name: Shopee contextual recovery and preserved Magalu Telegram contracts
-        if: github.ref == 'refs/heads/validation/shopee-magalu-recovery-20261028' || github.ref == 'refs/heads/validation/guardian-v1-shopee-release-20261028'
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          test -z "${DATABASE_URL:-}"
-          node --test --test-concurrency=1 tests/shopee-contextual-recovery.test.cjs tests/shopee-recovery-limits.test.cjs tests/shopee-*.test.js tests/manual-v2-import-shopee.test.js tests/links-comerciais-v2-aliexpress-shopee.test.js tests/magalu-teleradar-recovery.test.cjs tests/magalu-affiliate-link.test.js tests/magalu-factual-resolver.test.js tests/magalu-firstparty-identity-fallback.test.cjs tests/magalu-recovery-retry.test.cjs tests/teleradar.test.js tests/teleradar-handoff.test.js tests/teleradar-operational-control.test.js tests/teleradar-semantica-comercial.test.js tests/safe-redirect-http-lifecycle.test.js
-          git diff --exit-code 12589a07843954fb6ea858f34da4c56861e64f8a HEAD -- index.js modules/radar modules/teleradar modules/clonador-grupos modules/fila modules/executor modules/mensageiro-v3 modules/mensageiro-v4 optimus-capture utils/template-universal.js package.json package-lock.json
-      - name: Definitive Messenger backend - isolated fixtures only, no deploy
-        if: github.ref == 'refs/heads/validation/guardian-v1-messenger-backend-definitivo-20261028'
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          test -z "${DATABASE_URL:-}"
-          test -z "${OPTIMUS_MENSAGEIRO_V4_TARGETS:-}"
-          node --test tests/mensageiro-backend-definitivo.test.cjs tests/mensageiro-v3-*.test.cjs tests/mensageiro-v4.test.cjs tests/mensageiro-v4-canary.test.cjs tests/mensageiro-v4-ingress-probe.test.cjs tests/mensageiro-release-readiness.test.cjs
-          node tests/whatsapp-socket-listener-baileys-real.test.cjs
-          node tests/whatsapp-socket-listener-lifecycle.test.js
-          node tests/whatsapp-reconnect-seguro.test.js
-          git diff --exit-code dc4f3f0b9f6f61ce3bbaee0f87675b796bd4b58e HEAD -- index.js modules/radar modules/teleradar modules/clonador-grupos modules/engine modules/fila modules/executor optimus-capture bootstrap package.json package-lock.json
-      - name: Universal Messenger - real routers and existing engines, isolated only
-        if: github.ref == 'refs/heads/validation/guardian-v1-messenger-universal-20261028'
-        run: |
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          test -z "${DATABASE_URL:-}"
-          node --test tests/mensageiro-universal.test.cjs tests/mensageiro-v3-*.test.cjs tests/mensageiro-v4.test.cjs tests/mensageiro-v4-canary.test.cjs tests/mensageiro-v4-ingress-probe.test.cjs tests/mensageiro-release-readiness.test.cjs
-          node tests/whatsapp-socket-listener-baileys-real.test.cjs
-          node tests/whatsapp-socket-listener-lifecycle.test.js
-          node tests/whatsapp-reconnect-seguro.test.js
-          git diff --exit-code f9cfc3865ce848c223c84f2e3f916764a25028d2 HEAD -- modules/radar modules/teleradar modules/clonador-grupos modules/engine modules/fila modules/executor optimus-capture package.json package-lock.json
-      - name: Messenger readiness - isolated HTTP, handlers and persistence
-        if: github.ref == 'refs/heads/validation/guardian-v1-messenger-readiness-20261028'
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          test -z "${DATABASE_URL:-}"
-          test -z "${OPTIMUS_MENSAGEIRO_V4_TARGETS:-}"
-          node --test tests/mensageiro-v3-*.test.cjs tests/mensageiro-v4.test.cjs tests/mensageiro-v4-canary.test.cjs tests/mensageiro-v4-ingress-probe.test.cjs tests/mensageiro-release-readiness.test.cjs tests/mensageiro-programacoes.test.cjs tests/mensageiro-bot-comandos.test.cjs tests/mensageiro-gerente-grupo.test.cjs
-          node tests/whatsapp-reconnect-seguro.test.js
-          node tests/whatsapp-socket-listener-baileys-real.test.cjs
-          node tests/whatsapp-socket-listener-lifecycle.test.js
-          node tests/universal-flow-queue-executor.test.js
-          node tests/radar-cobertura-v1.test.js
-          node tests/teleradar-handoff.test.js
-          node tests/clonador-grupos-foundation.test.js
-          node tests/fila-viva-runtime-wiring.test.js
-          test "$(git diff --name-only f9cfc3865ce848c223c84f2e3f916764a25028d2 HEAD -- index.js modules optimus-capture package.json package-lock.json)" = modules/mensageiro-v3/routes.js
-      - name: Exact Baileys packaging profile - isolated only
-        if: github.ref == 'refs/heads/validation/baileys-buffer-packaging-20261026'
-        run: |
-          node scripts/guardian-v1.cjs prepare --base f50e8a294f839249e5427619e500e37332423363 --source "$GITHUB_SHA"
-          node -e "require('./modules/whatsapp/baileys-buffer-hotfix.service.js').applyPatch()"
-          node --test tests/guardian-baileys-buffer-packaging.test.cjs
-      - name: Baileys buffer recovery and essential contracts
-        if: github.ref == 'refs/heads/validation/baileys-buffer-servcel-20261026' || github.ref == 'refs/heads/validation/baileys-buffer-packaging-20261026'
-        run: |
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          test -z "${DATABASE_URL:-}"
-          node --test tests/baileys-initial-buffer-recovery.test.cjs
-          node tests/baileys-retry-hotfix.test.js
-          node --test tests/mensageiro-v4.test.cjs tests/mensageiro-v4-canary.test.cjs tests/mensageiro-v4-ingress-probe.test.cjs
-          node tests/whatsapp-socket-listener-baileys-real.test.cjs
-          node tests/whatsapp-socket-listener-lifecycle.test.js
-          node tests/mensageiro-v3-operational-hotfix.test.cjs
-          node tests/mensageiro-v3-m322-real-handlers.test.cjs
-          node tests/mensageiro-v3-schedule-timezone.test.cjs
-          node tests/mensageiro-v3-lock-identity.test.cjs
-          node tests/universal-flow-queue-executor.test.js
-          node tests/radar-cobertura-v1.test.js
-          node tests/teleradar-handoff.test.js
-          node tests/clonador-grupos-foundation.test.js
-          node tests/fila-viva-runtime-wiring.test.js
-          node tests/mensageiro-gerente-grupo.test.cjs
-          node tests/mensageiro-bot-comandos.test.cjs
-          node tests/mensageiro-programacoes.test.cjs
-      - name: Clean full-image fixture only - no deploy
-        if: github.ref == 'refs/heads/validation/baileys-buffer-servcel-20261026'
-        run: |
-          docker build --tag "optimus-buffer-fixture:$GITHUB_SHA" .
-          docker run --rm --network none --entrypoint node "optimus-buffer-fixture:$GITHUB_SHA" --check /app/index.js
-          docker run --rm --network none --entrypoint node "optimus-buffer-fixture:$GITHUB_SHA" --test /app/tests/baileys-initial-buffer-recovery.test.cjs
-      - name: Official derived-image build fixture - no production mounts or network
-        if: github.ref == 'refs/heads/validation/baileys-buffer-packaging-20261026'
-        shell: bash
-        run: |
-          set -euo pipefail
-          base=f50e8a294f839249e5427619e500e37332423363
-          mkdir "$RUNNER_TEMP/baileys-base"
-          git archive "$base" | tar -x -C "$RUNNER_TEMP/baileys-base"
-          base_tag="local/optimus-deploy-base:ci-$GITHUB_RUN_ID"
-          docker build --tag "$base_tag" "$RUNNER_TEMP/baileys-base"
-          node scripts/guardian-v1.cjs build-dockerfile --base "$base" --source "$GITHUB_SHA" --base-tag "$base_tag" > "$RUNNER_TEMP/buffer.Dockerfile"
-          node scripts/guardian-v1.cjs prepare --base "$base" --source "$GITHUB_SHA" --format dependencies-before > "$RUNNER_TEMP/before.tsv"
-          node scripts/guardian-v1.cjs prepare --base "$base" --source "$GITHUB_SHA" --format dependencies-after > "$RUNNER_TEMP/after.tsv"
-          while IFS=$'\t' read -r file hash; do
-            test "$(docker run --rm --network none --entrypoint sha256sum "$base_tag" "/app/node_modules/@whiskeysockets/baileys/$file" | cut -d' ' -f1)" = "$hash"
-          done < "$RUNNER_TEMP/before.tsv"
-          for build in 1 2; do
-            image="optimus-buffer-fixture:$GITHUB_SHA-$build"
-            docker build --no-cache --network none --pull=false -f "$RUNNER_TEMP/buffer.Dockerfile" --tag "$image" .
-            while IFS=$'\t' read -r file hash; do
-              test "$(docker run --rm --network none --entrypoint sha256sum "$image" "/app/node_modules/@whiskeysockets/baileys/$file" | cut -d' ' -f1)" = "$hash"
-            done < "$RUNNER_TEMP/after.tsv"
-            docker run --rm --network none --entrypoint node "$image" --check /app/index.js
-            docker run --rm --network none --volume "$GITHUB_WORKSPACE/tests/baileys-initial-buffer-recovery.test.cjs:/app/tests/baileys-initial-buffer-recovery.test.cjs:ro" --entrypoint node "$image" --test /app/tests/baileys-initial-buffer-recovery.test.cjs
-          done
-      - name: Landing Page isolated integration
-        if: startsWith(github.ref, 'refs/heads/feature/landing-page-v1-') || github.ref == 'refs/heads/validation/landing-v13-media-buttons-20261025'
-        env:
-          LANDING_AUTH_CONTRACT_FILE: ${{ runner.temp }}/landing-auth-contract.json
-        run: |
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          test -z "${DATABASE_URL:-}"
-          node --check modules/landing-page/addresses.js
-          node --check modules/landing-page/vercel-domains.js
-          node --test tests/landing-page-v1.test.cjs tests/landing-page-auth-plans-integration.test.cjs tests/landing-page-v12.test.cjs tests/landing-page-v13.test.cjs
-          node tests/planos-identidade-estavel-v1.test.js
-          node tests/saas-fundacao-v1.test.js
-      - name: Mensageiro V4 isolated contracts
-        if: github.ref == 'refs/heads/validation/mensageiro-v4-20261025' || github.ref == 'refs/heads/validation/mensageiro-v4-canary-runtime-20261025' || github.ref == 'refs/heads/validation/mensageiro-v4-ingress-probe-20261026' || github.ref == 'refs/heads/validation/v4-admin-observation-20261026'
-        run: |
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          test -z "${DATABASE_URL:-}"
-          test -z "${OPTIMUS_MENSAGEIRO_V4_WORKSPACES:-}"
-          test -z "${OPTIMUS_MENSAGEIRO_V4_TARGETS:-}"
-          git merge-base --is-ancestor af56a3af675fd7f2c005a04d90e22fe72cbc95e6 HEAD
-          node --test tests/mensageiro-v4.test.cjs tests/mensageiro-v4-canary.test.cjs tests/mensageiro-v4-ingress-probe.test.cjs
-          node tests/whatsapp-socket-listener-baileys-real.test.cjs
-          node tests/whatsapp-socket-listener-lifecycle.test.js
-          node tests/mensageiro-v3-operational-hotfix.test.cjs
-          node tests/mensageiro-v3-m322-real-handlers.test.cjs
-          node tests/mensageiro-v3-schedule-timezone.test.cjs
-          node tests/mensageiro-v3-lock-identity.test.cjs
-      - name: Radar ingress correlation focal suite
-        if: github.ref == 'refs/heads/validation/radar-ingress-correlation-20261106'
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          test -z "${DATABASE_URL:-}"
-          node --check modules/whatsapp/socket-listener-lifecycle.service.js
-          node --test \
-            tests/whatsapp-socket-listener-baileys-real.test.cjs \
-            tests/whatsapp-socket-listener-lifecycle.test.js \
-            tests/whatsapp-ingress-boundary.test.cjs \
-            tests/whatsapp-ingress-observation-journal.test.cjs \
-            tests/resonancia-gate-a.unit.test.cjs \
-            tests/telemetria-operacional.test.cjs \
-            tests/telemetria-prepared-input.test.cjs \
-            tests/telemetria-permanent-contract.test.cjs
-          node tests/telemetria-v1-backend.test.js
-          node --check modules/telemetria/trace-ref.js
-          node --check modules/telemetria/telemetria.routes.js
-          node --check modules/telemetria/operational-view.js
-          node --check modules/telemetria/telemetria.service.js
-      - name: Radar ingress observer scoped validation
-        if: github.ref == 'refs/heads/validation/radar-magalu-ingress-observer-20261026'
-        run: |
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          test -z "${DATABASE_URL:-}"
-          node --check index.js
-          node --check modules/radar/ingress-observation-v1.js
-          node --test tests/radar-ingress-observation-v1.test.cjs tests/radar-whatsapp-capture-gate.test.js
-      - name: Continuous WhatsApp ingress observation - isolated boundaries and bounded journal
-        if: github.ref == 'refs/heads/validation/guardian-v1-radar-ingress-continuous-20261031'
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          test -z "${DATABASE_URL:-}"
-          base=7708855e014d54a48825b0d3ae1f77da43294ad0
-          git merge-base --is-ancestor "$base" HEAD
-          test "$(git diff --name-only "$base" HEAD -- modules)" = $'modules/whatsapp/ingress-boundary-observation.js\nmodules/whatsapp/ingress-observation-journal.js'
-          git diff --exit-code "$base" HEAD -- modules/radar modules/teleradar modules/clonador-grupos modules/engine modules/fila modules/executor modules/mensageiro modules/mensageiro-v3 modules/mensageiro-v4 marketplaces utils
-          node --check index.js
-          node --check modules/whatsapp/ingress-boundary-observation.js
-          node --check modules/whatsapp/ingress-observation-journal.js
-          node --check scripts/full-image-runtime-manifest.cjs
-          node --check scripts/verify-full-image-equivalence.cjs
-          bash -n scripts/deploy-backend-vps-manual.sh
-          node --test tests/whatsapp-ingress-boundary.test.cjs tests/whatsapp-ingress-continuous.test.cjs tests/whatsapp-ingress-observation-journal.test.cjs tests/baileys-bootstrap-observation.test.cjs tests/baileys-bootstrap-production.test.cjs
-          node --test tests/full-image-equivalence.test.cjs tests/full-image-deploy-contract.test.cjs
-          node tests/whatsapp-socket-listener-baileys-real.test.cjs
-          node tests/whatsapp-socket-listener-lifecycle.test.js
-          node tests/benchmark-whatsapp-ingress-continuous.cjs
-          node tests/guardian-v1.test.cjs
-      - name: Guardião V1 self-tests
-        run: node tests/guardian-v1.test.cjs
-      - name: AliExpress real source fidelity and marketplace regressions
-        if: github.ref == 'refs/heads/validation/guardian-v1-aliexpress-reconciled-20261027'
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          test -z "${DATABASE_URL:-}"
-          node --test tests/aliexpress-app-moedas-contrato.test.js tests/aliexpress-moedas-productdetail-engine.test.js tests/aliexpress-afiliacao-workspace.test.js tests/aliexpress-imagem-gate.test.js tests/manual-v2-import-aliexpress.test.js tests/ofc-v24-espelho-comercial.test.js tests/contrato-comercial-final-universal.test.js tests/magalu-v2-golden-path.test.js tests/magalu-affiliate-link.test.js tests/magalu-image-resolver.test.js > "$RUNNER_TEMP/ali-focal.log" 2>&1 || { tail -n 100 "$RUNNER_TEMP/ali-focal.log"; exit 1; }
-          tail -n 12 "$RUNNER_TEMP/ali-focal.log"
-          mkdir "$RUNNER_TEMP/ali-baseline"
-          git archive dc7bdffc766512ade17e363f87345acd6d2f271f | tar -x -C "$RUNNER_TEMP/ali-baseline"
-          for file in links-comerciais-v2-aliexpress-shopee ofc-v24-espelho-piloto; do
-            set +e
-            node "tests/$file.test.js" > "$RUNNER_TEMP/$file-candidate.log" 2>&1
-            candidate_rc=$?
-            NODE_PATH="$GITHUB_WORKSPACE/node_modules" node "$RUNNER_TEMP/ali-baseline/tests/$file.test.js" > "$RUNNER_TEMP/$file-baseline.log" 2>&1
-            baseline_rc=$?
-            set -e
-            test "$candidate_rc" -eq 1 && test "$baseline_rc" -eq 1
-            case "$file" in
-              links-comerciais-v2-aliexpress-shopee) signature='Smart TV Philco deve importar' ;;
-              ofc-v24-espelho-piloto) signature='assert(mensagem.includes("Resgate:"))' ;;
-            esac
-            grep -F "$signature" "$RUNNER_TEMP/$file-candidate.log"
-            grep -F "$signature" "$RUNNER_TEMP/$file-baseline.log"
-            ! grep -E 'MODULE_NOT_FOUND|SyntaxError|ERR_MODULE_NOT_FOUND' "$RUNNER_TEMP/$file-candidate.log" "$RUNNER_TEMP/$file-baseline.log"
-          done
-      - name: Magalu first-party Worker - isolated fixtures only
-        if: github.ref == 'refs/heads/validation/magalu-firstparty-worker-v3-20261027'
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          test -z "${DATABASE_URL:-}"
-          node --check optimus-capture/local-worker/magalu-identity.js
-          node --check optimus-capture/adapters/magalu.js
-          node --test tests/magalu-firstparty-identity-fallback.test.cjs tests/magalu-local-worker-identity.test.js tests/optimus-capture-magalu.test.js tests/optimus-capture-magalu-opportunity.test.js tests/magalu-v2-golden-path.test.js tests/magalu-recovery-retry.test.cjs tests/magalu-image-resolver.test.js tests/magalu-identity-engine-importer.test.js tests/local-worker-platform-architecture.test.cjs tests/optimus-capture-extension.test.js tests/manual-v2-import-magalu.test.js > "$RUNNER_TEMP/magalu-firstparty-tests.log" 2>&1 || {
-            tail -n 120 "$RUNNER_TEMP/magalu-firstparty-tests.log"
-            exit 1
-          }
-          tail -n 20 "$RUNNER_TEMP/magalu-firstparty-tests.log"
-      - name: Telemetry isolated authorization and read contracts
-        if: github.ref == 'refs/heads/validation/telemetria-operacional-20261027' || github.ref == 'refs/heads/validation/telemetria-v11-panel-first-20261027'
-        run: |
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          test -z "${DATABASE_URL:-}"
-          node --test tests/telemetria-operacional.test.cjs
-          node --test tests/telemetria-prepared-input.test.cjs
-          node tests/telemetria-v1-backend.test.js
-          node tests/observabilidade-v22-admin-backend.test.cjs
-          node tests/observabilidade-v25-mensageiro-backend.test.cjs
-          node --test tests/radar-ingress-observation-v1.test.cjs
-          node --expose-gc tests/telemetria-performance.test.cjs
-          git diff --exit-code 227c860e43d1d31904bd5a1332fa29b629a5b3de HEAD -- modules/radar modules/teleradar modules/clonador-grupos modules/engine modules/executor modules/fila modules/mensageiro modules/mensageiro-v4
-      - name: Validate affected contracts
-        shell: bash
-        run: |
-          set -euo pipefail
-          base="$(git merge-base origin/main HEAD)"
-          case "$GITHUB_REF" in
-            refs/heads/validation/guardian-v1-saas-fix1-*) base=1eaf582b68c333773a5882bcb8962ffcac7b9bef ;;
-            refs/heads/validation/guardian-v1-baileys-balanced-buffer-20261029) base=cecd2e6acdf5df274d19ee87f029389078f141dc ;;
-            refs/heads/validation/guardian-v1-diversos-integracao-20261029) base=5dd99da80233ab9a49162e02e215b75982e3da28 ;;
-            refs/heads/validation/guardian-v1-garimpei-release-20261028) base=58ac3d19840bb25c8f72bb29e5ac60128a148bd4 ;;
-            refs/heads/validation/guardian-v1-shopee-release-20261028) base=12589a07843954fb6ea858f34da4c56861e64f8a ;;
-            refs/heads/validation/guardian-v1-garimpei-infra-20261028) base=12589a07843954fb6ea858f34da4c56861e64f8a ;;
-            refs/heads/validation/guardian-v1-garimpei-sensor24h-20261028) base=12589a07843954fb6ea858f34da4c56861e64f8a ;;
-            refs/heads/validation/guardian-v1-garimpei-observation-20261028) base=12589a07843954fb6ea858f34da4c56861e64f8a ;;
-            refs/heads/validation/guardian-v1-ml-identity-images-20261028) base=b8f5746e4d562deaa5c4081738de89e0bf5fc508 ;;
-            refs/heads/validation/guardian-v1-classifier-copy-focal-20261027) base=f800da32e987c740854a9de02d5bcc93d7f149e9 ;;
-            refs/heads/validation/guardian-v1-radar-ingress-continuous-20261031) base=7708855e014d54a48825b0d3ae1f77da43294ad0 ;;
-            refs/heads/validation/classificador-universal-v3-20261027) base=3ab4f29d7812cf0f9e996f210762fd94c1296322 ;;
-            refs/heads/validation/telemetria-operacional-20261027) base=227c860e43d1d31904bd5a1332fa29b629a5b3de ;;
-            refs/heads/validation/telemetria-v11-panel-first-20261027) base=ba966b2022a5489e2c794d79513714cb55accf97 ;;
-            refs/heads/validation/mensageiro-v4-20261025) base=af56a3af675fd7f2c005a04d90e22fe72cbc95e6 ;;
-            refs/heads/validation/mensageiro-v4-canary-runtime-20261025) base=760c4c11b1b2d726cb212b6aa4ac4a8ab35a478f ;;
-            refs/heads/validation/mensageiro-v4-ingress-probe-20261026) base=e55890ca4cf789cbdbdaf523f289ba6a2c891755 ;;
-            refs/heads/validation/v4-admin-observation-20261026) base=1bb4176a4aac0efb501bf5ef1d4fd9e2eb8f5205 ;;
-            refs/heads/validation/baileys-buffer-servcel-20261026) base=f50e8a294f839249e5427619e500e37332423363 ;;
-            refs/heads/validation/baileys-buffer-packaging-20261026) base=f50e8a294f839249e5427619e500e37332423363 ;;
-            refs/heads/feature/landing-page-v1-*) base=5a31e60524d9caac45883ca07511dcc208852f53 ;;
-            refs/heads/validation/landing-v13-media-buttons-20261025) base=eda20ff6b69449c69a00ac7777beb3b868e1da80 ;;
-          esac
-          source="$(git rev-parse HEAD)"
-          guardian_args=(validate --base "$base" --source "$source" --report "$RUNNER_TEMP/guardian-v1-report.json")
-          if [[ "$GITHUB_REF" == refs/heads/validation/guardian-v1-radar-ingress-continuous-20261031 ]]; then
-            guardian_args+=(--release-mode full_image)
+          compose_args=(-f "$compose")
+          release_state=absent
+          release_hash=none
+          if test -r "$release"; then
+            compose_args+=(-f "$release")
+            release_state=present
+            release_hash="$(sha256sum "$release" | cut -d' ' -f1)"
           fi
-          node scripts/guardian-v1.cjs "${guardian_args[@]}"
-      - name: Magalu identity-to-image recovery - isolated fixtures only
-        if: github.ref == 'refs/heads/validation/magalu-recovery-20261027'
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          test -z "${DATABASE_URL:-}"
-          node --check modules/engine/importer/importer.service.js
-          # Focal + marketplace regressions above use Guardian's existing baseline comparison.
-          mkdir "$RUNNER_TEMP/magalu-published-baseline"
-          git archive 0cfac15707f6dbdcbcccedacbb6dce01c173f817 | tar -x -C "$RUNNER_TEMP/magalu-published-baseline"
-          set +e
-          NODE_PATH="$GITHUB_WORKSPACE/node_modules" MAGALU_RECOVERY_TEST_ROOT="$RUNNER_TEMP/magalu-published-baseline" node --test --test-reporter=tap --test-name-pattern='^(identity wait exhaustion does not consume the image wait budget|adapter and official runner keep a job alive when identity finishes after three waits)$' tests/magalu-recovery-retry.test.cjs > "$RUNNER_TEMP/magalu-baseline-reproduction.log" 2>&1
-          baseline_status=$?
-          set -e
-          cat "$RUNNER_TEMP/magalu-baseline-reproduction.log"
-          test "$baseline_status" -eq 1
-          test "$(grep -c '^not ok' "$RUNNER_TEMP/magalu-baseline-reproduction.log")" -eq 2
-          ! grep -Eq 'unexpected_fixture_query|MODULE_NOT_FOUND|ERR_MODULE_NOT_FOUND' "$RUNNER_TEMP/magalu-baseline-reproduction.log"
-      - name: Classifier and Copy focal regression - offline only
-        if: github.ref == 'refs/heads/validation/guardian-v1-classifier-copy-focal-20261027'
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          test -z "${DATABASE_URL:-}"
-          node --test tests/classificador-copy-focal.test.cjs tests/classificador-universal-v3.test.cjs tests/classificador-v3-evidencia-marketplace.test.cjs tests/classificador-v3-magalu-evidencia.test.cjs tests/classificador-v3-legacy-parity.test.cjs
-          node --test tests/copy-inteligente-local-v2.test.js tests/copy-contextual-local.test.js tests/copy-inteligente-c3.test.js tests/copy-c3-contrato-publico.test.js
-          mkdir "$RUNNER_TEMP/classifier-copy-baseline"
-          git archive f800da32e987c740854a9de02d5bcc93d7f149e9 | tar -x -C "$RUNNER_TEMP/classifier-copy-baseline"
-          node --expose-gc tests/classificador-v3-replay.cjs --baseline "$RUNNER_TEMP/classifier-copy-baseline" --benchmark --out "$RUNNER_TEMP/classifier-copy-replay.json"
-          git diff --exit-code f800da32e987c740854a9de02d5bcc93d7f149e9 HEAD -- modules/radar modules/teleradar modules/engine modules/fila modules/executor utils/destinos.js
-      - name: Mercado Livre official identity images - offline only
-        if: github.ref == 'refs/heads/validation/guardian-v1-ml-identity-images-20261028'
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          test -z "${DATABASE_URL:-}"
-          node --test tests/ml-identity-image-publicability.test.cjs
-          node --test tests/resolver-imagem-universal.test.js tests/ml-work-enrichment-shadow.test.js tests/ml-work-enrichment-active.test.js tests/ml-work-enrichment-active-integration.test.js tests/optimus-capture-local-worker-ml-identity.test.js
-          node --check modules/local-worker/ml-identity.contract.js
-          node --check modules/local-worker/local-worker.service.js
-          node --check modules/imagens/resolver-imagem-universal.js
-          git diff --exit-code b8f5746e4d562deaa5c4081738de89e0bf5fc508 HEAD -- marketplaces modules/radar modules/teleradar modules/fila modules/executor modules/ofc-v2 modules/engine/distributor utils/destinos.js
-      - name: Deploy mechanism regressions
-        shell: bash
-        run: |
-          set -euo pipefail
-          bash -n scripts/deploy-backend-vps-manual.sh
-          node tests/deploy-backend-v2-overlay-validation.test.cjs
-          node tests/deploy-backend-compose-image-validation.test.cjs
-          node tests/deploy-backend-manual-diagnostics.test.cjs
-      - name: Classification V3 offline replay and benchmark
-        if: github.ref == 'refs/heads/validation/classificador-universal-v3-20261027'
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          test -z "${DATABASE_URL:-}"
-          mkdir "$RUNNER_TEMP/classifier-published-baseline"
-          git archive 3ab4f29d7812cf0f9e996f210762fd94c1296322 | tar -x -C "$RUNNER_TEMP/classifier-published-baseline"
-          node --expose-gc tests/classificador-v3-replay.cjs --baseline "$RUNNER_TEMP/classifier-published-baseline" --benchmark --out "$RUNNER_TEMP/classifier-v3-replay.json"
-      - name: Preserve classification V3 validation evidence
-        if: always() && github.ref == 'refs/heads/validation/classificador-universal-v3-20261027'
-        uses: actions/upload-artifact@v4
-        with:
-          name: classifier-v3-validation
-          path: |
-            ${{ runner.temp }}/classifier-v3-replay.json
-            ${{ runner.temp }}/guardian-v1-report.json
-          if-no-files-found: error
+          compose_hash="$(sha256sum "$compose" | cut -d' ' -f1)"
 
-  telemetry-postgres:
-    if: github.ref == 'refs/heads/validation/telemetria-operacional-20261027' || github.ref == 'refs/heads/validation/telemetria-v11-panel-first-20261027'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_DB: optimus_telemetry_fixture
-          POSTGRES_HOST_AUTH_METHOD: trust
-        ports: ["55442:5432"]
-        options: >-
-          --health-cmd "pg_isready -U postgres -d optimus_telemetry_fixture"
-          --health-interval 5s --health-timeout 5s --health-retries 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
-      - name: Read-only SQL and multiworkspace fixture
-        env:
-          TELEMETRY_FIXTURE_PG_URL: postgresql://postgres@127.0.0.1:55442/optimus_telemetry_fixture
-        run: |
-          test -z "${DATABASE_URL:-}"
-          node --test tests/telemetria-operacional.postgres.test.cjs
+          postgres_id="$(docker compose "${compose_args[@]}" ps -q postgres)"
+          test -n "$postgres_id"
+          postgres_status="$(docker inspect -f '{{.State.Status}}' "$postgres_id")"
+          postgres_health="$(docker inspect -f '{{.State.Health.Status}}' "$postgres_id")"
+          test "$postgres_status" = running
+          test "$postgres_health" = healthy
 
-  v4-financial:
-    if: github.ref == 'refs/heads/validation/mensageiro-v4-20261025' || github.ref == 'refs/heads/validation/mensageiro-v4-canary-runtime-20261025' || github.ref == 'refs/heads/validation/mensageiro-v4-ingress-probe-20261026' || github.ref == 'refs/heads/validation/v4-admin-observation-20261026' || github.ref == 'refs/heads/validation/guardian-v1-messenger-readiness-20261028' || github.ref == 'refs/heads/validation/guardian-v1-messenger-universal-20261028' || github.ref == 'refs/heads/validation/guardian-v1-messenger-backend-definitivo-20261028'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_DB: optimus_messenger_v4_fixture
-          POSTGRES_HOST_AUTH_METHOD: trust
-        ports:
-          - 55439:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d optimus_messenger_v4_fixture"
-          --health-interval 5s --health-timeout 5s --health-retries 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
-      - name: Official credits and exact canary scope - disposable PostgreSQL 17
-        run: |
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          test -z "${DATABASE_URL:-}"
-          test -z "${OPTIMUS_MENSAGEIRO_V4_TARGETS:-}"
-          export V4_FIXTURE_SERVER_HOST="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' '${{ job.services.postgres.id }}')"
-          test -n "$V4_FIXTURE_SERVER_HOST"
-          node --test tests/mensageiro-v4-credit-scope.postgres.test.cjs
+          data_mount="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Type}}|{{.Source}}|{{.Destination}}|{{.RW}}{{end}}{{end}}' "$backend")"
+          test "$data_mount" = 'bind|/opt/optimus/data|/data|true'
+          data_free_kb="$(df -Pk /opt/optimus/data | awk 'NR==2 {print $4}')"
+          [[ "$data_free_kb" =~ ^[0-9]+$ ]]
+
+          internal_http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:3000/)"
+          public_http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 8 https://go.optimuspromo.com.br/)"
+          test "$internal_http" = 200
+          test "$public_http" = 200
+
+          connected_events="$(docker logs --since "$backend_started" "$backend" 2>&1 | awk '/\[WHATSAPP\] WHATSAPP CONECTADO/{count++} END{print count+0}')"
+          qr_events="$(docker logs --since "$backend_started" "$backend" 2>&1 | awk '/QR RECEBIDO|needs.?qr|precisa.?qr/{count++} END{print count+0}')"
+          [[ "$connected_events" =~ ^[0-9]+$ ]]
+          [[ "$qr_events" =~ ^[0-9]+$ ]]
+
+          recovery_count=0
+          recovery_tag=NAO_ENCONTRADA
+          while IFS= read -r tag; do
+            if [[ "$tag" == local/optimus-backend-recovery:* ]]; then
+              recovery_count=$((recovery_count + 1))
+              recovery_tag="$tag"
+            fi
+          done < <(docker image inspect -f '{{range .RepoTags}}{{println .}}{{end}}' "$active_image")
+          rollback_status=READY_TO_TAG_BY_OFFICIAL_DEPLOY
+          if test "$recovery_count" -gt 0; then
+            test "$(docker image inspect -f '{{.Id}}' "$recovery_tag")" = "$active_image"
+            rollback_status=PASS_EXISTING_TAG
+          fi
+
+          printf 'SOURCE_ATIVO=%s\n' "$source_active"
+          printf 'IMAGEM_ATIVA=%s ref=%s status=%s restarts=%s oom=%s started=%s\n' "$active_image" "$backend_image_ref" "$backend_status" "$backend_restarts" "$backend_oom" "$backend_started"
+          printf 'POSTGRES=healthy status=%s\n' "$postgres_status"
+          printf 'MOUNTS_DATA=PASS mount=%s free_kb=%s compose_sha256=%s release=%s release_sha256=%s\n' "$data_mount" "$data_free_kb" "$compose_hash" "$release_state" "$release_hash"
+          printf 'SESSOES=OBSERVACAO_SANITIZADA connected_events_since_start=%s qr_events_since_start=%s\n' "$connected_events" "$qr_events"
+          printf 'HTTP=PASS internal=%s public=%s\n' "$internal_http" "$public_http"
+          printf 'ROLLBACK_TAG=%s count=%s tag=%s image=%s immutable_image_present=PASS\n' "$rollback_status" "$recovery_count" "$recovery_tag" "$active_image"
+          printf 'PREFLIGHT=PASS\n'
