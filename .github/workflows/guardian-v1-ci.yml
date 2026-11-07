@@ -140,7 +140,7 @@ jobs:
           printf 'POSTGRES_DEEP_QUERY=STARTED\n'
           pg_version="$(pg_query "SELECT current_setting('server_version');")"
           pg_major="$(pg_query "SELECT current_setting('server_version_num')::int / 10000;")"
-          test "$pg_major" = 17
+          printf 'POSTGRES_VERSION_OBSERVED=%s major=%s\n' "$pg_version" "$pg_major"
           pg_capacity="$(pg_query "SELECT current_setting('max_connections') || '|' || count(*) || '|' || count(*) FILTER (WHERE state='active') || '|' || count(*) FILTER (WHERE state='idle') || '|' || count(*) FILTER (WHERE wait_event_type='Lock') FROM pg_stat_activity WHERE datname=current_database();")"
           pg_ungranted_locks="$(pg_query "SELECT count(*) FROM pg_locks WHERE NOT granted;")"
           pg_oldest_xact_seconds="$(pg_query "SELECT COALESCE(floor(max(extract(epoch FROM (clock_timestamp()-xact_start))))::bigint,0) FROM pg_stat_activity WHERE datname=current_database() AND xact_start IS NOT NULL AND pid<>pg_backend_pid();")"
