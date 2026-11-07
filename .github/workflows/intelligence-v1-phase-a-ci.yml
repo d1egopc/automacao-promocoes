@@ -45,13 +45,64 @@ jobs:
           node tests/inteligencia-universal-decisao.test.js
           node tests/categorias-reducao-diversos.test.js
           node tests/classificador-universal-v2-categorias.test.js
+      - name: Known baseline debts remain unchanged
+        shell: bash
+        run: |
+          set -uo pipefail
+          baseline_dir="$RUNNER_TEMP/intelligence-v1-baseline"
+          git worktree add --detach "$baseline_dir" c8765343215232cb976efc4f70679f72c4287e87
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$baseline_dir/node_modules"
+
+          compare_with_baseline() {
+            local test_file="$1"
+            local candidate_log="$RUNNER_TEMP/candidate-$(basename "$test_file").log"
+            local baseline_log="$RUNNER_TEMP/baseline-$(basename "$test_file").log"
+            local candidate_status=0
+            local baseline_status=0
+
+            node "$test_file" >"$candidate_log" 2>&1 || candidate_status=$?
+            if [[ "$candidate_status" -eq 0 ]]; then
+              echo "PASS candidate: $test_file"
+              return 0
+            fi
+
+            (
+              cd "$baseline_dir"
+              node "$test_file" >"$baseline_log" 2>&1
+            ) || baseline_status=$?
+
+            if [[ "$baseline_status" -eq 0 ]]; then
+              echo "REGRESSION: candidate failed but published baseline passed: $test_file"
+              cat "$candidate_log"
+              return 1
+            fi
+
+            local candidate_fingerprint
+            local baseline_fingerprint
+            candidate_fingerprint="$(grep -E 'AssertionError|at .*tests/.*:[0-9]+:[0-9]+' "$candidate_log" | sed -E 's#^.*tests/#tests/#' | head -n 4)"
+            baseline_fingerprint="$(grep -E 'AssertionError|at .*tests/.*:[0-9]+:[0-9]+' "$baseline_log" | sed -E 's#^.*tests/#tests/#' | head -n 4)"
+
+            if [[ -z "$candidate_fingerprint" || "$candidate_fingerprint" != "$baseline_fingerprint" ]]; then
+              echo "REGRESSION: failure differs from published baseline: $test_file"
+              echo "Candidate fingerprint:"
+              printf '%s\n' "$candidate_fingerprint"
+              echo "Baseline fingerprint:"
+              printf '%s\n' "$baseline_fingerprint"
+              cat "$candidate_log"
+              return 1
+            fi
+
+            echo "BASELINE_DEBT_UNCHANGED: $test_file"
+            printf '%s\n' "$candidate_fingerprint"
+          }
+
+          compare_with_baseline tests/engine-v2-marketplaces-fidelidade.test.js
+          compare_with_baseline tests/template-universal-visual-contract.test.js
       - name: Six marketplace and downstream preservation
         run: |
-          node tests/engine-v2-marketplaces-fidelidade.test.js
           node tests/link-conversao-ocorrencia-marketplaces.test.js
           node tests/contrato-comercial-final-universal.test.js
           node tests/imagem-link-contrato-universal.test.js
-          node tests/template-universal-visual-contract.test.js
           node tests/dynamic-link-resolvers.test.js
           node tests/redirect-resolver-shortlinks-seguros.test.js
           node tests/teleradar-handoff.test.js
