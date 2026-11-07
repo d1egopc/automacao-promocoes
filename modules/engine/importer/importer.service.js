@@ -28,7 +28,8 @@ const {
 } = require("../../../marketplaces/mercadolivre/utils");
 const {
   avaliarOfertaUniversal,
-  detectarIdentidadeProdutoUniversal
+  detectarIdentidadeProdutoUniversal,
+  buildRoutingBridge
 } = require("../../inteligencia-universal");
 const {
   resolverImagemUniversal,
@@ -3962,6 +3963,9 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
     const prioridadeFinal = resultadoPrioridadeCupom.prioridadeFinal;
     const ofertaUniversal = resultadoV2.ofertaUniversal || {};
     const memoriaV2 = resultadoV2.memoria || {};
+    const routingBridge = resultadoV2.intelligenceV1Shadow?.applied === true
+      ? buildRoutingBridge(resultadoV2.intelligenceV1Shadow.metadata)
+      : null;
     const valorEfetivoDetalhes = objetoSeguro(resultadoV2.valorEfetivoDetalhes);
     const totalMemoriaCandidatos = memoriaCandidatos.length;
     const coerenciaPreco = validarCoerenciaPreco({
@@ -4037,6 +4041,7 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
         prioridade: prioridadeFinal
       },
       metadata: {
+        ...(routingBridge ? { intelligenceV1Routing: routingBridge } : {}),
         inteligenciaUniversalV2: {
           modo: "oficial",
           ok: okFinalV2,

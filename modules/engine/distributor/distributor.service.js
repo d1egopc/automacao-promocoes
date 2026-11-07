@@ -30,8 +30,28 @@ const { resolverOrigemFluxo } = require("../../../utils/origem-fluxo");
 const {
   resolverRestricaoDestinosClonador
 } = require("../../clonador-grupos/destinos-restricao.contract");
+const {
+  routingMode,
+  bridgeFromOffer,
+  projectedCategoryCandidates
+} = require("../../inteligencia-universal/routing-shadow-v1.service");
+const { operationalRef } = require("../../telemetria/operational-ref");
 
 let engineOfertasMetadataDisponivel = null;
+let routingShadowLogWindowStartedAt = 0;
+let routingShadowLogCount = 0;
+const ROUTING_SHADOW_LOGS_PER_MINUTE = 120;
+const ROUTING_SHADOW_MAX_DESTINATIONS = 250;
+
+function podeLogarRoutingShadow(agora = Date.now()) {
+  if (!routingShadowLogWindowStartedAt || agora - routingShadowLogWindowStartedAt >= 60_000) {
+    routingShadowLogWindowStartedAt = agora;
+    routingShadowLogCount = 0;
+  }
+  if (routingShadowLogCount >= ROUTING_SHADOW_LOGS_PER_MINUTE) return false;
+  routingShadowLogCount += 1;
+  return true;
+}
 
 async function engineOfertasTemMetadataDistribuidor() {
   if (engineOfertasMetadataDisponivel !== null) return engineOfertasMetadataDisponivel;
@@ -381,7 +401,117 @@ function analisarDestinosOferta(clienteId = "admin", oferta = {}, contexto = {})
     });
   }
 
-  return { destinos, compativeis, rejeitados };
+  const resultadoLegado = { destinos, compativeis, rejeitados };
+  const modoRouting = routingMode(contexto.intelligenceRoutingEnv || process.env);
+  if (modoRouting.effectiveMode !== "shadow") return resultadoLegado;
+
+  try {
+    const inicio = Date.now();
+    const projecao = projectedCategoryCandidates({
+      legacyCategories: categorias,
+      bridge: bridgeFromOffer(oferta)
+    });
+    const compativeisProjetados = [];
+    let avaliacoes = 0;
+
+    const destinosProjetados = destinos.slice(0, ROUTING_SHADOW_MAX_DESTINATIONS);
+    const coverageComplete = destinosProjetados.length === destinos.length;
+    if (!projecao.securityBlocked) {
+      for (let indice = 0; indice < destinosProjetados.length; indice += 1) {
+        const destino = destinosProjetados[indice];
+        const destinoNormalizado = destinoComMarketplacesEquivalentes(destino, oferta.marketplace);
+        for (const categoria of projecao.categories.length
+          ? projecao.categories
+          : [oferta.categoria || oferta.categoriaProduto || ""]) {
+          avaliacoes += 1;
+          const analise = destinosUtils.analisarDestinoOferta(destinoNormalizado, {
+            origem: oferta.origem,
+            origemFluxo: resolverOrigemFluxo(oferta),
+            fonte: oferta.fonte,
+            marketplace: oferta.marketplace,
+            categoria,
+            categoriaProduto: categoria,
+            titulo: oferta.titulo,
+            termo: oferta.titulo,
+            metadata: oferta.metadata,
+            evento_metadata: oferta.evento_metadata,
+            job_metadata: oferta.job_metadata
+          }, { logger: { log() {} } });
+          if (analise.aceita) {
+            compativeisProjetados.push({ destino, indice, categoriaUsada: categoria });
+            break;
+          }
+        }
+      }
+    }
+
+    const referenciaDestino = (destino = {}, indice = 0) => operationalRef(
+      "destination",
+      clienteId,
+      destinoIdDistribuidor(destino) || `index:${indice}`
+    ) || `unavailable:${indice}`;
+    const legadoRefs = [...new Set(compativeis.map(item => referenciaDestino(
+      item.destino,
+      Math.max(0, destinos.indexOf(item.destino))
+    )))];
+    const projetadoRefs = [...new Set(compativeisProjetados.map(item => referenciaDestino(item.destino, item.indice)))];
+    const legadoSet = new Set(legadoRefs);
+    const projetadoSet = new Set(projetadoRefs);
+    const inclusoes = projetadoRefs.filter(item => !legadoSet.has(item));
+    const exclusoes = legadoRefs.filter(item => !projetadoSet.has(item));
+    const comparativo = Object.freeze({
+      mode: "shadow",
+      authoritative: false,
+      activeReleased: false,
+      reason: projecao.reason,
+      metadataValid: projecao.validation.valid,
+      metadataErrors: projecao.validation.errors,
+      safetyClass: projecao.validation.safetyClass,
+      securityBlocked: projecao.securityBlocked,
+      approvalBlocked: projecao.approvalBlocked || !coverageComplete,
+      coverageComplete,
+      legacyCategories: Object.freeze([...categorias]),
+      projectedCategories: projecao.categories,
+      addedCategories: projecao.addedCategories,
+      legacyEligibleCount: legadoRefs.length,
+      projectedEligibleCount: projetadoRefs.length,
+      inclusions: Object.freeze(inclusoes.slice(0, 25)),
+      exclusions: Object.freeze(exclusoes.slice(0, 25)),
+      projectedDestinationRefs: Object.freeze(projetadoRefs.slice(0, 25)),
+      evaluations: avaliacoes,
+      durationMs: Date.now() - inicio,
+      externalCalls: 0,
+      targetsCreated: 0
+    });
+
+    if (podeLogarRoutingShadow()) console.log("[INTELLIGENCE-V1-ROUTING-SHADOW]", JSON.stringify({
+      clienteRef: operationalRef("workspace", String(clienteId || "admin")),
+      marketplace: normalizarMarketplace(oferta.marketplace),
+      mode: comparativo.mode,
+      authoritative: false,
+      reason: comparativo.reason,
+      safetyClass: comparativo.safetyClass,
+      securityBlocked: comparativo.securityBlocked,
+      approvalBlocked: comparativo.approvalBlocked,
+      legacyEligibleCount: comparativo.legacyEligibleCount,
+      projectedEligibleCount: comparativo.projectedEligibleCount,
+      inclusions: comparativo.inclusions,
+      exclusions: comparativo.exclusions,
+      addedCategories: comparativo.addedCategories,
+      durationMs: comparativo.durationMs,
+      coverageComplete: comparativo.coverageComplete
+    }));
+
+    return { ...resultadoLegado, intelligenceRoutingShadow: comparativo };
+  } catch (err) {
+    if (podeLogarRoutingShadow()) console.log("[INTELLIGENCE-V1-ROUTING-SHADOW-ERROR]", JSON.stringify({
+      clienteRef: operationalRef("workspace", String(clienteId || "admin")),
+      marketplace: normalizarMarketplace(oferta.marketplace),
+      error: "shadow_unavailable",
+      authoritative: false
+    }));
+    return resultadoLegado;
+  }
 }
 
 function categoriasDestinoRetencao(destinos = []) {
@@ -1638,5 +1768,6 @@ module.exports = {
   categoriasCandidatasOferta,
   filtrarDestinosClonadorGrupos,
   marketplaceEquivalentesDistribuidor,
+  analisarDestinosOferta,
   motivoDistribuicaoDefinitivo
 };
