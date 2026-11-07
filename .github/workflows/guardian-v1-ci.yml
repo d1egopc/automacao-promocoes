@@ -12,6 +12,7 @@ on:
       - validation/baileys-buffer-packaging-20261026
       - validation/radar-magalu-ingress-observer-20261026
       - validation/radar-ingress-correlation-20261106
+      - validation/whatsapp-runtime-journal-correlation-20261107
       - validation/telemetria-operacional-20261027
       - validation/telemetria-v11-panel-first-20261027
       - validation/magalu-recovery-20261027
@@ -409,7 +410,7 @@ jobs:
           node tests/mensageiro-v3-schedule-timezone.test.cjs
           node tests/mensageiro-v3-lock-identity.test.cjs
       - name: Radar ingress correlation focal suite
-        if: github.ref == 'refs/heads/validation/radar-ingress-correlation-20261106'
+        if: github.ref == 'refs/heads/validation/radar-ingress-correlation-20261106' || github.ref == 'refs/heads/validation/whatsapp-runtime-journal-correlation-20261107'
         shell: bash
         run: |
           set -euo pipefail
@@ -421,12 +422,14 @@ jobs:
             tests/whatsapp-socket-listener-lifecycle.test.js \
             tests/whatsapp-ingress-boundary.test.cjs \
             tests/whatsapp-ingress-observation-journal.test.cjs \
+            tests/whatsapp-runtime-journal-correlation.test.cjs \
             tests/resonancia-gate-a.unit.test.cjs \
             tests/telemetria-operacional.test.cjs \
             tests/telemetria-prepared-input.test.cjs \
             tests/telemetria-permanent-contract.test.cjs
           node tests/telemetria-v1-backend.test.js
           node --check modules/telemetria/trace-ref.js
+          node --check modules/telemetria/operational-ref.js
           node --check modules/telemetria/telemetria.routes.js
           node --check modules/telemetria/operational-view.js
           node --check modules/telemetria/telemetria.service.js
