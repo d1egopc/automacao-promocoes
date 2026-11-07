@@ -136,8 +136,10 @@ test("tabela ausente e falha de query sao fail-open com cache negativo curto", a
 test("fila shadow e limitada, single-flight e nunca bloqueia o chamador", async () => {
   const previousMode = process.env.OPTIMUS_INTELLIGENCE_V1_MEMORY_MODE;
   const previousConcurrency = process.env.OPTIMUS_INTELLIGENCE_V1_MEMORY_CONCURRENCY;
+  const previousDisabled = process.env.OPTIMUS_INTELLIGENCE_V1_MEMORY_DISABLED;
   process.env.OPTIMUS_INTELLIGENCE_V1_MEMORY_MODE = "shadow";
   process.env.OPTIMUS_INTELLIGENCE_V1_MEMORY_CONCURRENCY = "1";
+  delete process.env.OPTIMUS_INTELLIGENCE_V1_MEMORY_DISABLED;
   let active = 0;
   let maxActive = 0;
   const rows = new Map();
@@ -178,5 +180,7 @@ test("fila shadow e limitada, single-flight e nunca bloqueia o chamador", async 
     else process.env.OPTIMUS_INTELLIGENCE_V1_MEMORY_MODE = previousMode;
     if (previousConcurrency === undefined) delete process.env.OPTIMUS_INTELLIGENCE_V1_MEMORY_CONCURRENCY;
     else process.env.OPTIMUS_INTELLIGENCE_V1_MEMORY_CONCURRENCY = previousConcurrency;
+    if (previousDisabled === undefined) delete process.env.OPTIMUS_INTELLIGENCE_V1_MEMORY_DISABLED;
+    else process.env.OPTIMUS_INTELLIGENCE_V1_MEMORY_DISABLED = previousDisabled;
   }
 });
