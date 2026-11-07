@@ -47,17 +47,20 @@ jobs:
           test "$backend_status" = running
           test "$backend_oom" = false
 
-          source_active="$(docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$backend")"
-          if [[ ! "$source_active" =~ ^[0-9a-f]{40}$ ]] && [[ "$backend_image_ref" =~ local/optimus-backend:([0-9a-f]{40})- ]]; then
+          base_revision_label="$(docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$backend")"
+          source_active=NAO_COMPROVADO
+          if [[ "$backend_image_ref" =~ local/optimus-backend:([0-9a-f]{40})- ]]; then
             source_active="${BASH_REMATCH[1]}"
-          elif [[ ! "$source_active" =~ ^[0-9a-f]{40}$ ]]; then
-            source_active=NAO_COMPROVADO
+          else
             while IFS= read -r tag; do
               if [[ "$tag" =~ ^local/optimus-backend:([0-9a-f]{40})- ]]; then
                 source_active="${BASH_REMATCH[1]}"
                 break
               fi
             done < <(docker image inspect -f '{{range .RepoTags}}{{println .}}{{end}}' "$active_image")
+          fi
+          if [[ ! "$source_active" =~ ^[0-9a-f]{40}$ ]] && [[ "$base_revision_label" =~ ^[0-9a-f]{40}$ ]]; then
+            source_active="$base_revision_label"
           fi
           [[ "$source_active" =~ ^[0-9a-f]{40}$ ]]
 
@@ -108,7 +111,7 @@ jobs:
           fi
 
           printf 'SOURCE_ATIVO=%s\n' "$source_active"
-          printf 'IMAGEM_ATIVA=%s ref=%s status=%s restarts=%s oom=%s started=%s\n' "$active_image" "$backend_image_ref" "$backend_status" "$backend_restarts" "$backend_oom" "$backend_started"
+          printf 'IMAGEM_ATIVA=%s ref=%s base_revision_label=%s status=%s restarts=%s oom=%s started=%s\n' "$active_image" "$backend_image_ref" "$base_revision_label" "$backend_status" "$backend_restarts" "$backend_oom" "$backend_started"
           printf 'POSTGRES=healthy status=%s\n' "$postgres_status"
           printf 'MOUNTS_DATA=PASS mount=%s free_kb=%s compose_sha256=%s release=%s release_sha256=%s\n' "$data_mount" "$data_free_kb" "$compose_hash" "$release_state" "$release_hash"
           printf 'SESSOES=OBSERVACAO_SANITIZADA connected_events_since_start=%s qr_events_since_start=%s\n' "$connected_events" "$qr_events"
