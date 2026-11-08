@@ -58,7 +58,7 @@
       if (Date.now() >= deadline) throw new Error("magalu_identity_browser_timeout");
       if (attempt > 0) {
         const current = produtoFinal((await comPrazo(tabs.get(tabId), "magalu_identity_browser_timeout"))?.url);
-        if (!current || current.url !== final.url) throw new Error("magalu_identity_produto_nao_confirmado");
+        if (!current || current.url !== final.url) throw new Error("magalu_identity_url_trocada");
         if (Date.now() >= deadline) throw new Error("magalu_identity_browser_timeout");
       }
       try {
@@ -102,7 +102,7 @@
         }, () => finalizar(new Error("magalu_identity_aba_indisponivel")));
       });
       const final = produtoFinal(pronta?.url);
-      if (!final) throw new Error("magalu_identity_produto_nao_confirmado");
+      if (!final) throw new Error("magalu_identity_url_final_nao_produto");
       const captura = await comPrazo(
         capturarComReceptor(tabs, aba.id, final),
         "magalu_identity_browser_timeout"
@@ -110,13 +110,13 @@
       const produto = captura?.produto || {};
       const confirmacao = produtoFinal(produto.urlOriginal);
       const atual = produtoFinal((await comPrazo(tabs.get(aba.id), "magalu_identity_browser_timeout"))?.url);
-      if (!captura?.produto || !confirmacao || !atual ||
-        confirmacao.url !== final.url || atual.url !== final.url ||
-        texto(produto.produtoId).toLowerCase() !== final.productId ||
-        texto(produto.sku).toLowerCase() !== final.productId ||
-        texto(produto.titulo).length < 10 || !imagemOficial(produto.imagem)) {
-        throw new Error("magalu_identity_produto_nao_confirmado");
-      }
+      if (!captura?.produto) throw new Error("magalu_identity_captura_sem_produto");
+      if (!confirmacao) throw new Error("magalu_identity_captura_url_nao_produto");
+      if (!atual || confirmacao.url !== final.url || atual.url !== final.url) throw new Error("magalu_identity_url_trocada");
+      if (texto(produto.produtoId).toLowerCase() !== final.productId) throw new Error("magalu_identity_produto_id_divergente");
+      if (texto(produto.sku).toLowerCase() !== final.productId) throw new Error("magalu_identity_sku_divergente");
+      if (texto(produto.titulo).length < 10) throw new Error("magalu_identity_titulo_ausente");
+      if (!imagemOficial(produto.imagem)) throw new Error("magalu_identity_imagem_nao_oficial");
       return final;
     } finally {
       if (Number.isInteger(aba?.id)) {
