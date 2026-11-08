@@ -935,8 +935,14 @@ async function main() {
     ]);
     assert.equal(pixResult.ok, true);
     assert.ok(concurrentSend.ok === true ||
-      concurrentSend.reason === "sem_creditos",
+      ["sem_creditos", "historical_credits_unclassified"]
+        .includes(concurrentSend.reason),
     `unexpected concurrent send result: ${JSON.stringify(concurrentSend)}`);
+    const afterPixRetry = await manualCredits.reservarCreditoManualUniversal({
+      pool, workspaceId: "ws-v2-transition", operationId: "pix-race-retry",
+      destinationId: "pix-race-retry-destination" });
+    assert.equal(afterPixRetry.ok, true,
+      "applied PIX source must be spendable after a concurrent reservation settles");
     const v2Conservation = (await admin.query(`SELECT COUNT(*)::int AS bad
       FROM engine_universal_credit_sources
       WHERE workspace_id='ws-v2-transition'
