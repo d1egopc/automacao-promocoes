@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - validation/guardian-v1-*
+      - validation/ml-title-identity-reconciled-20261108
+      - validation/magalu-identity-subreason-20261108
+      - validation/intelligence-metadata-reconciled-20261108
       - validation/mensageiro-v4-20261025
       - validation/mensageiro-v4-canary-runtime-20261025
       - validation/mensageiro-v4-ingress-probe-20261026
@@ -466,6 +469,31 @@ jobs:
           node tests/whatsapp-socket-listener-lifecycle.test.js
           node tests/benchmark-whatsapp-ingress-continuous.cjs
           node tests/guardian-v1.test.cjs
+      - name: PR 38 Mercado Livre identity and routing regressions
+        if: github.ref == 'refs/heads/validation/ml-title-identity-reconciled-20261108'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node --test tests/mercadolivre-identidade-promocional-focal.test.cjs tests/diversos-titulos-focal.test.cjs tests/mercadolivre-identidade-canonica.test.js tests/destino-geral-distributor.test.js
+      - name: PR 39 Magalu worker sanitized identity reasons and multiworkspace regressions
+        if: github.ref == 'refs/heads/validation/magalu-identity-subreason-20261108'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node --check optimus-capture/local-worker/magalu-identity.js
+          node --test tests/magalu-worker-boundary-focal.test.cjs tests/magalu-local-worker-identity.test.js tests/optimus-capture-extension.test.js tests/local-worker-platform-architecture.test.cjs
+      - name: PR 40 Intelligence SHADOW metadata boundary and neutrality regressions
+        if: github.ref == 'refs/heads/validation/intelligence-metadata-reconciled-20261108'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node --test tests/intelligence-v1-metadata-boundary-observation.test.cjs tests/intelligence-v1-release-candidate.test.cjs tests/intelligence-v1-phase-d.test.cjs tests/intelligence-v1-phase-c.test.cjs
       - name: Guardião V1 self-tests
         run: node tests/guardian-v1.test.cjs
       - name: AliExpress real source fidelity and marketplace regressions
