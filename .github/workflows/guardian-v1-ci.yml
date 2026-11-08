@@ -144,6 +144,7 @@ jobs:
           node --check index.js
           node --check modules/engine/universal-credit-eligibility.service.js
           node --test tests/universal-credit-preflight.test.cjs \
+            tests/universal-initial-grant-migration.test.cjs \
             tests/saas-cortesia-v1.test.cjs \
             tests/saas-fundacao-v1.test.js \
             tests/saas-renovacao-assinatura-v1.test.js \
