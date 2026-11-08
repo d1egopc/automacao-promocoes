@@ -85,6 +85,15 @@ function tituloComercialUniversalValido(titulo = "", contexto = {}) {
     && n.split(/\s+/)[0] === n.split(/\s+/)[1]
     && marketplaces.has(n.split(/\s+/)[0]);
   const tituloBruto = limpo.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  // Linhas promocionais/instrucionais não identificam o produto, mesmo quando
+  // citam uma categoria ou produto incidental (por exemplo, "perfume").
+  const sloganOuInstrucao =
+    /^(?:aproveita|aproveite)\b.*\b(?:grupo|link)\b/.test(tituloBruto) ||
+    /^todo\s+mundo\s+vai\s+perguntar\b/.test(tituloBruto) ||
+    /^cupons?\b.*\b(?:garanta|enquanto)\b/.test(tituloBruto) ||
+    /\b(?:convida|convidar)\b.*\bgrupo\b.*\blink\b/.test(tituloBruto) ||
+    /\bgaranta\s+(?:o\s+seu|a\s+sua)\b.*\b(?:ativo|ativa|esgot)\b/.test(tituloBruto);
+  if (sloganOuInstrucao) return false;
   const linhaPromocionalCupom = /\b(?:r\$\s*)?\d{1,5}(?:[.,]\d{1,2})?\s*(?:off|de\s+desconto)|\b\d{1,3}\s*%\s*off\b/.test(tituloBruto) &&
     (/\b(?:cupom|voucher|codigo|cod|use|aplique|resgate|a\s+partir\s+de|acima\s+de|compras)\b/.test(tituloBruto) ||
       /^(?:r\$\s*)?\d{1,5}(?:[.,]\d{1,2})?\s*(?:off|de\s+desconto)|^\d{1,3}\s*%\s*off\b/.test(tituloBruto));
