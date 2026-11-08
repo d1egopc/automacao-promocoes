@@ -98,7 +98,8 @@ function criarTransacaoFinanceira(client) {
         `SELECT * FROM financial_credit_ledger
          WHERE cliente_id = $1
            AND ledger_type = 'cycle_credit'
-           AND metadata->>'origin' = 'admin_courtesy'
+           AND metadata->>'origin' IN
+             ('admin_courtesy','universal_migration_initial')
            AND projection_status IN ('pending', 'projected')
          ORDER BY cycle_start DESC NULLS LAST, created_at DESC
          LIMIT 1
