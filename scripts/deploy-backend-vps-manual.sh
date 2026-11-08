@@ -340,9 +340,60 @@ fi
 # A persistent Compose overlay changes only backend.image. The base Compose,
 # env_file, secrets, mounts, ports, networks and PostgreSQL are untouched.
 deploy_stage=validate_compose_overlay
-printf 'services:\n  backend:\n    image: %s\n' "$candidate_tag" > "$staging"
+if test -f "$release"; then
+  # Preserve every previously approved overlay setting (for example SHADOW
+  # flags and the bounded journal mount). Replace only backend.image; the
+  # effective-Compose guard below still rejects any additional delta.
+  python3 - "$release" "$staging" "$candidate_tag" <<'PY'
+import re
+import sys
+
+source, destination, image = sys.argv[1:]
+if not re.fullmatch(r"local/optimus-backend:[0-9a-f]{40}-[0-9]+-[0-9]+", image):
+    raise SystemExit("invalid candidate image reference")
+
+with open(source, "r", encoding="utf-8", newline="") as handle:
+    lines = handle.readlines()
+
+in_services = False
+in_backend = False
+matches = 0
+image_line = re.compile(r"^( {4}image:\s*)([^\s#]+)(\s*(?:#.*)?)(\r?\n?)$")
+for index, line in enumerate(lines):
+    body = line.rstrip("\r\n")
+    if re.match(r"^services:\s*(?:#.*)?$", body):
+        in_services = True
+        in_backend = False
+        continue
+    if in_services and re.match(r"^[^ ]", body) and body and not body.startswith("#"):
+        in_services = False
+        in_backend = False
+    if in_services and re.match(r"^  backend:\s*(?:#.*)?$", body):
+        in_backend = True
+        continue
+    if in_backend and re.match(r"^  [^ ]", body) and not re.match(r"^  backend:", body):
+        in_backend = False
+    if not in_backend:
+        continue
+    match = image_line.match(line)
+    if match:
+        lines[index] = f"{match.group(1)}{image}{match.group(3)}{match.group(4)}"
+        matches += 1
+
+if matches != 1:
+    raise SystemExit("backend release overlay must contain exactly one services.backend.image")
+
+with open(destination, "w", encoding="utf-8", newline="") as handle:
+    handle.writelines(lines)
+PY
+else
+  printf 'services:\n  backend:\n    image: %s\n' "$candidate_tag" > "$staging"
+fi
 if [[ "$sensor_mount_selected" == true ]]; then
-  printf '    volumes:\n      - type: bind\n        source: /opt/optimus/observability/garimpei-sensor\n        target: /var/log/optimus/garimpei-sensor\n        bind:\n          create_host_path: false\n' >> "$staging"
+  docker compose -f "$compose" -f "$staging" config --format json > "$scratch/staging-before-sensor.json"
+  if [[ "$(python3 "$sensor_guard" mode "$scratch/staging-before-sensor.json")" == absent ]]; then
+    printf '    volumes:\n      - type: bind\n        source: /opt/optimus/observability/garimpei-sensor\n        target: /var/log/optimus/garimpei-sensor\n        bind:\n          create_host_path: false\n' >> "$staging"
+  fi
 fi
 docker compose -f "$compose" -f "$staging" config --format json > "$scratch/after.json"
 if ! python3 "$sensor_guard" compose "$scratch/before.json" "$scratch/after.json" "$sensor_mount_approved"; then
