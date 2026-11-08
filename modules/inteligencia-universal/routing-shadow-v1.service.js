@@ -144,6 +144,42 @@ function buildRoutingBridge(metadata = {}) {
   });
 }
 
+function metadataContractReasonClasses(metadata = {}) {
+  const source = object(metadata);
+  const identity = object(source.identity);
+  const category = object(source.category);
+  const safety = object(source.safety);
+  const reasons = new Set();
+  const classificationStatus = text(source.classificationStatus, 30).toLowerCase();
+  const safetyClass = text(safety.class, 30).toLowerCase();
+  const principal = canonicalCategoryId(category.principal);
+  const affinitiesRaw = Array.isArray(category.affinities)
+    ? category.affinities
+    : (Array.isArray(category.categoriasAfinidade) ? category.categoriasAfinidade : []);
+  const evidenceRaw = Array.isArray(category.evidence) ? category.evidence : [];
+  const evidence = evidenceRaw.map(sanitizeEvidence).filter(Boolean);
+
+  if (classificationStatus !== "resolved" ||
+      text(category.classifierVersion, 100) !== CLASSIFIER_VERSION) reasons.add("classification");
+  if (identity.confirmed !== true || identity.divergent === true || !validHash(identity.evidenceHash)) {
+    reasons.add("identity");
+  }
+  if (!VALID_SAFETY_CLASSES.has(safetyClass)) reasons.add("safety");
+  if (evidence.length !== evidenceRaw.length ||
+      (principal && principal !== "Diversos" &&
+       !evidence.some(item => item.categoryId === principal && item.role === "principal"))) {
+    reasons.add("evidence");
+  }
+  if (affinitiesRaw.length > MAX_AFFINITIES ||
+      affinitiesRaw.map(canonicalCategoryId).filter(Boolean).length !== affinitiesRaw.length ||
+      affinitiesRaw.some(item => {
+        const categoryId = canonicalCategoryId(item);
+        return categoryId && !evidence.some(e => e.categoryId === categoryId && e.role === "affinity");
+      })) reasons.add("affinities");
+
+  return [...reasons].sort();
+}
+
 function bridgeFromOffer(offer = {}) {
   const metadata = object(offer.metadata);
   return object(metadata.intelligenceV1Routing);
@@ -245,6 +281,7 @@ module.exports = {
   MAX_AFFINITIES,
   routingMode,
   buildRoutingBridge,
+  metadataContractReasonClasses,
   bridgeFromOffer,
   validateRoutingBridge,
   projectedCategoryCandidates
