@@ -658,7 +658,6 @@ async function preserveProvenAdminTopupRemainderTx(client, { epoch, workspaceId,
     throw new Error("universal_migration_topup_chain_limit_exceeded");
   }
   let previous = null;
-  let previousRevision = null;
   let topup = null;
   let laterDebits = 0;
   let laterPositive = 0;
@@ -668,7 +667,6 @@ async function preserveProvenAdminTopupRemainderTx(client, { epoch, workspaceId,
     const value = Number(movement.amount);
     const after = Number(movement.balance_after);
     if (!Number.isSafeInteger(revision) || revisions.has(revision) ||
-        (previousRevision !== null && revision !== previousRevision + 1) ||
         !Number.isSafeInteger(value) || !Number.isSafeInteger(after)) {
       throw new Error("universal_migration_topup_chain_invalid");
     }
@@ -684,9 +682,8 @@ async function preserveProvenAdminTopupRemainderTx(client, { epoch, workspaceId,
       else if (value > 0) laterPositive += value;
     }
     previous = after;
-    previousRevision = revision;
   }
-  if (previous !== snapshot.balance || Number(movements.at(-1).revision) !== snapshot.revision) {
+  if (previous !== snapshot.balance) {
     throw new Error("universal_migration_topup_chain_stale");
   }
   if (!topup || topup.ledger_type !== "admin_credit" ||
