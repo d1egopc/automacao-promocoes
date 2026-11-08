@@ -935,7 +935,8 @@ async function main() {
     ]);
     assert.equal(pixResult.ok, true);
     assert.ok(concurrentSend.ok === true ||
-      concurrentSend.reason === "sem_creditos");
+      concurrentSend.reason === "sem_creditos",
+    `unexpected concurrent send result: ${JSON.stringify(concurrentSend)}`);
     const v2Conservation = (await admin.query(`SELECT COUNT(*)::int AS bad
       FROM engine_universal_credit_sources
       WHERE workspace_id='ws-v2-transition'
