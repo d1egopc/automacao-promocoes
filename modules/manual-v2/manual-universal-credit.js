@@ -107,13 +107,6 @@ async function reservarCreditoManualUniversal({ pool, workspaceId, operationId, 
     }
     let sourceId = null;
     if (sourced) {
-      const entitlement = (await client.query(`SELECT 1 FROM engine_universal_credit_sources
-        WHERE operation_epoch_started_at=$1 AND workspace_id=$2
-          AND source_kind IN ('cycle','opening') AND state='active' AND granted>0
-          AND (cycle_start IS NULL OR cycle_start<=clock_timestamp())
-          AND (cycle_end IS NULL OR cycle_end>clock_timestamp()) LIMIT 1`,
-      [epoch, id.workspaceId])).rows[0];
-      if (!entitlement) return { ok: false, reason: "sem_creditos", epoch, ...id };
       const source = (await client.query(`SELECT id FROM engine_universal_credit_sources
         WHERE operation_epoch_started_at=$1 AND workspace_id=$2
           AND state='active' AND available>0
@@ -121,7 +114,15 @@ async function reservarCreditoManualUniversal({ pool, workspaceId, operationId, 
           AND (cycle_end IS NULL OR cycle_end>clock_timestamp())
         ORDER BY cycle_end ASC NULLS LAST,created_at,id
         LIMIT 1 FOR UPDATE SKIP LOCKED`, [epoch, id.workspaceId])).rows[0];
-      if (!source) return { ok: false, reason: "sem_creditos", epoch, ...id };
+      if (!source) {
+        const historical = (await client.query(`SELECT 1 FROM
+          engine_universal_credit_sources
+          WHERE operation_epoch_started_at=$1 AND workspace_id=$2
+            AND source_kind='legacy_unclassified' AND state='unclassified'
+            AND available>0 LIMIT 1`, [epoch, id.workspaceId])).rows[0];
+        return { ok: false, reason: historical ?
+          "historical_credits_unclassified" : "sem_creditos", epoch, ...id };
+      }
       sourceId = source.id;
       await client.query(`UPDATE engine_universal_credit_sources SET
         available=available-1,reserved=reserved+1,revision=revision+1,

@@ -13,6 +13,7 @@ const { prepararModoOperacionalReal } =
   require("../modules/engine/universal-runtime-bootstrap");
 const credits = require("../modules/engine/universal-credits.repository");
 const queue = require("../modules/engine/universal-queue.repository");
+const manualCredits = require("../modules/manual-v2/manual-universal-credit");
 
 const root = path.join(__dirname, "..");
 const config = { host: "127.0.0.1", port: 55433, user: "postgres",
@@ -180,6 +181,14 @@ async function main() {
       financial_credit_ledger WHERE cliente_id='ws_topup' AND
       universal_movement_type='FINANCIAL_MOVEMENT' AND balance_policy='add'`)).rows[0].n, 3);
 
+    const manualTopupOnly = await manualCredits.reservarCreditoManualUniversal({
+      pool, workspaceId: "ws_topup", operationId: "manual-topup-only",
+      destinationId: "manual-wa" });
+    assert.equal(manualTopupOnly.ok, true,
+      "admin top-up must fund Manual V2 without a current cycle");
+    assert.equal((await manualCredits.liberarCreditoManualUniversal({
+      pool, reserva: manualTopupOnly })).released, true);
+
     await assert.rejects(credits.addAdminBalance({ pool,
       workspaceId: "ws_topup", amount: 0,
       idempotencyKey: "universal:admin:topup:invalid-zero" }),
@@ -208,7 +217,8 @@ async function main() {
     console.log("UNIVERSAL_ADMIN_TOPUP_POSTGRES17_PASS", JSON.stringify({
       balance: 3, reserved: 0, available: 3, holdPreserved: true,
       ackDebitedOnce: true, failureReleased: true, duplicateTopup: true,
-      concurrentTopups: 2, rollbackBalance: rollback.rollbackBalance
+      concurrentTopups: 2, manualTopupWithoutCycle: true,
+      rollbackBalance: rollback.rollbackBalance
     }));
   } finally {
     if (pool) await pool.end();
