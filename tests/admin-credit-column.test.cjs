@@ -41,3 +41,13 @@ test("rotas administrativas usam disponível sem alterar o ledger", () => {
   assert.match(source, /creditos:\s*await saldoCreditosAdminSomenteLeitura\(id, usuario\)/);
   assert.match(source, /creditos:\s*movimento\.available/);
 });
+
+test("Dashboard, perfil, Google e telemetria usam a mesma projeção disponível", () => {
+  const source = fs.readFileSync(require.resolve("../index.js"), "utf8");
+  const status = source.slice(source.indexOf('app.get("/automacao/status"'));
+  const me = source.slice(source.indexOf('app.get("/me"'));
+  assert.match(status, /const saldoCreditos = projecaoCreditos\.disponivel/);
+  assert.match(me, /saldoCreditos = creditosFinanceiros\.disponivel/);
+  assert.match(source, /async function saldoCreditosGoogleSomenteLeitura[\s\S]*?return projecao\.disponivel/);
+  assert.match(source, /source: "projecaoCreditosSomenteLeitura"[\s\S]*?creditosFinanceiros: projecao/);
+});

@@ -239,11 +239,13 @@ function assertNoSecret(text, secrets) {
       body: { credential: idToken } });
     assert.strictEqual(google.status, 200, JSON.stringify(google.body));
     assert.ok(google.body.token, "Google existente deve emitir JWT");
+    assert.strictEqual(google.body.usuario.creditos, 413,
+      "login Google deve expor saldo disponível no modo Universal");
 
     const me = await request({ port, route: "/me", token: google.body.token });
     assert.strictEqual(me.status, 200, JSON.stringify(me.body));
     assert.strictEqual(me.body.usuario.id, "user_existente");
-    assert.strictEqual(me.body.usuario.creditos, 432);
+    assert.strictEqual(me.body.usuario.creditos, 413);
     assert.strictEqual(me.body.usuario.creditosEstado, "disponivel");
     assert.strictEqual(me.body.usuario.creditosFinanceiros.total, 432);
     assert.strictEqual(me.body.usuario.creditosFinanceiros.disponivel, 413);
@@ -254,7 +256,7 @@ function assertNoSecret(text, secrets) {
     })));
     for (const status of statuses) {
       assert.strictEqual(status.status, 200, JSON.stringify(status.body));
-      assert.strictEqual(status.body.creditos, 432);
+      assert.strictEqual(status.body.creditos, 413);
       assert.strictEqual(status.body.creditosFinanceiros.total, 432);
       assert.strictEqual(status.body.creditosFinanceiros.disponivel, 413);
       assert.strictEqual(status.body.creditosFinanceiros.reservado, 19);
