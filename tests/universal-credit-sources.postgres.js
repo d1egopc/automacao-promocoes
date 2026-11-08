@@ -423,8 +423,12 @@ async function main() {
     assert.equal(balance.balance, 267,
       "new cycle replaces old cycle availability but preserves admin source");
     assert.equal(balance.aggregateAvailable, 250);
-    assert.equal(balance.available, 0,
-      "future cycle cannot make administrative value spendable before its window");
+    assert.equal(balance.cycleAvailable, 0,
+      "future cycle cannot make plan credits spendable before its window");
+    assert.equal(balance.adminAvailable, 50,
+      "confirmed admin top-up remains available without a current plan cycle");
+    assert.equal(balance.available, 50,
+      "only the confirmed admin top-up is spendable before the future cycle starts");
 
     await enqueueOne(admin, pool, "ws-pix", "pix-old", 5);
     const pixOld = await claimAndStart(pool, "ws-pix");
