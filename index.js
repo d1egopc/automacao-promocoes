@@ -5397,6 +5397,14 @@ async function saldoCreditosSomenteLeitura(clienteId, usuario = null) {
   });
 }
 
+// A coluna administrativa representa somente créditos utilizáveis. Mantemos
+// saldoCreditosSomenteLeitura() agregado para os contratos que dependem de
+// total; esta projeção é exclusiva do read-model administrativo.
+async function saldoCreditosAdminSomenteLeitura(clienteId, usuario = null) {
+  const projecao = await projecaoCreditosSomenteLeitura(clienteId, usuario);
+  return projecao.disponivel;
+}
+
 async function projecaoCreditosSomenteLeitura(clienteId, usuario = null) {
   return creditBalanceService.lerProjecaoCreditosSomenteLeitura({
     mode: modoMotorReal,
@@ -15078,7 +15086,7 @@ async function listarUsuariosAdminSomenteLeituraAtual() {
     usuarios,
     mode: modoMotorReal,
     sanitizar: sanitizarUsuarioAdmin,
-    lerSaldo: saldoCreditosSomenteLeitura
+    lerSaldo: saldoCreditosAdminSomenteLeitura
   });
 }
 
@@ -16237,7 +16245,7 @@ app.put("/admin/usuarios/:id", exigirAdminMasterEstrito, async (req, res) => {
   return res.json({
     ok: true,
     usuario: { ...sanitizarUsuarioAdmin(usuario),
-      creditos: await saldoCreditosSomenteLeitura(id, usuario) },
+      creditos: await saldoCreditosAdminSomenteLeitura(id, usuario) },
     cortesia: cortesiaResultado
   });
 });
@@ -16300,7 +16308,7 @@ app.post("/admin/usuarios/:id/creditos/topup", exigirAdminMasterEstrito, async (
         available: movimento.available
       },
       usuario: { ...sanitizarUsuarioAdmin(usuario),
-        creditos: movimento.balance,
+        creditos: movimento.available,
         creditosFinanceiros: {
           total: movimento.balance,
           disponivel: movimento.available,
