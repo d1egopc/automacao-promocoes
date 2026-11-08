@@ -444,6 +444,20 @@ function criarRetornoBloqueioGlobal(ofertaId = "", motivoGlobal = "") {
   };
 }
 
+const MOTIVOS_RESERVA_CREDITO_SEGUROS = new Set([
+  "sem_creditos",
+  "historical_credits_unclassified",
+  "workspace_inativo",
+  "manual_credit_reservation_terminal"
+]);
+
+function motivoReservaCredito(reserva = {}) {
+  const motivo = texto(reserva?.reason);
+  if (motivo === "sem_creditos") return "Sem creditos";
+  if (MOTIVOS_RESERVA_CREDITO_SEGUROS.has(motivo)) return motivo;
+  return "credit_reservation_unavailable";
+}
+
 function destinosPorClienteAtual(deps = {}) {
   if (typeof deps.getDestinosPorCliente === "function") {
     return deps.getDestinosPorCliente() || {};
@@ -645,7 +659,8 @@ async function enviarOfertaManualV2({ clienteId = "admin", ofertaId = "", destin
         });
         if (reservaCredito?.ok !== true) {
           retorno.erros += 1;
-          retorno.resultados.push(resultadoErro({ ...destinoBase, erro: "Sem creditos" }));
+          retorno.resultados.push(resultadoErro({ ...destinoBase,
+            erro: motivoReservaCredito(reservaCredito) }));
           continue;
         }
       } else if (!await usuarioTemCreditos(cliente, 1)) {

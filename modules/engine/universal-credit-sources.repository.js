@@ -768,6 +768,14 @@ async function addAdminTopupTx(client, { epoch, workspaceId, amount: delta,
     engine_universal_credit_balances WHERE operation_epoch_started_at=$1
       AND workspace_id=$2 FOR UPDATE`, [epoch, workspaceId])).rows[0];
   if (!balance) throw new Error("universal_admin_credit_opening_missing");
+  const readSpendable = async () => Number((await client.query(`SELECT
+      COALESCE(sum(available),0)::bigint AS available
+    FROM engine_universal_credit_sources
+    WHERE operation_epoch_started_at=$1 AND workspace_id=$2
+      AND state='active' AND available>0
+      AND (cycle_start IS NULL OR cycle_start<=clock_timestamp())
+      AND (cycle_end IS NULL OR cycle_end>clock_timestamp())`,
+  [epoch, workspaceId])).rows[0].available);
   const existing = (await client.query(`SELECT id,cliente_id,amount,
       operation_epoch_started_at,universal_movement_type,balance_policy,
       universal_credit_source_id
@@ -782,7 +790,7 @@ async function addAdminTopupTx(client, { epoch, workspaceId, amount: delta,
     }
     return { handled: true, ok: true, duplicate: true, delta,
       balance: Number(balance.balance), reserved: Number(balance.reserved),
-      available: Number(balance.balance) - Number(balance.reserved),
+      available: await readSpendable(),
       sourceId: existing.universal_credit_source_id };
   }
   const inserted = (await client.query(`INSERT INTO financial_credit_ledger
@@ -810,7 +818,7 @@ async function addAdminTopupTx(client, { epoch, workspaceId, amount: delta,
   return { handled: true, ok: true, duplicate: false, delta,
     balanceBefore: Number(balance.balance), balance: aggregate.backed,
     reserved: aggregate.reserved,
-    available: aggregate.backed - aggregate.reserved,
+    available: await readSpendable(),
     revision: aggregate.revision, sourceId: source.id };
 }
 
@@ -826,15 +834,6 @@ async function holdForTargetTx(client, { epoch, workspaceId, targetId }) {
   [epoch, workspaceId, targetId])).rows[0];
   if (existing) return { handled: true, ok: false,
     reason: "universal_credit_hold_existing" };
-  const entitlement = (await client.query(`SELECT 1 FROM
-    engine_universal_credit_sources
-    WHERE operation_epoch_started_at=$1 AND workspace_id=$2
-      AND source_kind IN ('cycle','opening') AND state='active' AND granted>0
-      AND (cycle_start IS NULL OR cycle_start<=clock_timestamp())
-      AND (cycle_end IS NULL OR cycle_end>clock_timestamp())
-    LIMIT 1`, [epoch, workspaceId])).rows[0];
-  if (!entitlement) return { handled: true, ok: false,
-    reason: "workspace_credits_unavailable" };
   const source = (await client.query(`SELECT id FROM
     engine_universal_credit_sources
     WHERE operation_epoch_started_at=$1 AND workspace_id=$2
@@ -843,8 +842,16 @@ async function holdForTargetTx(client, { epoch, workspaceId, targetId }) {
       AND (cycle_end IS NULL OR cycle_end>clock_timestamp())
     ORDER BY cycle_end ASC NULLS LAST,created_at,id
     LIMIT 1 FOR UPDATE SKIP LOCKED`, [epoch, workspaceId])).rows[0];
-  if (!source) return { handled: true, ok: false,
-    reason: "workspace_credits_unavailable" };
+  if (!source) {
+    const historical = (await client.query(`SELECT 1 FROM
+      engine_universal_credit_sources
+      WHERE operation_epoch_started_at=$1 AND workspace_id=$2
+        AND source_kind='legacy_unclassified' AND state='unclassified'
+        AND available>0 LIMIT 1`, [epoch, workspaceId])).rows[0];
+    return { handled: true, ok: false,
+      reason: historical ? "historical_credits_unclassified" :
+        "workspace_credits_unavailable" };
+  }
   await client.query(`UPDATE engine_universal_credit_sources
     SET available=available-1,reserved=reserved+1,revision=revision+1,
         updated_at=clock_timestamp() WHERE id=$1`, [source.id]);
