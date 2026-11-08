@@ -5418,7 +5418,8 @@ async function projecaoCreditosSomenteLeitura(clienteId, usuario = null) {
 async function saldoCreditosGoogleSomenteLeitura(clienteId, usuario = null,
   { onStage = () => {} } = {}) {
   onStage("credit.ledger_read");
-  return saldoCreditosSomenteLeitura(clienteId, usuario);
+  const projecao = await projecaoCreditosSomenteLeitura(clienteId, usuario);
+  return projecao.disponivel;
 }
 
 async function reservarCreditoEnvioManualV2({ clienteId, operationId, destinoId, destinationId } = {}) {
@@ -14578,7 +14579,7 @@ app.get("/automacao/status", async (req, res) => {
     .length;
 
   const projecaoCreditos = await projecaoCreditosSomenteLeitura(clienteId, usuario);
-  const saldoCreditos = projecaoCreditos.total;
+  const saldoCreditos = projecaoCreditos.disponivel;
   return res.json({
     ok: true,
     clienteId,
@@ -16845,12 +16846,13 @@ app.use("/telemetria", criarRotasTelemetria({
       return { available: false, state: "INDISPONIVEL", reason: "workspace_not_available" };
     }
     try {
-      const creditos = await saldoCreditosSomenteLeitura(clienteId, usuario);
+      const projecao = await projecaoCreditosSomenteLeitura(clienteId, usuario);
       return {
         available: true,
         state: "COMPROVADO",
-        source: "saldoCreditosSomenteLeitura",
-        creditos: Number.isFinite(Number(creditos)) ? Number(creditos) : null,
+        source: "projecaoCreditosSomenteLeitura",
+        creditos: Number.isFinite(Number(projecao.disponivel)) ? Number(projecao.disponivel) : null,
+        creditosFinanceiros: projecao,
         direitoFinanceiro: "DESCONHECIDO"
       };
     } catch {
@@ -28485,7 +28487,7 @@ app.get("/me", async (req, res) => {
   let creditosEstado = "disponivel";
   try {
     creditosFinanceiros = await projecaoCreditosSomenteLeitura(clienteId, usuario);
-    saldoCreditos = creditosFinanceiros.total;
+    saldoCreditos = creditosFinanceiros.disponivel;
   } catch (erro) {
     creditosEstado = "indisponivel";
     registrarErroSaas({
