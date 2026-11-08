@@ -28,9 +28,25 @@ function normalizarPapelComercial(valor = "") {
     .trim();
 }
 
+// Instruções de resgate e slogans publicitários não identificam o produto.
+// A lista é deliberadamente pequena para não rejeitar títulos técnicos que
+// apenas carregam preço, cupom ou uma categoria comercial válida.
+function tituloPublicitarioOuInstrucao(titulo = "") {
+  const normalizado = normalizarPapelComercial(titulo);
+  if (!normalizado) return false;
+  if (/^(?:use|utilize|aplique|resgate|clique|acesse|toque|selecione|va|siga)\b/.test(normalizado)) return true;
+  if (/\b(?:beneficio|beneficios)\b.*\b(?:esse|essa|este|esta|item|oferta|bebida|casa)\b/.test(normalizado)) return true;
+  if (/\b(?:tem|confira|veja)\b.*\b(?:beneficio|oferta)\b.*\b(?:item|bebida|casa)\b/.test(normalizado)) return true;
+  if (/^(?:suas?|esses?|essas?)\b.*\b(?:agradecem|cuidado|merecem)\b/.test(normalizado)) return true;
+  if (/\b(?:no|na|nos|nas)\b.*\b(?:canto|rodape|menu|aba|tela)\b.*\b(?:direito|esquerdo|mais|clique|va)\b/.test(normalizado)) return true;
+  if (/\b(?:cara das ofertas|equipe de ofertas|admin(?:istrador|istradora)? do grupo)\b.*\b(?:achou|encontrou|separou|trouxe|pra voce)\b/.test(normalizado)) return true;
+  return false;
+}
+
 function tituloComercialUniversalValido(titulo = "", contexto = {}) {
   const limpo = texto(titulo);
   if (!limpo) return false;
+  if (tituloPublicitarioOuInstrucao(limpo)) return false;
   if (/^\d{1,3}\s*%$/.test(limpo)) return false;
   const n = normalizarPapelComercial(limpo);
   if (!n) return false;
@@ -1035,6 +1051,7 @@ function deveLogarDivergenciaComercial(resultado = {}) {
 
 module.exports = {
   VERSAO_PRECEDENCIA_COMERCIAL,
+  tituloPublicitarioOuInstrucao,
   resolverPrecedenciaComercialRadar,
   resumirPrecedenciaComercialLog,
   deveLogarDivergenciaComercial,

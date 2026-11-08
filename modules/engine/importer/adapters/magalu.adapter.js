@@ -30,6 +30,7 @@ const {
   sanitizarUrlProdutoMagalu,
   produtoIdUrlMagalu
 } = require("../../../local-worker/magalu-identity.contract");
+const { tituloPublicitarioOuInstrucao } = require("../../../radar/comercial-precedencia");
 
 const POLITICA_MAGALU_ENGINE = Object.freeze({
   timeoutMs: 2500,
@@ -207,6 +208,7 @@ function tituloRadarSeguroMagalu(valor = "") {
   if (valor && typeof valor === "object") return "";
   const titulo = texto(valor).replace(/\s+/g, " ");
   if (titulo.length < 4) return "";
+  if (tituloPublicitarioOuInstrucao(titulo)) return "";
   if (/https?:\/\//i.test(titulo)) return "";
   if (/r\$\s*\d/i.test(titulo)) return "";
 

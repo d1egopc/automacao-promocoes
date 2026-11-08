@@ -3,6 +3,7 @@ const {
   resumirExtratorComercialParaLog
 } = require("./extrator-comercial-universal");
 const { textoComercialSemRodape } = require("./linhas-auxiliares");
+const { tituloPublicitarioOuInstrucao } = require("./comercial-precedencia");
 
 const RADAR_EXTRATOR_LOCAL_MODO = "observacao";
 const VERSAO_EXTRATOR_LOCAL = "radar_extrator_local_v1";
@@ -184,7 +185,7 @@ function extrairLinhasCandidatasTitulo(texto = "", links = []) {
     .map(limparMarcadoresTitulo)
     .filter(Boolean)
     .filter(linha => !linhaPromocionalCupomSemProduto(linha))
-    .filter(linha => pontuarLinhaTituloProduto(linha) >= 6 || !linhaComercialNaoTitulo(linha))
+    .filter(linha => !linhaComercialNaoTitulo(linha))
     .filter(linha => !linksSet.has(linha))
     .filter(linha => !/(?:https?:\/\/|www\.)/i.test(linha))
     .filter(linha => !/^\s*[0-5](?:[,.]\d)?\s*\(\d{2,6}\)/.test(linha))
@@ -214,6 +215,7 @@ function limparMarcadoresTitulo(linha = "") {
 function linhaComercialNaoTitulo(linha = "") {
   const limpa = removerMarcadoresFormatacaoComercial(linha).trim();
   if (!limpa) return true;
+  if (tituloPublicitarioOuInstrucao(limpa)) return true;
   if (/^\s*(?:link|links|resgate|resgatar|carrinho)\b/i.test(limpa)) return true;
   if (/^\s*[0-5](?:[,.]\d)?\s*\(\d{2,6}\)/.test(limpa)) return true;
   if (/^\s*(?:cupom|c[oó]digo|codigo)\s*:/i.test(limpa)) return true;
