@@ -278,15 +278,15 @@ async function main() {
     let onboardPaid = await credits.readBalance({ pool,
       workspaceId: "ws-onboard-paid" });
     assert.equal(onboardPaid.aggregateAvailable, 25);
-    assert.equal(onboardPaid.available, 0,
-      "zero opening plus admin top-up does not create plan entitlement");
+    assert.equal(onboardPaid.available, 25,
+      "audited admin top-up is independently spendable");
     const onboardPix = await insertCycle(admin, { workspace: "ws-onboard-paid",
       value: 40, origin: "financial_event_v1", suffix: "onboard-pix" });
     await credits.applyFinancialLedger({ pool, ledgerId: onboardPix });
     onboardPaid = await credits.readBalance({ pool,
       workspaceId: "ws-onboard-paid" });
     assert.equal(onboardPaid.available, 65,
-      "valid Pix entitlement makes its cycle and preserved admin source eligible");
+      "Pix cycle and preserved admin source remain independently eligible");
     assert.equal((await sources.inspectShadowWorkspace({ pool,
       workspaceId: "ws-other" })).mode, "LEGACY",
     "an existing unmigrated workspace remains independently legacy");
@@ -459,9 +459,8 @@ async function main() {
       const adminOnlyHold = await sources.holdForTargetTx(sourceClient, {
         epoch, workspaceId: "ws-admin-only", targetId: adminTarget.id
       });
-      assert.deepEqual({ ok: adminOnlyHold.ok, reason: adminOnlyHold.reason },
-        { ok: false, reason: "workspace_credits_unavailable" },
-        "administrative credits alone must not create send entitlement");
+      assert.equal(adminOnlyHold.ok, true,
+        "audited administrative source must fund automatic delivery");
       await sourceClient.query("ROLLBACK");
     } finally {
       sourceClient.release();

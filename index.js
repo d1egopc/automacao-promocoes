@@ -5397,6 +5397,16 @@ async function saldoCreditosSomenteLeitura(clienteId, usuario = null) {
   });
 }
 
+async function projecaoCreditosSomenteLeitura(clienteId, usuario = null) {
+  return creditBalanceService.lerProjecaoCreditosSomenteLeitura({
+    mode: modoMotorReal,
+    workspaceId: clienteId,
+    usuario,
+    readBalance: ({ workspaceId }) => lerSaldoUniversal({ pool: getEnginePool(),
+      workspaceId })
+  });
+}
+
 async function saldoCreditosGoogleSomenteLeitura(clienteId, usuario = null,
   { onStage = () => {} } = {}) {
   onStage("credit.ledger_read");
@@ -14559,7 +14569,8 @@ app.get("/automacao/status", async (req, res) => {
     })
     .length;
 
-  const saldoCreditos = await saldoCreditosSomenteLeitura(clienteId, usuario);
+  const projecaoCreditos = await projecaoCreditosSomenteLeitura(clienteId, usuario);
+  const saldoCreditos = projecaoCreditos.disponivel;
   return res.json({
     ok: true,
     clienteId,
@@ -14569,6 +14580,7 @@ app.get("/automacao/status", async (req, res) => {
     erros: itensCliente.filter(o => o.status === "erro").length,
     enviadasHoje: enviadas.filter(ofertaEnviadaHoje).length,
     creditos: saldoCreditos,
+    creditosFinanceiros: projecaoCreditos,
     sessoesAtivas,
     destinosAtivos,
     ultimoEnvio: ultimaOfertaEnviada?.enviadoEm || ultimaOfertaEnviada?.dataEnvio || null,
@@ -16288,7 +16300,12 @@ app.post("/admin/usuarios/:id/creditos/topup", exigirAdminMasterEstrito, async (
         available: movimento.available
       },
       usuario: { ...sanitizarUsuarioAdmin(usuario),
-        creditos: movimento.balance }
+        creditos: movimento.available,
+        creditosFinanceiros: {
+          total: movimento.balance,
+          disponivel: movimento.available,
+          reservado: movimento.reserved
+        } }
     });
   } catch (error) {
     const codigo = String(error?.message || "universal_admin_credit_topup_failed");
@@ -28456,9 +28473,11 @@ app.get("/me", async (req, res) => {
   }
 
   let saldoCreditos = null;
+  let creditosFinanceiros = null;
   let creditosEstado = "disponivel";
   try {
-    saldoCreditos = await saldoCreditosSomenteLeitura(clienteId, usuario);
+    creditosFinanceiros = await projecaoCreditosSomenteLeitura(clienteId, usuario);
+    saldoCreditos = creditosFinanceiros.disponivel;
   } catch (erro) {
     creditosEstado = "indisponivel";
     registrarErroSaas({
@@ -28507,6 +28526,7 @@ app.get("/me", async (req, res) => {
       pagamentoUltimoStatus: usuario.pagamentoUltimoStatus || "",
       creditos: saldoCreditos,
       creditosEstado,
+      creditosFinanceiros,
       papel: usuario.papel,
       ativo: usuario.ativo,
       marketplacesLiberados: planoAtual.marketplaces || [],

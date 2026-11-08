@@ -21,7 +21,8 @@ total but can never satisfy a new reservation.
 
 - `cycle`: Pix/payment or courtesy cycle, with the plan's real window;
 - `admin_topup`: additive administrative credit, without automatic cycle
-  expiry, but never an entitlement by itself;
+  expiry; its audited grant is independently spendable and does not require
+  a current plan cycle;
 - `opening`: a classified opening grant;
 - `legacy_escrow`: indeterminate historical funding that backs old holds only;
 - `legacy_unclassified`: historical available credit awaiting an explicit
@@ -31,10 +32,10 @@ New reservations select only an active, non-expired source. Cycle sources have
 priority over non-expiring administrative sources. Every hold records the exact
 source. No new target can consume a legacy escrow source.
 
-An active cycle/opening window is an independent prerequisite for every new
-reservation. An administrative source can fund a reservation only while that
-entitlement exists; its balance alone never creates a right to send. Future
-cycle sources cannot be consumed before `cycle_start`.
+A reservation requires an active, non-expired source. A cycle/opening source
+must be inside its own window; an audited `admin_topup` source is independently
+eligible. Historical unclassified value never becomes eligible by this rule.
+Future cycle sources cannot be consumed before `cycle_start`.
 
 ## Cycle replacement
 
@@ -44,9 +45,9 @@ remainder of earlier cycle/opening sources, preserves their reserved escrow,
 preserves classified administrative top-ups and creates exactly one new source
 for the idempotent ledger row.
 
-A workspace without a current entitlement remains blocked even if an
-administrative source has available credit. Login and `/me` remain independent
-and read-only.
+A workspace without a current cycle remains blocked only when it also lacks an
+active administrative source. Login and `/me` remain independent and
+read-only.
 
 ## Late resolution
 
@@ -100,12 +101,12 @@ snapshot, accepts only `legacy_escrow` and `legacy_unclassified` projection
 rows, binds the old holds and switches to `ACTIVE_SEGREGATED` without changing
 aggregate balance, reservations or ledger history.
 
-The historical projection then remains fully backed and non-spendable. Only a
-later, valid `financial_credit_ledger` cycle movement (Pix/payment or courtesy)
-creates an active source and current entitlement. Cycle replacement expires
-only eligible earlier cycle/opening availability; it never consumes, releases
-or relabels segregated legacy value. A workspace has zero spendable new credit
-until that valid movement exists.
+The historical projection then remains fully backed and non-spendable. A later,
+valid `financial_credit_ledger` movement creates only its own eligible source:
+a Pix/payment or courtesy cycle, or an audited administrative top-up. Cycle
+replacement expires only eligible earlier cycle/opening availability; it never
+consumes, releases or relabels segregated legacy value. A workspace has zero
+spendable new credit until one such valid movement exists.
 
 This transition is not a provenance classification: it does not call the
 historical value administrative, expired or current, and it does not authorize
@@ -118,8 +119,8 @@ Its registration intent, aggregate opening, opening ledger row, opening source
 and `ACTIVE` workspace state are created atomically. A registration retry
 reuses the same ledger/source identity. It never enters SHADOW and requires no
 manual activation. A zero opening creates no entitlement; a later Pix,
-courtesy or other authorized financial movement must create the eligible source
-before sending is possible.
+courtesy, administrative top-up or other authorized financial movement must
+create the eligible source before sending is possible.
 
 This automatic path is restricted to a balance inserted by that same new-user
 transaction, with revision zero, no reservation and no hold. If a balance

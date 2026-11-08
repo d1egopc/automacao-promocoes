@@ -262,7 +262,12 @@ async function readBalance({ pool, workspaceId }) {
       b.operation_epoch_started_at,b.revision,sw.mode AS source_mode,
       COALESCE(src.active_available,0)::bigint AS source_available,
       COALESCE(src.has_current_entitlement,false) AS has_current_entitlement,
-      COALESCE(src.legacy_segregated,0)::bigint AS legacy_segregated
+      COALESCE(src.legacy_segregated,0)::bigint AS legacy_segregated,
+      COALESCE(src.cycle_granted,0)::bigint AS cycle_granted,
+      COALESCE(src.cycle_available,0)::bigint AS cycle_available,
+      COALESCE(src.cycle_reserved,0)::bigint AS cycle_reserved,
+      COALESCE(src.cycle_consumed,0)::bigint AS cycle_consumed,
+      COALESCE(src.admin_available,0)::bigint AS admin_available
     FROM engine_operation_state s
     JOIN engine_universal_credit_balances b
       ON b.operation_epoch_started_at=s.operation_epoch_started_at
@@ -282,7 +287,19 @@ async function readBalance({ pool, workspaceId }) {
           AS has_current_entitlement,
         COALESCE(SUM(available+reserved) FILTER
           (WHERE source_kind IN ('legacy_escrow','legacy_unclassified')),0)
-          AS legacy_segregated
+          AS legacy_segregated,
+        COALESCE(SUM(granted) FILTER (WHERE source_kind IN ('cycle','opening')
+          AND state IN ('active','escrow','closed')),0) AS cycle_granted,
+        COALESCE(SUM(available) FILTER (WHERE source_kind IN ('cycle','opening')
+          AND state='active' AND (cycle_start IS NULL OR cycle_start<=clock_timestamp())
+          AND (cycle_end IS NULL OR cycle_end>clock_timestamp())),0)
+          AS cycle_available,
+        COALESCE(SUM(reserved) FILTER (WHERE source_kind IN ('cycle','opening')
+          AND state IN ('active','escrow')),0) AS cycle_reserved,
+        COALESCE(SUM(consumed) FILTER (WHERE source_kind IN ('cycle','opening')
+          AND state IN ('active','escrow','closed')),0) AS cycle_consumed,
+        COALESCE(SUM(available) FILTER (WHERE source_kind='admin_topup'
+          AND state='active'),0) AS admin_available
       FROM engine_universal_credit_sources cs
       WHERE cs.operation_epoch_started_at=b.operation_epoch_started_at
         AND cs.workspace_id=b.workspace_id
@@ -296,11 +313,19 @@ async function readBalance({ pool, workspaceId }) {
   const row = result.rows[0];
   const aggregateAvailable = Number(row.balance) - Number(row.reserved);
   const sourceAuthority = sourceCredits.sourceAuthorityActive(row.source_mode);
-  const spendable = sourceAuthority && row.has_current_entitlement === true
-    ? Number(row.source_available) : (sourceAuthority ? 0 : aggregateAvailable);
+  // A fonte, e nao o plano, e a autoridade de gasto depois do cutover.
+  // Isso permite que um admin_topup valido financie envios mesmo quando nao
+  // existe um ciclo corrente, sem tornar legacy_unclassified gastavel.
+  const spendable = sourceAuthority
+    ? Number(row.source_available) : aggregateAvailable;
   return { balance: Number(row.balance), reserved: Number(row.reserved),
     available: spendable, spendable, aggregateAvailable,
     legacySegregated: Number(row.legacy_segregated),
+    cycleGranted: Number(row.cycle_granted),
+    cycleAvailable: Number(row.cycle_available),
+    cycleReserved: Number(row.cycle_reserved),
+    cycleConsumed: Number(row.cycle_consumed),
+    adminAvailable: Number(row.admin_available),
     sourceMode: row.source_mode || null,
     openingBalance: Number(row.opening_balance),
     operationEpochStartedAt: epochIso(row.operation_epoch_started_at),
