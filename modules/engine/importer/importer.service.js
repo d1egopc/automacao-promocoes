@@ -1041,9 +1041,19 @@ function normalizarOfertaImportada(resultado = {}, job = {}) {
   const tituloImportado = normalizarTexto(resultado.titulo || resultado.nome || "");
   const marketplaceTitulo = normalizarTexto(resultado.marketplace || job.marketplace || job.marketplace_detectado);
   const tituloSeguro = tituloComercialUniversalValido(tituloImportado, { marketplace: marketplaceTitulo }) ? tituloImportado : "";
+  const identidadeMl = resultado.metadata?.identidadeCanonicaMl || {};
+  const mlbProduto = normalizarTexto(identidadeMl.mlbProduto || "").toUpperCase();
+  const mlbResultado = normalizarTexto(resultado.produtoIdDetectado || resultado.produtoId || "").toUpperCase();
+  const tituloOficialConfirmado = marketplaceTitulo.toLowerCase() === "mercadolivre"
+    && identidadeMl.status === "consistente"
+    && identidadeMl.mlbForteConfirmado === true
+    && /^MLB\d+$/.test(mlbProduto)
+    && mlbProduto === mlbResultado
+    && !resultado.metadata?.fallbackMercadoLivreClonador
+    && !resultado.metadata?.fallbackMercadoLivreRadar;
   const tituloMetadata = normalizarTexto(produtoMetadata.titulo || produtoMetadata.nome || produtoMetadata.title || "");
   const tituloParaCategoria = tituloSeguro || (
-    tituloComercialUniversalValido(tituloMetadata, { marketplace: marketplaceTitulo }) ? tituloMetadata : ""
+    tituloOficialConfirmado && tituloComercialUniversalValido(tituloMetadata, { marketplace: marketplaceTitulo }) ? tituloMetadata : ""
   );
   const resultadoParaCategoria = tituloParaCategoria
     ? { ...resultado, titulo: tituloParaCategoria, nome: tituloParaCategoria }
@@ -1056,7 +1066,7 @@ function normalizarOfertaImportada(resultado = {}, job = {}) {
     linkOriginal: resultado.linkOriginal || "",
     linkExpandido: resultado.linkExpandido || resultado.urlFinal || ""
   }, resultado.metadata || {}, job);
-  const tituloFinal = tituloSeguro || tituloFactual.titulo;
+  const tituloFinal = tituloSeguro || (tituloOficialConfirmado ? tituloFactual.titulo : "");
   const origemFluxo = resolverOrigemFluxo(resultado, job);
 
   return {
@@ -3699,6 +3709,16 @@ function avaliarGateIdentidadeMercadoLivre(oferta = {}, metadata = {}) {
   const marketplace = normalizarMarketplaceMemoria(oferta.marketplace || metadata.marketplace || "");
   if (marketplace !== "mercadolivre") {
     return { retida: false, motivo: "" };
+  }
+
+  if (!tituloComercialUniversalValido(oferta.titulo || oferta.nome || "", { marketplace })) {
+    return {
+      retida: true,
+      status: "retida_v2",
+      motivo: "mercadolivre_titulo_tecnico_nao_confirmado",
+      reprocessavel: true,
+      sinais: []
+    };
   }
 
   const identidade = objetoSeguro(metadata.identidadeCanonicaMl || metadata.revalidacaoMeliLa);
