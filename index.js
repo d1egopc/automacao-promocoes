@@ -14570,7 +14570,7 @@ app.get("/automacao/status", async (req, res) => {
     .length;
 
   const projecaoCreditos = await projecaoCreditosSomenteLeitura(clienteId, usuario);
-  const saldoCreditos = projecaoCreditos.disponivel;
+  const saldoCreditos = projecaoCreditos.total;
   return res.json({
     ok: true,
     clienteId,
@@ -16300,7 +16300,7 @@ app.post("/admin/usuarios/:id/creditos/topup", exigirAdminMasterEstrito, async (
         available: movimento.available
       },
       usuario: { ...sanitizarUsuarioAdmin(usuario),
-        creditos: movimento.available,
+        creditos: movimento.balance,
         creditosFinanceiros: {
           total: movimento.balance,
           disponivel: movimento.available,
@@ -28477,7 +28477,7 @@ app.get("/me", async (req, res) => {
   let creditosEstado = "disponivel";
   try {
     creditosFinanceiros = await projecaoCreditosSomenteLeitura(clienteId, usuario);
-    saldoCreditos = creditosFinanceiros.disponivel;
+    saldoCreditos = creditosFinanceiros.total;
   } catch (erro) {
     creditosEstado = "indisponivel";
     registrarErroSaas({

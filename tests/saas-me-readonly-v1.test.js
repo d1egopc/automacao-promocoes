@@ -245,6 +245,9 @@ function assertNoSecret(text, secrets) {
     assert.strictEqual(me.body.usuario.id, "user_existente");
     assert.strictEqual(me.body.usuario.creditos, 432);
     assert.strictEqual(me.body.usuario.creditosEstado, "disponivel");
+    assert.strictEqual(me.body.usuario.creditosFinanceiros.total, 432);
+    assert.strictEqual(me.body.usuario.creditosFinanceiros.disponivel, 413);
+    assert.strictEqual(me.body.usuario.creditosFinanceiros.reservado, 19);
     const statusAntes = await snapshotFinanceiro("user_existente");
     const statuses = await Promise.all(Array.from({ length: 8 }, () => request({
       port, route: "/automacao/status", token: google.body.token
@@ -252,6 +255,9 @@ function assertNoSecret(text, secrets) {
     for (const status of statuses) {
       assert.strictEqual(status.status, 200, JSON.stringify(status.body));
       assert.strictEqual(status.body.creditos, 432);
+      assert.strictEqual(status.body.creditosFinanceiros.total, 432);
+      assert.strictEqual(status.body.creditosFinanceiros.disponivel, 413);
+      assert.strictEqual(status.body.creditosFinanceiros.reservado, 19);
     }
     assert.deepStrictEqual(await snapshotFinanceiro("user_existente"), statusAntes,
       "GET /automacao/status concorrente nao altera saldo, reservas ou revisao");
