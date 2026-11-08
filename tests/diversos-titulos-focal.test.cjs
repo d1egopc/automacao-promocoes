@@ -8,6 +8,8 @@ const {
 } = require("../modules/radar/comercial-precedencia");
 const { extrairEvidenciasRadarLocal } = require("../modules/radar/extrator-local");
 const { classificarCategoriaOferta } = require("../marketplaces/inteligencia/classificador-categorias");
+const { classificarCategoriaUniversal } = require("../modules/inteligencia-universal/categoria.service");
+const { destinoAceitaOferta } = require("../utils/destinos");
 const { importarProdutoMagaluEngine } = require("../modules/engine/importer/adapters/magalu.adapter");
 
 const TITULOS_PUBLICITARIOS = [
@@ -125,6 +127,53 @@ test("categoria usa o produto principal e ignora brinde de vestuário", () => {
     classificarCategoriaOferta({ titulo: "Boné Yamaha Aba Curva", marketplace: "mercadolivre", categoria: "Diversos" }),
     "Roupas e Moda Masculina"
   );
+});
+
+test("categorias Yamalube e placa de captura não herdam fallback contaminado", () => {
+  const casos = [
+    {
+      titulo: "Óleo Náutico Tcw3 2t Yamalube Kit 4l Grátis Boné Yamaha",
+      marketplace: "mercadolivre",
+      categoriaAnterior: "Roupas e Moda Masculina",
+      categoriaEsperada: "Diversos",
+      categoriaDestino: "Diversos"
+    },
+    {
+      titulo: "Placa de captura de vídeo 4K HDTVI para USB 3.0, dispositivo de captura HDMI 1080P a 60 FPS",
+      marketplace: "amazon",
+      categoriaAnterior: "Perfumaria, Farmácia e Beleza",
+      categoriaEsperada: "Periféricos",
+      categoriaDestino: "Periféricos"
+    }
+  ];
+
+  for (const caso of casos) {
+    const oferta = {
+      titulo: caso.titulo,
+      marketplace: caso.marketplace,
+      categoria: caso.categoriaAnterior,
+      precoAtual: 99.9,
+      cupom: "FIXTURE",
+      linkAfiliado: "https://example.test/oferta"
+    };
+    const categoriaClassificada = classificarCategoriaOferta(oferta, caso.titulo);
+    const universal = classificarCategoriaUniversal(oferta, { termo: caso.titulo });
+    const persistida = { ...oferta, categoria: categoriaClassificada };
+    const destino = {
+      ativo: true,
+      marketplaces: [caso.marketplace],
+      categorias: [caso.categoriaDestino],
+      origemOfertas: "ambos"
+    };
+
+    assert.equal(categoriaClassificada, caso.categoriaEsperada, `${caso.marketplace}: classificação`);
+    assert.equal(universal.categoria, caso.categoriaEsperada, `${caso.marketplace}: categoria exibida/universal`);
+    assert.equal(persistida.categoria, caso.categoriaEsperada, `${caso.marketplace}: categoria persistida`);
+    assert.equal(destinoAceitaOferta(destino, persistida), true, `${caso.marketplace}: categoria usada no roteamento`);
+    assert.equal(oferta.precoAtual, 99.9, `${caso.marketplace}: preço comercial preservado`);
+    assert.equal(oferta.cupom, "FIXTURE", `${caso.marketplace}: cupom preservado`);
+    assert.equal(oferta.linkAfiliado, "https://example.test/oferta", `${caso.marketplace}: link preservado`);
+  }
 });
 
 console.log("diversos-titulos-focal.test.cjs OK");

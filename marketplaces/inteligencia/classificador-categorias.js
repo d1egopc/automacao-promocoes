@@ -153,7 +153,7 @@ const REGRAS = [
       "colonia", "body splash", "malbec", "lattafa", "yara", "azzaro",
       "rayhaan", "maison alhambra", "armaf", "nautica classic men red",
       "boticario", "natura", "eudora", "hidratante", "skincare",
-      "protetor solar", "fps", "shampoo", "condicionador", "maquiagem",
+      "protetor solar", "shampoo", "condicionador", "maquiagem",
       "mascara capilar", "hidratante labial", "skincare",
       "batom", "gloss", "serum", "sabonete liquido", "creme facial",
       "vitamina c", "maquina de cortar cabelo", "barbeador",
@@ -754,6 +754,20 @@ function desempatar(a, b) {
 
 function categoriaPorNaturezaExplicita(oferta = {}, termo = "") {
   const titulo = normalizarTextoLocal(oferta.titulo || oferta.nome || termo || "");
+  if (/\b(?:placa|dispositivo) de captura\b/.test(titulo) &&
+      /\b(?:video|hdtvi|hdmi|usb|fps)\b/.test(titulo) &&
+      !/\b(?:placa de video|placa grafica)\b/.test(titulo)) {
+    return CATEGORIA.perifericos;
+  }
+  // A taxonomia vigente não possui categoria Náutica/Lubrificantes. Ainda
+  // assim, um óleo náutico é evidência suficiente para impedir que a
+  // categoria declarada de um brinde/acessório seja herdada; o fallback
+  // correto é Diversos, sem inventar uma categoria nova.
+  if (/\b(?:oleo|lubrificante)\b/.test(titulo) &&
+      /\b(?:nautico|tcw3)\b/.test(titulo) &&
+      !/\b(?:capilar|cabelo|cosmetico|automotivo|motor de carro|motocicleta)\b/.test(titulo)) {
+    return CATEGORIA.diversos;
+  }
   return /^brinquedos? (?:bancada|oficina)\b/.test(titulo) ? CATEGORIA.brinquedos : "";
 }
 
@@ -862,6 +876,10 @@ function avaliarEvidenciaCategoria(oferta = {}, termo = "") {
         [CATEGORIA.bebes, CATEGORIA.infantil, CATEGORIA.brinquedos].includes(oficial?.categoria || declarada)))) {
     categoria = CATEGORIA.diversos;
     motivo = "conteudo_adulto_sem_categoria_habilitada";
+  } else if ((categoria = categoriaPorNaturezaExplicita(oferta, termo))) {
+    motivo = categoria === CATEGORIA.diversos
+      ? "natureza_nautica_sem_taxonomia"
+      : "dispositivo_captura_informatica";
   } else if (/\bbrinquedos?\b/.test(titulo) && /\b(?:pesca|molinetes?|bancada|oficina|ferramentas?|lavadora|inversora|solda|alicate|parafusadeira|furadeira)\b/.test(titulo)) {
     categoria = CATEGORIA.brinquedos;
   } else if (/\b(?:churrasqueira de brinquedo|brinquedo churrasqueira)\b/.test(titulo)) {
