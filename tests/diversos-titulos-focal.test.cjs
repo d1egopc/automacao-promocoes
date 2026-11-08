@@ -108,4 +108,23 @@ test("amostras dos cinco marketplaces mantêm categoria factual sem ampliar Dive
   }
 });
 
+test("categoria usa o produto principal e ignora brinde de vestuário", () => {
+  const casos = [
+    "Óleo Náutico Tcw3 2t Yamalube Kit 4l Grátis Boné Yamaha",
+    "Óleo Náutico 2T Yamalube 1L + brinde: Boné Yamaha",
+    "Lubrificante náutico para motor 2T (brinde boné)"
+  ];
+  for (const titulo of casos) {
+    assert.equal(
+      classificarCategoriaOferta({ titulo, marketplace: "mercadolivre", categoria: "Diversos" }, titulo),
+      "Diversos",
+      titulo
+    );
+  }
+  assert.equal(
+    classificarCategoriaOferta({ titulo: "Boné Yamaha Aba Curva", marketplace: "mercadolivre", categoria: "Diversos" }),
+    "Roupas e Moda Masculina"
+  );
+});
+
 console.log("diversos-titulos-focal.test.cjs OK");

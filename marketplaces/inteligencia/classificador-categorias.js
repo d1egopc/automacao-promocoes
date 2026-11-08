@@ -48,11 +48,39 @@ function normalizarTextoLocal(texto = "") {
     .trim();
 }
 
+// Brindes e acessórios promocionais não são a natureza do produto principal.
+// O corte é deliberadamente conservador: só remove um trecho quando há um
+// marcador explícito de brinde junto de um acessório conhecido, preservando
+// títulos legítimos como "kit grátis de ferramentas".
+const TERMOS_BRINDE_CLASSIFICACAO = Object.freeze([
+  "bone", "camiseta", "camisa", "caneca", "chaveiro", "sacola",
+  "bolsa", "meia", "oculos", "viseira"
+]);
+
+function textoPrincipalSemBrinde(valor = "") {
+  const normalizado = normalizarTextoLocal(valor);
+  if (!normalizado) return "";
+
+  const parenteses = /\((?:brinde|gratis|ganhe|acompanha)\b[^)]*\)/g;
+  const semParenteses = normalizado.replace(parenteses, " ").replace(/\s+/g, " ").trim();
+
+  const termoBrinde = TERMOS_BRINDE_CLASSIFICACAO.join("|");
+  const corteMais = semParenteses.search(new RegExp(`\\s\\+\\s+(?:brinde\\s*:?\\s*)?(?:um|uma)?\\s*(?:${termoBrinde})\\b`));
+  if (corteMais > 0) return semParenteses.slice(0, corteMais).trim();
+
+  const marcador = /\b(?:gratis|brinde|ganhe|acompanha)\b/.exec(semParenteses);
+  if (!marcador || marcador.index <= 0) return semParenteses;
+  const sufixo = semParenteses.slice(marcador.index + marcador[0].length);
+  const temAcessorio = new RegExp(`\\b(?:${termoBrinde})\\b`).test(sufixo);
+  if (temAcessorio) return semParenteses.slice(0, marcador.index).trim();
+  return semParenteses;
+}
+
 function textoOferta(oferta = {}, termo = "") {
   return normalizarTextoLocal([
-    termo,
-    oferta.titulo,
-    oferta.nome,
+    textoPrincipalSemBrinde(termo),
+    textoPrincipalSemBrinde(oferta.titulo),
+    textoPrincipalSemBrinde(oferta.nome),
     oferta.descricao,
     oferta.categoria,
     oferta.categoriaProduto,
