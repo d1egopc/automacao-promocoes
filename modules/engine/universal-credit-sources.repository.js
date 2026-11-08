@@ -40,6 +40,20 @@ async function transaction(pool, action) {
   } finally { client.release(); }
 }
 
+async function serializableTransaction(pool, action, maxAttempts = 10) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      return await transaction(pool, async client => {
+        await client.query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
+        return action(client);
+      });
+    } catch (error) {
+      if (error?.code !== "40001" || attempt === maxAttempts - 1) throw error;
+    }
+  }
+  throw new Error("universal_serialization_retry_exhausted");
+}
+
 async function workspaceModeTx(client, { epoch, workspaceId, lock = false }) {
   const result = await client.query(`SELECT mode,baseline_hash,
       baseline_balance,baseline_reserved,revision
@@ -727,8 +741,7 @@ async function activateWorkspaceSegregatedWithInitialGrant({ pool, workspaceId,
   if (!workspace || !/^[0-9a-f]{64}$/.test(hash)) {
     throw new Error("universal_credit_source_activation_identity_invalid");
   }
-  return transaction(pool, async client => {
-    await client.query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
+  return serializableTransaction(pool, async client => {
     await client.query("SELECT pg_advisory_xact_lock(hashtext($1))",
       [`courtesy:${workspace}`]);
     const operation = (await client.query(`SELECT operation_epoch_started_at
