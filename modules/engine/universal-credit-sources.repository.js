@@ -595,6 +595,159 @@ async function activateWorkspaceSegregated({ pool, workspaceId, baselineHash }) 
   });
 }
 
+function validateInitialMigrationGrant(grant = {}) {
+  const planId = text(grant.planId);
+  const creditModel = text(grant.creditModel);
+  const renewalPolicy = text(grant.renewalPolicy);
+  const value = amount(grant.amount);
+  const start = new Date(grant.cycleStart);
+  const end = new Date(grant.cycleEnd);
+  const cycleDays = Number(grant.cycleDays);
+  if (!planId || !["ciclo", "unicos"].includes(creditModel) || value <= 0 ||
+      !Number.isSafeInteger(cycleDays) || cycleDays <= 0 ||
+      !["pagamento", "sem_renovacao"].includes(renewalPolicy) ||
+      !Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) ||
+      end <= start) {
+    throw new Error("universal_migration_initial_grant_invalid");
+  }
+  return { planId, creditModel, renewalPolicy, amount: value, cycleDays,
+    cycleStart: start.toISOString(), cycleEnd: end.toISOString() };
+}
+
+// Performs the authority cutover and its one-time plan grant in one database
+// transaction. Historical balance stays segregated; only this ledger-backed
+// cycle can fund new reservations.
+async function activateWorkspaceSegregatedWithInitialGrant({ pool, workspaceId,
+  baselineHash, grant }) {
+  const workspace = text(workspaceId);
+  const hash = text(baselineHash);
+  const initial = validateInitialMigrationGrant(grant);
+  if (!workspace || !/^[0-9a-f]{64}$/.test(hash)) {
+    throw new Error("universal_credit_source_activation_identity_invalid");
+  }
+  return transaction(pool, async client => {
+    await client.query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))",
+      [`courtesy:${workspace}`]);
+    const operation = (await client.query(`SELECT operation_epoch_started_at
+      FROM engine_operation_state WHERE id=1 AND mode='UNIVERSAL' FOR SHARE`)).rows[0];
+    if (!operation) throw new Error("universal_credit_source_mode_required");
+    const epoch = new Date(operation.operation_epoch_started_at).toISOString();
+    const key = movementKey("MIGRATION_INITIAL_CYCLE", epoch, workspace,
+      `${initial.planId}:${initial.cycleStart}`);
+    const state = await workspaceModeTx(client, { epoch,
+      workspaceId: workspace, lock: true });
+
+    if (state?.mode === "ACTIVE_SEGREGATED") {
+      const existing = (await client.query(`SELECT id,amount,cycle_start,cycle_end,
+          projection_status,universal_credit_source_id,idempotency_key,
+          metadata->'planSnapshot'->>'planoId' AS plan_id,
+          metadata->'planSnapshot'->>'creditosModelo' AS credit_model,
+          metadata->'planSnapshot'->>'cicloDias' AS cycle_days,
+          metadata->'planSnapshot'->>'renovacaoCreditos' AS renewal_policy
+        FROM financial_credit_ledger
+        WHERE cliente_id=$1 AND operation_epoch_started_at=$2
+          AND metadata->>'origin'='universal_migration_initial'
+        ORDER BY created_at,id LIMIT 1 FOR UPDATE`, [workspace, epoch])).rows[0];
+      if (!existing || Number(existing.amount) !== initial.amount ||
+          text(existing.plan_id) !== initial.planId ||
+          text(existing.credit_model) !== initial.creditModel ||
+          Number(existing.cycle_days) !== initial.cycleDays ||
+          text(existing.renewal_policy) !== initial.renewalPolicy ||
+          existing.projection_status !== "projected" ||
+          !existing.universal_credit_source_id) {
+        throw new Error("universal_migration_initial_grant_missing");
+      }
+      return { ok: true, duplicate: true, mode: state.mode,
+        ledgerId: existing.id, sourceId: existing.universal_credit_source_id,
+        spendable: initial.amount, idempotencyKey: existing.idempotency_key,
+        cycleStart: new Date(existing.cycle_start).toISOString(),
+        cycleEnd: new Date(existing.cycle_end).toISOString() };
+    }
+    if (!state || state.mode !== "SHADOW" || state.baseline_hash !== hash) {
+      throw new Error("universal_credit_source_baseline_conflict");
+    }
+
+    const conflictingCycle = (await client.query(`SELECT id FROM financial_credit_ledger
+      WHERE cliente_id=$1 AND ledger_type='cycle_credit'
+        AND projection_status IN ('pending','projected')
+        AND idempotency_key<>$2
+        AND cycle_start IS NOT NULL AND cycle_end IS NOT NULL
+        AND cycle_start<$4 AND cycle_end>$3
+      LIMIT 1 FOR UPDATE`, [workspace, key, initial.cycleStart,
+      initial.cycleEnd])).rows[0];
+    if (conflictingCycle) {
+      throw new Error("universal_migration_current_cycle_conflict");
+    }
+
+    const comparison = await shadowComparisonTx(client, { epoch,
+      workspaceId: workspace, state, lock: true });
+    if (!comparison.ok || comparison.projectedBalance !== comparison.snapshot.balance ||
+        comparison.projectedReserved !== comparison.snapshot.reserved) {
+      throw new Error(`universal_credit_source_transition_blocked:${[
+        ...comparison.divergences,
+        ...(comparison.projectedBalance !== comparison.snapshot.balance ?
+          ["legacy_balance_changed"] : []),
+        ...(comparison.projectedReserved !== comparison.snapshot.reserved ?
+          ["legacy_reserved_changed"] : [])
+      ].join(",")}`);
+    }
+    const nonLegacy = (await client.query(`SELECT COUNT(*)::int AS n
+      FROM engine_universal_credit_sources
+      WHERE operation_epoch_started_at=$1 AND workspace_id=$2
+        AND source_kind NOT IN ('legacy_escrow','legacy_unclassified')`,
+    [epoch, workspace])).rows[0];
+    if (Number(nonLegacy.n) !== 0) {
+      throw new Error("universal_credit_source_transition_nonlegacy_source");
+    }
+    const mapped = await client.query(`UPDATE engine_universal_credit_holds h
+      SET source_id=m.source_id,updated_at=clock_timestamp()
+      FROM engine_universal_credit_shadow_hold_sources m
+      WHERE h.operation_epoch_started_at=$1 AND h.workspace_id=$2
+        AND h.state='held' AND h.source_id IS NULL
+        AND m.operation_epoch_started_at=h.operation_epoch_started_at
+        AND m.workspace_id=h.workspace_id AND m.target_id=h.target_id`,
+    [epoch, workspace]);
+    if (mapped.rowCount !== comparison.snapshot.holds.length) {
+      throw new Error("universal_credit_source_hold_cutover_conflict");
+    }
+    const activated = await client.query(`UPDATE engine_universal_credit_source_workspaces
+      SET mode='ACTIVE_SEGREGATED',activated_at=clock_timestamp(),
+          revision=revision+1,updated_at=clock_timestamp()
+      WHERE operation_epoch_started_at=$1 AND workspace_id=$2 AND mode='SHADOW'`,
+    [epoch, workspace]);
+    if (activated.rowCount !== 1) {
+      throw new Error("universal_credit_source_transition_mode_conflict");
+    }
+    const ledger = (await client.query(`INSERT INTO financial_credit_ledger
+      (cliente_id,ledger_type,amount,balance_policy,cycle_start,cycle_end,
+       reason,idempotency_key,projection_status,metadata)
+      VALUES ($1,'cycle_credit',$2,'replace_cycle',$3,$4,
+        'universal_migration_initial_cycle',$5,'pending',$6::jsonb)
+      ON CONFLICT (idempotency_key) DO NOTHING RETURNING *`,
+    [workspace, initial.amount, initial.cycleStart, initial.cycleEnd, key,
+      JSON.stringify({ authority: "postgresql_universal",
+        origin: "universal_migration_initial", planSnapshot: {
+          planoId: initial.planId, creditosModelo: initial.creditModel,
+          creditosPorCiclo: initial.amount, cicloDias: initial.cycleDays,
+          renovacaoCreditos: initial.renewalPolicy } })])).rows[0];
+    if (!ledger) throw new Error("universal_migration_initial_grant_conflict");
+    const applied = await applyLedgerTx(client, { epoch, movement: ledger });
+    if (!applied.handled || !applied.applied || !applied.sourceId) {
+      throw new Error("universal_migration_initial_grant_projection_failed");
+    }
+    await client.query(`UPDATE financial_credit_ledger
+      SET projection_status='projected',projected_at=clock_timestamp()
+      WHERE id=$1`, [ledger.id]);
+    return { ok: true, duplicate: false, mode: "ACTIVE_SEGREGATED",
+      ledgerId: ledger.id, sourceId: applied.sourceId,
+      spendable: initial.amount, historicalBalance: comparison.snapshot.balance,
+      historicalReserved: comparison.snapshot.reserved,
+      idempotencyKey: key, cycleStart: initial.cycleStart,
+      cycleEnd: initial.cycleEnd };
+  });
+}
+
 async function rollbackSegregatedWorkspace({ pool, workspaceId, baselineHash }) {
   const workspace = text(workspaceId);
   const hash = text(baselineHash);
@@ -1010,7 +1163,8 @@ module.exports = { workspaceModeTx, sourceAuthorityActive,
   activateNewWorkspaceTx, totalsTx, legacySnapshotTx,
   ledgerProvenanceTx, inspectShadowWorkspace, shadowComparisonTx,
   prepareShadowWorkspace, classifyLegacyAvailable, activateWorkspaceSources,
-  activateWorkspaceSegregated, rollbackShadowWorkspace,
+  activateWorkspaceSegregated, activateWorkspaceSegregatedWithInitialGrant,
+  rollbackShadowWorkspace,
   rollbackSegregatedWorkspace,
   recomputeAggregateTx, applyLedgerTx, addAdminTopupTx, holdForTargetTx,
   settleConfirmedTx, releaseForTargetTx };

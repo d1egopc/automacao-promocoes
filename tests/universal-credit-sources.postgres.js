@@ -12,10 +12,13 @@ const { SQL_SCHEMA_FINANCEIRO_V1 } =
 const financialService = require("../modules/financeiro/financeiro.service");
 const { criarRepositorioFinanceiroPostgres } =
   require("../modules/financeiro/financeiro.repository");
+const { registrarCicloCortesia } =
+  require("../modules/financeiro/cortesia.service");
 const { prepararModoOperacionalReal } =
   require("../modules/engine/universal-runtime-bootstrap");
 const credits = require("../modules/engine/universal-credits.repository");
 const sources = require("../modules/engine/universal-credit-sources.repository");
+const migration = require("../modules/financeiro/universal-migration.service");
 const queue = require("../modules/engine/universal-queue.repository");
 const manualCredits = require("../modules/manual-v2/manual-universal-credit");
 const express = require("express");
@@ -187,7 +190,9 @@ async function main() {
       ["ws-race-courtesy", 0], ["ws-race-prepare", 0],
       ["ws-race-concurrent", 0], ["ws-segregated", 15427],
       ["ws-segregated-rollback", 9], ["ws-segregated-diverged", 10],
-      ["ws-segregated-new", 0], ["ws-v2-transition", 100]]) {
+      ["ws-segregated-new", 0], ["ws-v2-transition", 100],
+      ["ws-migration-initial", 25], ["ws-migration-recurring", 0],
+      ["ws-migration-cycle-conflict", 0]]) {
       await credits.openBalance({ pool, workspaceId: workspace,
         operationEpochStartedAt: epoch, openingBalance: opening, sourceHash });
     }
@@ -675,6 +680,89 @@ async function main() {
     await credits.applyFinancialLedger({ pool, ledgerId: newCourtesy });
     assert.equal((await credits.readBalance({ pool,
       workspaceId: "ws-segregated-new" })).spendable, 100);
+
+    // Migration cutover and its plan-derived initial grant are atomic and
+    // idempotent. Historical value stays segregated and non-spendable.
+    const initialShadow = (await prepareShadow(pool,
+      "ws-migration-initial")).shadow;
+    const initialArgs = {
+      pool,
+      usuario: { id: "ws-migration-initial", plano: "free-beta",
+        cortesiaAutomatica: true },
+      plano: { id: "free-beta", entradaBeta: true,
+        creditosModelo: "ciclo", creditosPorCiclo: 300,
+        cicloDias: 300, renovacaoCreditos: "sem_renovacao" },
+      baselineHash: initialShadow.baselineHash,
+      agora: "2026-11-08T00:00:00.000Z"
+    };
+    const migrationRace = await Promise.all(Array.from({ length: 8 }, () =>
+      migration.migrateLegacyWorkspaceWithInitialGrant(initialArgs)));
+    assert.equal(migrationRace.filter(item => !item.duplicate).length, 1);
+    assert.equal(migrationRace.filter(item => item.duplicate).length, 7);
+    const initialBalance = await credits.readBalance({ pool,
+      workspaceId: "ws-migration-initial" });
+    assert.deepEqual({ balance: initialBalance.balance,
+      spendable: initialBalance.spendable,
+      legacy: initialBalance.legacySegregated,
+      mode: initialBalance.sourceMode },
+    { balance: 325, spendable: 300, legacy: 25,
+      mode: "ACTIVE_SEGREGATED" });
+    const initialRows = (await admin.query(`SELECT
+        COUNT(*)::int AS ledger_count,
+        COUNT(DISTINCT universal_credit_source_id)::int AS source_count,
+        MIN(EXTRACT(EPOCH FROM cycle_end-cycle_start)/86400)::int AS duration_days
+      FROM financial_credit_ledger
+      WHERE cliente_id='ws-migration-initial'
+        AND metadata->>'origin'='universal_migration_initial'`)).rows[0];
+    assert.equal(initialRows.ledger_count, 1);
+    assert.equal(initialRows.source_count, 1);
+    assert.equal(initialRows.duration_days, 300);
+
+    const recurringShadow = (await prepareShadow(pool,
+      "ws-migration-recurring")).shadow;
+    await migration.migrateLegacyWorkspaceWithInitialGrant({ pool,
+      usuario: { id: "ws-migration-recurring", plano: "partners",
+        cortesiaAutomatica: true },
+      plano: { id: "partners", creditosModelo: "ciclo",
+        creditosPorCiclo: 6000, cicloDias: 30,
+        renovacaoCreditos: "pagamento" },
+      baselineHash: recurringShadow.baselineHash,
+      agora: "2026-11-08T00:00:00.000Z" });
+    const courtesyWithinInitialCycle = await registrarCicloCortesia({
+      repositorio: criarRepositorioFinanceiroPostgres({ pool }),
+      usuario: { id: "ws-migration-recurring", plano: "partners",
+        cortesiaAutomatica: true },
+      plano: { id: "partners", creditosModelo: "ciclo",
+        creditosPorCiclo: 6000, cicloDias: 30,
+        renovacaoCreditos: "pagamento" },
+      agora: "2026-11-09T00:00:00.000Z"
+    });
+    assert.equal(courtesyWithinInitialCycle.created, false);
+    assert.equal(courtesyWithinInitialCycle.reason, "courtesy_cycle_current");
+    assert.equal(Number((await admin.query(`SELECT COUNT(*)::int AS n
+      FROM financial_credit_ledger
+      WHERE cliente_id='ws-migration-recurring'
+        AND ledger_type='cycle_credit'`)).rows[0].n), 1);
+
+    // A paid/courtesy cycle already covering the opening window blocks the
+    // initial grant instead of replacing or duplicating that entitlement.
+    const conflictShadow = (await prepareShadow(pool,
+      "ws-migration-cycle-conflict")).shadow;
+    await insertCycle(admin, { workspace: "ws-migration-cycle-conflict",
+      value: 4000, origin: "financial_event_v1", suffix: "paid-before-cutover",
+      durationDays: 30 });
+    await assert.rejects(
+      migration.migrateLegacyWorkspaceWithInitialGrant({ pool,
+        usuario: { id: "ws-migration-cycle-conflict", plano: "ultimate" },
+        plano: { id: "ultimate", creditosModelo: "ciclo",
+          creditosPorCiclo: 4000, cicloDias: 30,
+          renovacaoCreditos: "pagamento" },
+        baselineHash: conflictShadow.baselineHash,
+        agora: new Date(now).toISOString() }),
+      /current_cycle_conflict/);
+    assert.equal((await sources.inspectShadowWorkspace({ pool,
+      workspaceId: "ws-migration-cycle-conflict" })).mode, "SHADOW");
+
     const directConfirmed = await manualCredits.reservarCreditoManualUniversal({
       pool, workspaceId: "ws-segregated-new", operationId: "manual-ack",
       destinationId: "destination-one" });

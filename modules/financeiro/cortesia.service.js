@@ -36,6 +36,7 @@ function calcularJanelaCortesia({ usuario = {}, plano = {}, ultimoCiclo = null,
   agora = new Date(), forcarNovoPlano = false } = {}) {
   const politica = politicaCreditosPlano(plano);
   if (plano.entradaBeta === true || politica.creditosModelo !== "ciclo" ||
+      politica.renovacaoCreditos === "sem_renovacao" ||
       politica.creditosPorCiclo <= 0) {
     return { ok: false, reason: "courtesy_plan_not_cyclic" };
   }
