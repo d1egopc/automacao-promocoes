@@ -3711,6 +3711,31 @@ function avaliarGateIdentidadeMercadoLivre(oferta = {}, metadata = {}) {
     return { retida: false, motivo: "" };
   }
 
+  const identidade = objetoSeguro(metadata.identidadeCanonicaMl || metadata.revalidacaoMeliLa);
+  const motivoIdentidade = identidade.motivo === "mercadolivre_identidade_nao_confirmada"
+    ? "mercadolivre_identidade_nao_confirmada"
+    : "mercadolivre_identidade_inconsistente";
+  if (
+    identidade.status === "inconsistente" ||
+    identidade.status === "nao_confirmada" ||
+    identidade.motivo === "mercadolivre_identidade_inconsistente" ||
+    identidade.motivo === "mercadolivre_identidade_nao_confirmada"
+  ) {
+    return {
+      retida: true,
+      status: "retida_v2",
+      motivo: motivoIdentidade,
+      reprocessavel: true,
+      sinais: Array.isArray(identidade.sinais) ? identidade.sinais : [],
+      mlbExpandidaPrevia: identidade.mlbExpandidaPrevia || "",
+      mlbRevalidado: identidade.mlbRevalidado || "",
+      mlbProduto: identidade.mlbProduto || "",
+      precoRadar: identidade.precoRadar ?? null,
+      precoImportador: identidade.precoImportador ?? null,
+      tituloSimilaridade: identidade.tituloSimilaridade ?? null
+    };
+  }
+
   if (!tituloComercialUniversalValido(oferta.titulo || oferta.nome || "", { marketplace })) {
     return {
       retida: true,
@@ -3721,32 +3746,7 @@ function avaliarGateIdentidadeMercadoLivre(oferta = {}, metadata = {}) {
     };
   }
 
-  const identidade = objetoSeguro(metadata.identidadeCanonicaMl || metadata.revalidacaoMeliLa);
-  const motivoIdentidade = identidade.motivo === "mercadolivre_identidade_nao_confirmada"
-    ? "mercadolivre_identidade_nao_confirmada"
-    : "mercadolivre_identidade_inconsistente";
-  if (
-    identidade.status !== "inconsistente" &&
-    identidade.status !== "nao_confirmada" &&
-    identidade.motivo !== "mercadolivre_identidade_inconsistente" &&
-    identidade.motivo !== "mercadolivre_identidade_nao_confirmada"
-  ) {
-    return { retida: false, motivo: "" };
-  }
-
-  return {
-    retida: true,
-    status: "retida_v2",
-    motivo: motivoIdentidade,
-    reprocessavel: true,
-    sinais: Array.isArray(identidade.sinais) ? identidade.sinais : [],
-    mlbExpandidaPrevia: identidade.mlbExpandidaPrevia || "",
-    mlbRevalidado: identidade.mlbRevalidado || "",
-    mlbProduto: identidade.mlbProduto || "",
-    precoRadar: identidade.precoRadar ?? null,
-    precoImportador: identidade.precoImportador ?? null,
-    tituloSimilaridade: identidade.tituloSimilaridade ?? null
-  };
+  return { retida: false, motivo: "" };
 }
 
 function mapearOfertaMemoria(row = {}) {
