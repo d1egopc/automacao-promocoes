@@ -40,6 +40,20 @@ async function transaction(pool, action) {
   } finally { client.release(); }
 }
 
+async function serializableTransaction(pool, action, maxAttempts = 10) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      return await transaction(pool, async client => {
+        await client.query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
+        return action(client);
+      });
+    } catch (error) {
+      if (error?.code !== "40001" || attempt === maxAttempts - 1) throw error;
+    }
+  }
+  throw new Error("universal_serialization_retry_exhausted");
+}
+
 async function workspaceModeTx(client, { epoch, workspaceId, lock = false }) {
   const result = await client.query(`SELECT mode,baseline_hash,
       baseline_balance,baseline_reserved,revision
@@ -614,19 +628,117 @@ function validateInitialMigrationGrant(grant = {}) {
     cycleStart: start.toISOString(), cycleEnd: end.toISOString() };
 }
 
+function validateProvenAdminTopupRemainder(evidence = null) {
+  if (evidence == null) return null;
+  const ledgerId = text(evidence.ledgerId);
+  const expectedRemaining = Number(evidence.expectedRemaining);
+  const expectedRevision = Number(evidence.expectedRevision);
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(ledgerId) ||
+      !Number.isSafeInteger(expectedRemaining) || expectedRemaining < 0 ||
+      !Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
+    throw new Error("universal_migration_topup_remainder_evidence_invalid");
+  }
+  return { ledgerId, expectedRemaining, expectedRevision };
+}
+
+async function preserveProvenAdminTopupRemainderTx(client, { epoch, workspaceId,
+  snapshot, baselineHash, evidence }) {
+  if (!evidence) return { remaining: 0, sourceId: null };
+  const movements = (await client.query(`SELECT id,amount,balance_policy,
+      universal_balance_revision AS revision,universal_balance_after AS balance_after,
+      ledger_type,projection_status,universal_credit_source_id,
+      metadata->>'origin' AS origin
+    FROM financial_credit_ledger
+    WHERE operation_epoch_started_at=$1 AND cliente_id=$2
+      AND universal_movement_type IS NOT NULL
+    ORDER BY universal_balance_revision,id
+    LIMIT 10001 FOR UPDATE`, [epoch, workspaceId])).rows;
+  if (!movements.length) throw new Error("universal_migration_topup_chain_missing");
+  if (movements.length > 10000) {
+    throw new Error("universal_migration_topup_chain_limit_exceeded");
+  }
+  let previous = null;
+  let topup = null;
+  let laterDebits = 0;
+  let laterPositive = 0;
+  const revisions = new Set();
+  for (const movement of movements) {
+    const revision = Number(movement.revision);
+    const value = Number(movement.amount);
+    const after = Number(movement.balance_after);
+    if (!Number.isSafeInteger(revision) || revisions.has(revision) ||
+        !Number.isSafeInteger(value) || !Number.isSafeInteger(after)) {
+      throw new Error("universal_migration_topup_chain_invalid");
+    }
+    revisions.add(revision);
+    const expectedAfter = movement.balance_policy === "set" ? value :
+      (previous === null ? NaN : previous + value);
+    if (after !== expectedAfter) {
+      throw new Error("universal_migration_topup_chain_incomplete");
+    }
+    if (String(movement.id) === evidence.ledgerId) topup = movement;
+    else if (topup && revision > Number(topup.revision)) {
+      if (value < 0) laterDebits += -value;
+      else if (value > 0) laterPositive += value;
+    }
+    previous = after;
+  }
+  if (previous !== snapshot.balance) {
+    throw new Error("universal_migration_topup_chain_stale");
+  }
+  if (!topup || topup.ledger_type !== "admin_credit" ||
+      topup.balance_policy !== "add" || topup.origin !== "admin_credit_topup" ||
+      topup.projection_status !== "projected" || topup.universal_credit_source_id ||
+      Number(topup.revision) !== evidence.expectedRevision || Number(topup.amount) <= 0 ||
+      laterPositive !== 0) {
+    throw new Error("universal_migration_topup_provenance_unproven");
+  }
+  const remaining = Math.max(0, Number(topup.amount) - laterDebits - snapshot.reserved);
+  if (remaining !== evidence.expectedRemaining) {
+    throw new Error("universal_migration_topup_remainder_changed");
+  }
+  if (remaining === 0) return { remaining: 0, sourceId: null };
+  const legacy = (await client.query(`SELECT id,granted,available,reserved
+    FROM engine_universal_credit_sources
+    WHERE operation_epoch_started_at=$1 AND workspace_id=$2
+      AND source_kind='legacy_unclassified' AND state='unclassified'
+    ORDER BY id FOR UPDATE`, [epoch, workspaceId])).rows;
+  if (legacy.length !== 1 || Number(legacy[0].reserved) !== 0 ||
+      Number(legacy[0].available) < remaining || Number(legacy[0].granted) < remaining) {
+    throw new Error("universal_migration_topup_remainder_unbacked");
+  }
+  await client.query(`UPDATE engine_universal_credit_sources
+    SET granted=granted-$2,available=available-$2,revision=revision+1,
+        updated_at=clock_timestamp() WHERE id=$1`, [legacy[0].id, remaining]);
+  const source = (await client.query(`INSERT INTO engine_universal_credit_sources
+    (operation_epoch_started_at,workspace_id,source_key,ledger_id,source_kind,state,
+     granted,available,reserved,consumed,expired,metadata)
+    VALUES ($1,$2,$3,$4,'admin_topup','active',$5,$5,0,0,0,$6::jsonb)
+    ON CONFLICT (operation_epoch_started_at,workspace_id,source_key) DO NOTHING
+    RETURNING id`, [epoch, workspaceId,
+      `legacy-admin-topup-remnant:${evidence.ledgerId}:${baselineHash}`,
+      evidence.ledgerId, remaining,
+      JSON.stringify({ authority: "postgresql_universal",
+        classification: "proven_legacy_admin_topup_remainder",
+        evidenceLedgerId: evidence.ledgerId, originalAmount: Number(topup.amount),
+        laterDebits, reservedConservativelyApplied: snapshot.reserved })])).rows[0];
+  if (!source) throw new Error("universal_migration_topup_remainder_conflict");
+  return { remaining, sourceId: source.id };
+}
+
 // Performs the authority cutover and its one-time plan grant in one database
 // transaction. Historical balance stays segregated; only this ledger-backed
 // cycle can fund new reservations.
 async function activateWorkspaceSegregatedWithInitialGrant({ pool, workspaceId,
-  baselineHash, grant }) {
+  baselineHash, grant, provenAdminTopupRemainder = null }) {
   const workspace = text(workspaceId);
   const hash = text(baselineHash);
   const initial = validateInitialMigrationGrant(grant);
+  const topupEvidence = validateProvenAdminTopupRemainder(provenAdminTopupRemainder);
   if (!workspace || !/^[0-9a-f]{64}$/.test(hash)) {
     throw new Error("universal_credit_source_activation_identity_invalid");
   }
-  return transaction(pool, async client => {
-    await client.query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
+  return serializableTransaction(pool, async client => {
     await client.query("SELECT pg_advisory_xact_lock(hashtext($1))",
       [`courtesy:${workspace}`]);
     const operation = (await client.query(`SELECT operation_epoch_started_at
@@ -658,9 +770,31 @@ async function activateWorkspaceSegregatedWithInitialGrant({ pool, workspaceId,
           !existing.universal_credit_source_id) {
         throw new Error("universal_migration_initial_grant_missing");
       }
+      let preservedAdminTopup = 0;
+      if (topupEvidence) {
+        const preserved = (await client.query(`SELECT ledger_id,granted,metadata
+          FROM engine_universal_credit_sources
+          WHERE operation_epoch_started_at=$1 AND workspace_id=$2
+            AND source_kind='admin_topup'
+            AND metadata->>'classification'='proven_legacy_admin_topup_remainder'
+          ORDER BY id FOR UPDATE`, [epoch, workspace])).rows;
+        if (topupEvidence.expectedRemaining === 0) {
+          if (preserved.length !== 0) {
+            throw new Error("universal_migration_topup_remainder_conflict");
+          }
+        } else if (preserved.length !== 1 ||
+            String(preserved[0].ledger_id) !== topupEvidence.ledgerId ||
+            Number(preserved[0].granted) !== topupEvidence.expectedRemaining ||
+            text(preserved[0].metadata?.evidenceLedgerId) !== topupEvidence.ledgerId) {
+          throw new Error("universal_migration_topup_remainder_conflict");
+        } else {
+          preservedAdminTopup = Number(preserved[0].granted);
+        }
+      }
       return { ok: true, duplicate: true, mode: state.mode,
         ledgerId: existing.id, sourceId: existing.universal_credit_source_id,
-        spendable: initial.amount, idempotencyKey: existing.idempotency_key,
+        spendable: initial.amount + preservedAdminTopup,
+        preservedAdminTopup, idempotencyKey: existing.idempotency_key,
         cycleStart: new Date(existing.cycle_start).toISOString(),
         cycleEnd: new Date(existing.cycle_end).toISOString() };
     }
@@ -692,12 +826,15 @@ async function activateWorkspaceSegregatedWithInitialGrant({ pool, workspaceId,
           ["legacy_reserved_changed"] : [])
       ].join(",")}`);
     }
+    const preservedTopup = await preserveProvenAdminTopupRemainderTx(client, {
+      epoch, workspaceId: workspace, snapshot: comparison.snapshot,
+      baselineHash: hash, evidence: topupEvidence });
     const nonLegacy = (await client.query(`SELECT COUNT(*)::int AS n
       FROM engine_universal_credit_sources
       WHERE operation_epoch_started_at=$1 AND workspace_id=$2
         AND source_kind NOT IN ('legacy_escrow','legacy_unclassified')`,
     [epoch, workspace])).rows[0];
-    if (Number(nonLegacy.n) !== 0) {
+    if (Number(nonLegacy.n) !== (preservedTopup.remaining > 0 ? 1 : 0)) {
       throw new Error("universal_credit_source_transition_nonlegacy_source");
     }
     const mapped = await client.query(`UPDATE engine_universal_credit_holds h
@@ -741,8 +878,10 @@ async function activateWorkspaceSegregatedWithInitialGrant({ pool, workspaceId,
       WHERE id=$1`, [ledger.id]);
     return { ok: true, duplicate: false, mode: "ACTIVE_SEGREGATED",
       ledgerId: ledger.id, sourceId: applied.sourceId,
-      spendable: initial.amount, historicalBalance: comparison.snapshot.balance,
+      spendable: initial.amount + preservedTopup.remaining,
+      historicalBalance: comparison.snapshot.balance,
       historicalReserved: comparison.snapshot.reserved,
+      preservedAdminTopup: preservedTopup.remaining,
       idempotencyKey: key, cycleStart: initial.cycleStart,
       cycleEnd: initial.cycleEnd };
   });
