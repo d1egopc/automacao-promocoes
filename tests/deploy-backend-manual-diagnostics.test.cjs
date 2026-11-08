@@ -44,7 +44,7 @@ function assertDiagnostic(result, stage, code, resultCode = "command_failed") {
   assert.doesNotMatch(output, /BASH_COMMAND|fixture-secret-must-not-be-logged|authorization\s*[:=]|password\s*[:=]|token\s*[:=]/i);
 }
 
-function makeFixture(scenario, { activeMismatch = false, switched = false } = {}) {
+function makeFixture(scenario, { activeMismatch = false, switched = false, persistentShadowOverlay = false } = {}) {
   const parent = path.join(root, "tmp", "test-tmp");
   fs.mkdirSync(parent, { recursive: true });
   const dir = fs.mkdtempSync(path.join(parent, "deploy-manual-diagnostics-"));
@@ -85,6 +85,18 @@ function makeFixture(scenario, { activeMismatch = false, switched = false } = {}
   const rollbackMarker = path.join(dir, "rollback-calls.txt");
   fs.writeFileSync(activeImageFile, activeMismatch ? `sha256:${"c".repeat(64)}` : baseImage);
   if (switched) fs.writeFileSync(path.join(infra, "backend-release.yml"), `services:\n  backend:\n    image: local/optimus-backend:${sourceSha}-fixture-1\n`);
+  if (persistentShadowOverlay) {
+    fs.writeFileSync(path.join(infra, "backend-release.yml"), [
+      "services:",
+      "  backend:",
+      `    image: ${baseComposeImage}`,
+      "    environment:",
+      "      OPTIMUS_INTELLIGENCE_V1_MODE: shadow",
+      "      OPTIMUS_INTELLIGENCE_V1_MEMORY_MODE: shadow",
+      "      OPTIMUS_INTELLIGENCE_V1_ROUTING_MODE: shadow",
+      ""
+    ].join("\n"));
+  }
 
   return {
     dir,
@@ -106,7 +118,7 @@ function makeFixture(scenario, { activeMismatch = false, switched = false } = {}
       GITHUB_REF: "refs/heads/main",
       GITHUB_SHA: sourceSha,
       GITHUB_WORKSPACE: toShellPath(workspace),
-      GITHUB_RUN_ID: "fixture-run",
+      GITHUB_RUN_ID: "42490053765",
       GITHUB_RUN_ATTEMPT: "1",
       RUNTIME_FILES: "index.js",
       DEPLOY_FIXTURE_INFRA: toShellPath(infra),
@@ -142,7 +154,7 @@ curl() {
   return 0
 }
 docker() {
-  local action="BASH_PARAM{1:-}" format="BASH_PARAM{3:-}" reference="BASH_PARAM{5:-}" file="" image="" previous=0 arg
+  local action="BASH_PARAM{1:-}" format="BASH_PARAM{3:-}" reference="BASH_PARAM{5:-}" file="" image="" environment='{"FIXTURE":"same"}' previous=0 arg
   if [[ "$action" == exec && "$2" == optimus-backend ]]; then
     if [[ "BASH_PARAM{3:-}" == sh ]]; then printf file; return 0; fi
     if [[ "BASH_PARAM{3:-}" == sha256sum ]]; then printf '%s  %s\n' "$DEPLOY_FIXTURE_IMAGE_HASH" "BASH_PARAM{4:-/app/index.js}"; return 0; fi
@@ -198,10 +210,14 @@ docker() {
         done
         image="$DEPLOY_FIXTURE_BASE_COMPOSE_IMAGE"
         if [[ "$file" != "$DEPLOY_FIXTURE_INFRA/compose.yml" ]]; then image="$(awk '$1 == "image:" { print $2 }' "$file")"; fi
+        if [[ -f "$file" ]] && grep -q 'OPTIMUS_INTELLIGENCE_V1_MODE: shadow' "$file"; then
+          environment='{"FIXTURE":"same","OPTIMUS_INTELLIGENCE_V1_MEMORY_MODE":"shadow","OPTIMUS_INTELLIGENCE_V1_MODE":"shadow","OPTIMUS_INTELLIGENCE_V1_ROUTING_MODE":"shadow"}'
+        fi
         if [[ "$DEPLOY_FIXTURE_SCENARIO" == before_swap && "$file" != "$DEPLOY_FIXTURE_INFRA/compose.yml" ]]; then
-          printf '{"services":{"backend":{"image":"%s","environment":{"FIXTURE":"same","unexpected":"different"},"volumes":[]},"postgres":{"image":"postgres"}}}\n' "$image"
+          environment='{"FIXTURE":"same","unexpected":"different"}'
+          printf '{"services":{"backend":{"image":"%s","environment":%s,"volumes":[]},"postgres":{"image":"postgres"}}}\n' "$image" "$environment"
         else
-          printf '{"services":{"backend":{"image":"%s","environment":{"FIXTURE":"same"},"volumes":[]},"postgres":{"image":"postgres"}}}\n' "$image"
+          printf '{"services":{"backend":{"image":"%s","environment":%s,"volumes":[]},"postgres":{"image":"postgres"}}}\n' "$image" "$environment"
         fi
         return 0
       fi
@@ -334,6 +350,19 @@ test("fixture de sucesso percorre overlay e termina sem acionar diagnóstico", (
     assert.match(diagnosticOutput(result), /guardian_health backend=PASS postgres=PASS http=PASS sessions=PASS rio=PASS/);
     assert.doesNotMatch(diagnosticOutput(result), /deploy_failure/);
     assert.equal(fs.readFileSync(fixture.activeImageFile, "utf8"), candidateImage);
+  });
+});
+
+test("overlay persistente preserva flags SHADOW e troca somente a imagem", () => {
+  withFixture("success", { persistentShadowOverlay: true }, (fixture) => {
+    const result = executeFixture(fixture);
+    assert.equal(result.status, 0, diagnosticOutput(result));
+    const release = fs.readFileSync(path.join(fixture.infra, "backend-release.yml"), "utf8");
+    assert.match(release, new RegExp(`image: local/optimus-backend:${fixture.sourceSha}-42490053765-1`));
+    assert.match(release, /OPTIMUS_INTELLIGENCE_V1_MODE: shadow/);
+    assert.match(release, /OPTIMUS_INTELLIGENCE_V1_MEMORY_MODE: shadow/);
+    assert.match(release, /OPTIMUS_INTELLIGENCE_V1_ROUTING_MODE: shadow/);
+    assert.doesNotMatch(diagnosticOutput(result), /GARIMPEI_INFRA_GUARD_BLOCKED|deploy_failure/);
   });
 });
 
