@@ -989,6 +989,24 @@ function assertSemSegredos(retorno) {
   }
 
   {
+    const { deps, chamadas } = baseDeps({
+      usuarioTemCreditos: () => { throw new Error("json_credit_must_not_be_read"); },
+      reservarCreditoEnvio: async () => ({
+        ok: false,
+        reason: "historical_credits_unclassified"
+      })
+    });
+    const retorno = await enviarOfertaManualV2({
+      clienteId: "cliente_a", ofertaId: "oferta_a", destinosIds: ["wa_ok"],
+      attemptId: "attempt_historical_unclassified"
+    }, deps);
+    assert.strictEqual(retorno.ok, false);
+    assert.strictEqual(retorno.resultados[0].erro,
+      "historical_credits_unclassified");
+    assert.strictEqual(chamadas.wa.length, 0);
+  }
+
+  {
     const ordem = [];
     const reserva = { ok: true, workspaceId: "cliente_a",
       operationId: "attempt_credito:wa_ok", destinationId: "wa_ok" };

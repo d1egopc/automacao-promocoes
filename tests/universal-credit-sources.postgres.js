@@ -278,15 +278,15 @@ async function main() {
     let onboardPaid = await credits.readBalance({ pool,
       workspaceId: "ws-onboard-paid" });
     assert.equal(onboardPaid.aggregateAvailable, 25);
-    assert.equal(onboardPaid.available, 0,
-      "zero opening plus admin top-up does not create plan entitlement");
+    assert.equal(onboardPaid.available, 25,
+      "audited admin top-up is independently spendable");
     const onboardPix = await insertCycle(admin, { workspace: "ws-onboard-paid",
       value: 40, origin: "financial_event_v1", suffix: "onboard-pix" });
     await credits.applyFinancialLedger({ pool, ledgerId: onboardPix });
     onboardPaid = await credits.readBalance({ pool,
       workspaceId: "ws-onboard-paid" });
     assert.equal(onboardPaid.available, 65,
-      "valid Pix entitlement makes its cycle and preserved admin source eligible");
+      "Pix cycle and preserved admin source remain independently eligible");
     assert.equal((await sources.inspectShadowWorkspace({ pool,
       workspaceId: "ws-other" })).mode, "LEGACY",
     "an existing unmigrated workspace remains independently legacy");
@@ -423,8 +423,12 @@ async function main() {
     assert.equal(balance.balance, 267,
       "new cycle replaces old cycle availability but preserves admin source");
     assert.equal(balance.aggregateAvailable, 250);
-    assert.equal(balance.available, 0,
-      "future cycle cannot make administrative value spendable before its window");
+    assert.equal(balance.cycleAvailable, 0,
+      "future cycle cannot make plan credits spendable before its window");
+    assert.equal(balance.adminAvailable, 50,
+      "confirmed admin top-up remains available without a current plan cycle");
+    assert.equal(balance.available, 50,
+      "only the confirmed admin top-up is spendable before the future cycle starts");
 
     await enqueueOne(admin, pool, "ws-pix", "pix-old", 5);
     const pixOld = await claimAndStart(pool, "ws-pix");
@@ -459,9 +463,8 @@ async function main() {
       const adminOnlyHold = await sources.holdForTargetTx(sourceClient, {
         epoch, workspaceId: "ws-admin-only", targetId: adminTarget.id
       });
-      assert.deepEqual({ ok: adminOnlyHold.ok, reason: adminOnlyHold.reason },
-        { ok: false, reason: "workspace_credits_unavailable" },
-        "administrative credits alone must not create send entitlement");
+      assert.equal(adminOnlyHold.ok, true,
+        "audited administrative source must fund automatic delivery");
       await sourceClient.query("ROLLBACK");
     } finally {
       sourceClient.release();
@@ -932,7 +935,14 @@ async function main() {
     ]);
     assert.equal(pixResult.ok, true);
     assert.ok(concurrentSend.ok === true ||
-      concurrentSend.reason === "sem_creditos");
+      ["sem_creditos", "historical_credits_unclassified"]
+        .includes(concurrentSend.reason),
+    `unexpected concurrent send result: ${JSON.stringify(concurrentSend)}`);
+    const afterPixRetry = await manualCredits.reservarCreditoManualUniversal({
+      pool, workspaceId: "ws-v2-transition", operationId: "pix-race-retry",
+      destinationId: "pix-race-retry-destination" });
+    assert.equal(afterPixRetry.ok, true,
+      "applied PIX source must be spendable after a concurrent reservation settles");
     const v2Conservation = (await admin.query(`SELECT COUNT(*)::int AS bad
       FROM engine_universal_credit_sources
       WHERE workspace_id='ws-v2-transition'
