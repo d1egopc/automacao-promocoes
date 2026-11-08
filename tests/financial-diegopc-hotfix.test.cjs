@@ -2,7 +2,9 @@
 
 const assert = require("node:assert/strict");
 const {
-  projetarSaldoCreditos
+  projetarSaldoCreditos,
+  lerSaldoCreditosSomenteLeitura,
+  lerSaldoCreditosOperacional
 } = require("../modules/saas/credit-balance.service");
 const {
   calcularReconciliacaoAdministrativaHistorica
@@ -89,13 +91,32 @@ function testarDryRunDiego() {
   assert.equal(comReservaIndevida.applyAllowed, false);
 }
 
-testarProjecao();
-testarDryRunDiego();
-console.log("FINANCIAL_DIEGOPC_HOTFIX_PASS", JSON.stringify({
-  projection: true,
-  legacyCompatibility: true,
-  dryRunOnly: true,
-  provenAdminCredits: 12820,
-  unprovenCredits: 2588,
-  multiworkspaceIsolation: true
-}));
+async function testarCompatibilidadeTotalVsDisponivel() {
+  const saldo = { balance: 15436, reserved: 28, available: 0,
+    legacySegregated: 15408, sourceMode: "ACTIVE_SEGREGATED" };
+  const readBalance = async () => saldo;
+  assert.equal(await lerSaldoCreditosSomenteLeitura({ mode: "UNIVERSAL",
+    workspaceId: "user_pss60lus", readBalance }), 15436,
+  "read-only scalar keeps the aggregate balance contract");
+  assert.equal(await lerSaldoCreditosOperacional({ mode: "UNIVERSAL",
+    workspaceId: "user_pss60lus", readBalance }), 0,
+  "operational gate uses only spendable credits");
+}
+
+(async () => {
+  testarProjecao();
+  testarDryRunDiego();
+  await testarCompatibilidadeTotalVsDisponivel();
+  console.log("FINANCIAL_DIEGOPC_HOTFIX_PASS", JSON.stringify({
+    projection: true,
+    legacyCompatibility: true,
+    totalVsSpendable: true,
+    dryRunOnly: true,
+    provenAdminCredits: 12820,
+    unprovenCredits: 2588,
+    multiworkspaceIsolation: true
+  }));
+})().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});

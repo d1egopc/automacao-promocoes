@@ -68,7 +68,7 @@ async function lerSaldoCreditosSomenteLeitura({
   const projecao = await lerProjecaoCreditosSomenteLeitura({
     mode, workspaceId, usuario, readBalance
   });
-  return projecao.disponivel;
+  return projecao.total;
 }
 
 async function lerProjecaoCreditosOperacional({
