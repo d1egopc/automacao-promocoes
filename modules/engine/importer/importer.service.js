@@ -185,6 +185,11 @@ function tituloPareceSloganComercialEngine(titulo = "") {
   const texto = normalizarTitulo(titulo);
   if (!texto) return true;
 
+  // Keep the factual-title gate aligned with the shared Radar contract.  A
+  // slogan may contain a product word (for example, "perfume") without being
+  // evidence of product identity.
+  if (!tituloComercialUniversalValido(titulo, {})) return true;
+
   const contemProduto = /\b(?:air\s*fryer|airfryer|aspirador|furadeira|parafusadeira|ducha|chuveiro|lavadora|lava\s*e\s*seca|secadora|camisa|camiseta|baby\s*tee|blusa|polo|short|tenis|chinelo|smartphone|notebook|monitor|perfume|whey|creatina|pneu|colchao|cama\s*box)\b/.test(texto);
   if (contemProduto) return false;
   if (/^(?:corre|olha|confere|cupom|promocao|promo|oferta|desconto)\b/.test(texto)) return true;
@@ -1036,6 +1041,13 @@ function normalizarOfertaImportada(resultado = {}, job = {}) {
   const tituloImportado = normalizarTexto(resultado.titulo || resultado.nome || "");
   const marketplaceTitulo = normalizarTexto(resultado.marketplace || job.marketplace || job.marketplace_detectado);
   const tituloSeguro = tituloComercialUniversalValido(tituloImportado, { marketplace: marketplaceTitulo }) ? tituloImportado : "";
+  const tituloMetadata = normalizarTexto(produtoMetadata.titulo || produtoMetadata.nome || produtoMetadata.title || "");
+  const tituloParaCategoria = tituloSeguro || (
+    tituloComercialUniversalValido(tituloMetadata, { marketplace: marketplaceTitulo }) ? tituloMetadata : ""
+  );
+  const resultadoParaCategoria = tituloParaCategoria
+    ? { ...resultado, titulo: tituloParaCategoria, nome: tituloParaCategoria }
+    : { ...resultado, titulo: "", nome: "" };
   const tituloFactual = resolverTituloFactualEngine({
     ...resultado,
     titulo: tituloSeguro,
@@ -1044,15 +1056,16 @@ function normalizarOfertaImportada(resultado = {}, job = {}) {
     linkOriginal: resultado.linkOriginal || "",
     linkExpandido: resultado.linkExpandido || resultado.urlFinal || ""
   }, resultado.metadata || {}, job);
+  const tituloFinal = tituloSeguro || tituloFactual.titulo;
   const origemFluxo = resolverOrigemFluxo(resultado, job);
 
   return {
     ok: resultado.ok !== false,
     ...(origemFluxo ? { origemFluxo } : {}),
     marketplace: marketplaceTitulo,
-    titulo: tituloSeguro,
+    titulo: tituloFinal,
     tituloFactual: tituloFactual.titulo,
-    tituloNormalizado: normalizarTitulo(tituloSeguro),
+    tituloNormalizado: normalizarTitulo(tituloFinal),
     preco: normalizarNumero(resultado.preco || resultado.precoAtual || produtoMetadata.precoAtual || produtoMetadata.preco),
     precoOriginal: normalizarNumero(resultado.precoOriginal || resultado.precoAntigo || produtoMetadata.precoOriginal || produtoMetadata.precoAntigo),
     imagem: imagemResolvida.imagem,
@@ -1064,7 +1077,7 @@ function normalizarOfertaImportada(resultado = {}, job = {}) {
     linkOriginal: normalizarTexto(resultado.linkOriginal || ""),
     linkExpandido: normalizarTexto(resultado.linkExpandido || resultado.urlFinal || ""),
     linkAfiliado: normalizarTexto(resultado.linkAfiliado || resultado.linkFinal || resultado.link || ""),
-    categoria: resolverCategoriaEngine(resultado, job),
+    categoria: resolverCategoriaEngine(resultadoParaCategoria, job),
     cupom: normalizarTexto(resultado.cupom || ""),
     cupomTipo: normalizarTexto(resultado.cupomTipo || resultado.tipoCupom || ""),
     score: normalizarNumero(resultado.score),

@@ -147,8 +147,8 @@ function resolverIdentidadeIntelligenceV1(oferta = {}) {
 function linhaPromocional(valor = "") {
   const linha = normalizarComparacao(valor);
   if (!linha) return true;
-  return /(?:^|\b)(?:trouxe pra voce|corre que|imperdivel|oferta do dia|promocao|aproveite|so hoje|baratinho|olha isso)(?:\b|$)/.test(linha) ||
-    /\b(?:cupom|desconto|frete gratis|por apenas)\b/.test(linha) ||
+  return /(?:^|\b)(?:trouxe pra voce|corre que|imperdivel|oferta do dia|promocao|aproveita(?: e)?|aproveite|so hoje|baratinho|olha isso|todo mundo vai perguntar)(?:\b|$)/.test(linha) ||
+    /\b(?:cupom|cupons|desconto|frete gratis|por apenas|convida(?:r)? .* grupo .* link|garanta .* enquanto .* ativo)\b/.test(linha) ||
     /(?:https?:\/\/|www\.|\br\$\s*\d)/i.test(valor);
 }
 
