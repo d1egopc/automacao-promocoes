@@ -52,6 +52,25 @@
       ]);
     } finally { clearTimeout(timer); }
   }
+  async function capturarComReceptor(tabs, tabId, final) {
+    const deadline = Date.now() + BROWSER_TIMEOUT_MS;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (Date.now() >= deadline) throw new Error("magalu_identity_browser_timeout");
+      if (attempt > 0) {
+        const current = produtoFinal((await comPrazo(tabs.get(tabId), "magalu_identity_browser_timeout"))?.url);
+        if (!current || current.url !== final.url) throw new Error("magalu_identity_produto_nao_confirmado");
+        if (Date.now() >= deadline) throw new Error("magalu_identity_browser_timeout");
+      }
+      try {
+        return await tabs.sendMessage(tabId, { type: "OPTIMUS_CAPTURE_PAGE" }, { frameId: 0 });
+      } catch (error) {
+        // Page completion does not guarantee a document_idle receiver is registered yet.
+        if (!/^Could not establish connection\. Receiving end does not exist\.?$/i.test(texto(error?.message))) throw error;
+        if (attempt === 2) throw new Error("magalu_identity_content_script_ausente");
+        await new Promise(resolve => setTimeout(resolve, 150 * (attempt + 1)));
+      }
+    }
+  }
   async function resolverPelaPagina(origem) {
     const tabs = global.chrome?.tabs;
     if (!tabs?.create || !tabs?.get || !tabs?.sendMessage || !tabs?.remove ||
@@ -85,7 +104,7 @@
       const final = produtoFinal(pronta?.url);
       if (!final) throw new Error("magalu_identity_produto_nao_confirmado");
       const captura = await comPrazo(
-        tabs.sendMessage(aba.id, { type: "OPTIMUS_CAPTURE_PAGE" }, { frameId: 0 }),
+        capturarComReceptor(tabs, aba.id, final),
         "magalu_identity_browser_timeout"
       );
       const produto = captura?.produto || {};
