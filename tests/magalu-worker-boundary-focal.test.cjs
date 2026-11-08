@@ -15,20 +15,20 @@ const product = {
   urlOriginal: finalUrl
 };
 
-function setup({ missingAlways = false, error = "" } = {}) {
+function setup({ missingAlways = false, error = "", pageUrl = finalUrl, productOverride = {} } = {}) {
   const calls = [];
   const removed = [];
   const delays = [];
   const tabs = {
-    create: async () => ({ id: 71, status: "complete", url: finalUrl }),
-    get: async () => ({ id: 71, status: "complete", url: finalUrl }),
+    create: async () => ({ id: 71, status: "complete", url: pageUrl }),
+    get: async () => ({ id: 71, status: "complete", url: pageUrl }),
     sendMessage: async (_id, message, options) => {
       calls.push({ message, options });
       if (error) throw new Error(error);
       if (missingAlways || calls.length === 1) {
         throw new Error("Could not establish connection. Receiving end does not exist.");
       }
-      return { ok: true, produto: product };
+      return { ok: true, produto: { ...product, ...productOverride } };
     },
     remove: async id => removed.push(id),
     onUpdated: { addListener() {}, removeListener() {} }
@@ -87,3 +87,17 @@ test("unrelated receiver errors are not retried", async () => {
     assert.deepEqual(fixture.removed, [71]);
   } finally { fixture.restore(); }
 });
+
+for (const caso of [
+  { name: "final URL without product", options: { pageUrl: "https://www.magazineluiza.com.br/" }, reason: "magalu_identity_url_final_nao_produto" },
+  { name: "product ID mismatch", options: { productOverride: { produtoId: "999999999" } }, reason: "magalu_identity_produto_id_divergente" },
+  { name: "unofficial image", options: { productOverride: { imagem: "https://example.test/image.jpg" } }, reason: "magalu_identity_imagem_nao_oficial" }
+]) {
+  test(`identity failure has a fixed sanitized reason: ${caso.name}`, async () => {
+    const fixture = setup(caso.options);
+    try {
+      await assert.rejects(resolverAtual(), new RegExp(caso.reason));
+      assert.deepEqual(fixture.removed, [71]);
+    } finally { fixture.restore(); }
+  });
+}
