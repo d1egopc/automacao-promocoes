@@ -298,7 +298,8 @@ function assertNoSecret(text, secrets) {
     const fimMe = fonte.indexOf("// ================= INTEGRA", inicioMe);
     assert.ok(inicioMe >= 0 && fimMe > inicioMe);
     const blocoMe = fonte.slice(inicioMe, fimMe);
-    assert.ok(blocoMe.includes("saldoCreditosSomenteLeitura"));
+    assert.ok(blocoMe.includes("projecaoCreditosSomenteLeitura"));
+    assert.ok(blocoMe.includes("creditosFinanceiros"));
     assert.ok(!blocoMe.includes("saldoCreditosParaExibicao"));
     assert.ok(!blocoMe.includes("renovarCreditosSeNecessario"));
     assert.ok(blocoMe.includes('creditosEstado = "indisponivel"'));
@@ -307,7 +308,8 @@ function assertNoSecret(text, secrets) {
     const inicioStatus = fonte.indexOf('app.get("/automacao/status"');
     const fimStatus = fonte.indexOf('app.get("/automacao"', inicioStatus);
     const blocoStatus = fonte.slice(inicioStatus, fimStatus);
-    assert.ok(blocoStatus.includes("saldoCreditosSomenteLeitura"));
+    assert.ok(blocoStatus.includes("projecaoCreditosSomenteLeitura"));
+    assert.ok(blocoStatus.includes("creditosFinanceiros"));
     assert.ok(!blocoStatus.includes("saldoCreditosParaExibicao"));
     assert.ok(!blocoStatus.includes("garantirFilaClienteInicializadaHttp"));
     assertNoSecret(stdout + stderr, [idToken, google.body.token, jwtSecret]);
