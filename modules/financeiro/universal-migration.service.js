@@ -44,13 +44,15 @@ function buildInitialMigrationGrant({ usuario = {}, plano = {}, planId = "",
 }
 
 async function migrateLegacyWorkspaceWithInitialGrant({ pool, usuario, plano,
-  planId, baselineHash, agora, repository = sourceCredits } = {}) {
+  planId, baselineHash, agora, provenAdminTopupRemainder = null,
+  repository = sourceCredits } = {}) {
   const prepared = buildInitialMigrationGrant({ usuario, plano, planId, agora });
   return repository.activateWorkspaceSegregatedWithInitialGrant({
     pool,
     workspaceId: prepared.workspaceId,
     baselineHash,
-    grant: prepared.grant
+    grant: prepared.grant,
+    provenAdminTopupRemainder
   });
 }
 

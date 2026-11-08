@@ -192,7 +192,9 @@ async function main() {
       ["ws-segregated-rollback", 9], ["ws-segregated-diverged", 10],
       ["ws-segregated-new", 0], ["ws-v2-transition", 100],
       ["ws-migration-initial", 25], ["ws-migration-recurring", 0],
-      ["ws-migration-cycle-conflict", 0]]) {
+      ["ws-migration-cycle-conflict", 0],
+      ["ws-migration-topup-partial", 5],
+      ["ws-migration-topup-zero", 5]]) {
       await credits.openBalance({ pool, workspaceId: workspace,
         operationEpochStartedAt: epoch, openingBalance: opening, sourceHash });
     }
@@ -717,6 +719,126 @@ async function main() {
     assert.equal(initialRows.ledger_count, 1);
     assert.equal(initialRows.source_count, 1);
     assert.equal(initialRows.duration_days, 300);
+
+    // An old administrative top-up may be split out of unclassified history
+    // only when its complete movement chain proves a conservative remainder.
+    // All later debits and every open reservation are charged against it first.
+    const legacyTopup = await credits.addAdminBalance({ pool,
+      workspaceId: "ws-migration-topup-partial", amount: 10,
+      idempotencyKey: "migration-old-topup-partial", operatorId: "fixture" });
+    assert.equal(legacyTopup.ok, true);
+    const partialEvidence = (await admin.query(`SELECT id,
+        universal_balance_revision AS revision
+      FROM financial_credit_ledger
+      WHERE idempotency_key='migration-old-topup-partial'`)).rows[0];
+    for (let index = 0; index < 4; index += 1) {
+      await enqueueOne(admin, pool, "ws-migration-topup-partial",
+        `topup-consumed-${index}`, 50 + index);
+      const claim = await claimAndStart(pool, "ws-migration-topup-partial");
+      const ack = await durableAck(admin, claim,
+        `provider-topup-consumed-${index}`);
+      await queue.confirmSend({ pool, destinationId: claim.id,
+        leaseToken: claim.leaseToken, ...ack });
+    }
+    await enqueueOne(admin, pool, "ws-migration-topup-partial",
+      "topup-open-reservation", 54);
+    const openLegacyClaim = await claimAndStart(pool,
+      "ws-migration-topup-partial");
+    const partialShadow = (await prepareShadow(pool,
+      "ws-migration-topup-partial")).shadow;
+    const partialArgs = { pool,
+      usuario: { id: "ws-migration-topup-partial", plano: "partners",
+        cortesiaAutomatica: true },
+      plano: { id: "partners", creditosModelo: "ciclo",
+        creditosPorCiclo: 6000, cicloDias: 350,
+        renovacaoCreditos: "sem_renovacao" },
+      baselineHash: partialShadow.baselineHash,
+      agora: "2026-11-08T00:00:00.000Z",
+      provenAdminTopupRemainder: { ledgerId: partialEvidence.id,
+        expectedRemaining: 5, expectedRevision: Number(partialEvidence.revision) } };
+    const partialRace = await Promise.all(Array.from({ length: 8 }, () =>
+      migration.migrateLegacyWorkspaceWithInitialGrant(partialArgs)));
+    assert.equal(partialRace.filter(item => !item.duplicate).length, 1);
+    assert.equal(partialRace.filter(item => item.duplicate).length, 7);
+    assert.ok(partialRace.every(item => item.preservedAdminTopup === 5 &&
+      item.spendable === 6005));
+    let partialBalance = await credits.readBalance({ pool,
+      workspaceId: "ws-migration-topup-partial" });
+    assert.deepEqual({ balance: partialBalance.balance,
+      reserved: partialBalance.reserved, spendable: partialBalance.spendable,
+      legacy: partialBalance.legacySegregated,
+      mode: partialBalance.sourceMode },
+    { balance: 6011, reserved: 1, spendable: 6005, legacy: 6,
+      mode: "ACTIVE_SEGREGATED" });
+    const partialSources = (await admin.query(`SELECT source_kind,ledger_id,
+        granted,available,reserved,metadata->>'classification' AS classification
+      FROM engine_universal_credit_sources
+      WHERE workspace_id='ws-migration-topup-partial'
+      ORDER BY source_kind,created_at,id`)).rows;
+    const preservedSource = partialSources.find(row =>
+      row.classification === "proven_legacy_admin_topup_remainder");
+    assert.deepEqual({ kind: preservedSource.source_kind,
+      ledgerId: preservedSource.ledger_id,
+      granted: Number(preservedSource.granted),
+      available: Number(preservedSource.available),
+      reserved: Number(preservedSource.reserved) },
+    { kind: "admin_topup", ledgerId: partialEvidence.id,
+      granted: 5, available: 5, reserved: 0 });
+    const lateLegacyAck = await durableAck(admin, openLegacyClaim,
+      "provider-topup-open-reservation");
+    await queue.confirmSend({ pool, destinationId: openLegacyClaim.id,
+      leaseToken: openLegacyClaim.leaseToken, ...lateLegacyAck });
+    partialBalance = await credits.readBalance({ pool,
+      workspaceId: "ws-migration-topup-partial" });
+    assert.deepEqual({ balance: partialBalance.balance,
+      reserved: partialBalance.reserved, spendable: partialBalance.spendable,
+      legacy: partialBalance.legacySegregated },
+    { balance: 6010, reserved: 0, spendable: 6005, legacy: 5 },
+    "late ACK consumes only old escrow and never the preserved top-up");
+
+    const zeroTopup = await credits.addAdminBalance({ pool,
+      workspaceId: "ws-migration-topup-zero", amount: 3,
+      idempotencyKey: "migration-old-topup-zero", operatorId: "fixture" });
+    assert.equal(zeroTopup.ok, true);
+    const zeroEvidence = (await admin.query(`SELECT id,
+        universal_balance_revision AS revision
+      FROM financial_credit_ledger
+      WHERE idempotency_key='migration-old-topup-zero'`)).rows[0];
+    for (let index = 0; index < 3; index += 1) {
+      await enqueueOne(admin, pool, "ws-migration-topup-zero",
+        `zero-consumed-${index}`, 60 + index);
+      const claim = await claimAndStart(pool, "ws-migration-topup-zero");
+      const ack = await durableAck(admin, claim, `provider-zero-${index}`);
+      await queue.confirmSend({ pool, destinationId: claim.id,
+        leaseToken: claim.leaseToken, ...ack });
+    }
+    const zeroShadow = (await prepareShadow(pool,
+      "ws-migration-topup-zero")).shadow;
+    const zeroArgs = { pool,
+      usuario: { id: "ws-migration-topup-zero", plano: "partners" },
+      plano: { id: "partners", creditosModelo: "ciclo",
+        creditosPorCiclo: 6000, cicloDias: 350,
+        renovacaoCreditos: "sem_renovacao" },
+      baselineHash: zeroShadow.baselineHash,
+      agora: "2026-11-08T00:00:00.000Z",
+      provenAdminTopupRemainder: { ledgerId: zeroEvidence.id,
+        expectedRemaining: 1, expectedRevision: Number(zeroEvidence.revision) } };
+    await assert.rejects(
+      migration.migrateLegacyWorkspaceWithInitialGrant(zeroArgs),
+      /topup_remainder_changed/);
+    assert.equal((await sources.inspectShadowWorkspace({ pool,
+      workspaceId: "ws-migration-topup-zero" })).mode, "SHADOW",
+    "failed proof must roll back the entire cutover");
+    zeroArgs.provenAdminTopupRemainder.expectedRemaining = 0;
+    const zeroMigration = await migration.migrateLegacyWorkspaceWithInitialGrant(
+      zeroArgs);
+    assert.equal(zeroMigration.preservedAdminTopup, 0);
+    assert.equal(zeroMigration.spendable, 6000);
+    assert.equal(Number((await admin.query(`SELECT COUNT(*)::int AS n
+      FROM engine_universal_credit_sources
+      WHERE workspace_id='ws-migration-topup-zero'
+        AND source_kind='admin_topup'`)).rows[0].n), 0,
+    "fully consumed old top-up must never be granted again");
 
     const recurringShadow = (await prepareShadow(pool,
       "ws-migration-recurring")).shadow;

@@ -146,6 +146,17 @@ only when a zero opening plus the complete movement chain proves the entire
 available value. Current balance, age, plan name and operator convenience are
 never provenance.
 
+For a LEGACY workspace with an older administrative top-up, a conservative
+remainder may be preserved during the same atomic `ACTIVE_SEGREGATED` cutover
+only when the complete, gap-free ledger chain proves the original top-up and
+all later movements. Every later debit and every still-open reservation is
+charged against that top-up first; any later positive movement, stale revision,
+missing page, duplicate revision or changed remainder blocks the transition.
+The proved remainder is linked to the original ledger row as one audited
+`admin_topup` source. A zero remainder creates no source. This exception never
+classifies the rest of the historical balance and never reconstructs general
+legacy history.
+
 ## Rollback
 
 Before any future cutover, preserve the exact source-state baseline. Rollback

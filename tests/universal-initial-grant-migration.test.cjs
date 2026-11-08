@@ -23,12 +23,18 @@ test("migration derives recurring grant from the current plan", async () => {
   const result = await migrateLegacyWorkspaceWithInitialGrant({ pool: {},
     usuario: { id: "workspace-a", plano: "partners",
       cortesiaAutomatica: true }, plano: plan,
-    baselineHash: "a".repeat(64), agora: now, repository });
+    baselineHash: "a".repeat(64), agora: now,
+    provenAdminTopupRemainder: { ledgerId:
+      "21093e05-ea43-4384-8b1d-6f52c308d5a9",
+    expectedRemaining: 2255, expectedRevision: 4294 }, repository });
   assert.equal(result.spendable, 6000);
   assert.deepEqual(received.grant, { planId: "partners",
     creditModel: "ciclo", renewalPolicy: "pagamento", amount: 6000,
     cycleDays: 30, cycleStart: now.toISOString(),
     cycleEnd: "2026-12-08T12:00:00.000Z" });
+  assert.deepEqual(received.provenAdminTopupRemainder, {
+    ledgerId: "21093e05-ea43-4384-8b1d-6f52c308d5a9",
+    expectedRemaining: 2255, expectedRevision: 4294 });
 });
 
 test("free beta keeps configured 300-day non-renewing grant", () => {
