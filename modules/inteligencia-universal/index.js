@@ -31,6 +31,7 @@ const {
   ROUTING_ACTIVE_RELEASED,
   routingMode,
   buildRoutingBridge,
+  metadataContractReasonClasses,
   bridgeFromOffer,
   validateRoutingBridge,
   projectedCategoryCandidates
@@ -66,6 +67,7 @@ module.exports = {
   ROUTING_ACTIVE_RELEASED,
   routingMode,
   buildRoutingBridge,
+  metadataContractReasonClasses,
   bridgeFromOffer,
   validateRoutingBridge,
   projectedCategoryCandidates

@@ -33,8 +33,13 @@ const {
 const {
   routingMode,
   bridgeFromOffer,
-  projectedCategoryCandidates
+  projectedCategoryCandidates,
+  validateRoutingBridge
 } = require("../../inteligencia-universal/routing-shadow-v1.service");
+const {
+  observeMetadataBoundary,
+  reasonClassesFromValidationErrors
+} = require("../../inteligencia-universal/metadata-boundary-observation");
 const { operationalRef } = require("../../telemetria/operational-ref");
 
 let engineOfertasMetadataDisponivel = null;
@@ -407,9 +412,18 @@ function analisarDestinosOferta(clienteId = "admin", oferta = {}, contexto = {})
 
   try {
     const inicio = Date.now();
+    const routingBridge = bridgeFromOffer(oferta);
+    const routingBridgeValidation = validateRoutingBridge(routingBridge);
+    observeMetadataBoundary("distributor", {
+      present: Object.keys(routingBridge).length > 0,
+      valid: routingBridgeValidation.valid === true,
+      reasons: reasonClassesFromValidationErrors(routingBridgeValidation.errors),
+      outcome: "consumed",
+      env: contexto.intelligenceRoutingEnv || process.env
+    });
     const projecao = projectedCategoryCandidates({
       legacyCategories: categorias,
-      bridge: bridgeFromOffer(oferta)
+      bridge: routingBridge
     });
     const compativeisProjetados = [];
     let avaliacoes = 0;

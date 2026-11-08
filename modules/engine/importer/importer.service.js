@@ -29,8 +29,14 @@ const {
 const {
   avaliarOfertaUniversal,
   detectarIdentidadeProdutoUniversal,
-  buildRoutingBridge
+  buildRoutingBridge,
+  metadataContractReasonClasses,
+  validateRoutingBridge
 } = require("../../inteligencia-universal");
+const {
+  observeMetadataBoundary,
+  reasonClassesFromValidationErrors
+} = require("../../inteligencia-universal/metadata-boundary-observation");
 const {
   resolverImagemUniversal,
   imagemUrlEfemeraUniversal,
@@ -3996,9 +4002,19 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
     const prioridadeFinal = resultadoPrioridadeCupom.prioridadeFinal;
     const ofertaUniversal = resultadoV2.ofertaUniversal || {};
     const memoriaV2 = resultadoV2.memoria || {};
+    const routingMetadata = resultadoV2.intelligenceV1Shadow?.metadata || null;
     const routingBridge = resultadoV2.intelligenceV1Shadow?.applied === true
       ? buildRoutingBridge(resultadoV2.intelligenceV1Shadow.metadata)
       : null;
+    const routingBridgeValidation = routingBridge ? validateRoutingBridge(routingBridge) : null;
+    observeMetadataBoundary("builder", {
+      present: Boolean(routingBridge),
+      valid: routingBridgeValidation?.valid === true,
+      reasons: routingBridgeValidation
+        ? reasonClassesFromValidationErrors(routingBridgeValidation.errors)
+        : (routingMetadata ? metadataContractReasonClasses(routingMetadata) : ["envelope_missing"]),
+      outcome: routingBridge ? "built" : "dropped"
+    });
     const valorEfetivoDetalhes = objetoSeguro(resultadoV2.valorEfetivoDetalhes);
     const totalMemoriaCandidatos = memoriaCandidatos.length;
     const coerenciaPreco = validarCoerenciaPreco({
@@ -4928,6 +4944,16 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     evento,
     radarMirror: radarMirrorComparado
   });
+  const importerBridge = metadataFinal?.intelligenceV1Routing || null;
+  const importerValidation = importerBridge ? validateRoutingBridge(importerBridge) : null;
+  observeMetadataBoundary("importer", {
+    present: Boolean(importerBridge),
+    valid: importerValidation?.valid === true,
+    reasons: importerValidation
+      ? reasonClassesFromValidationErrors(importerValidation.errors)
+      : ["envelope_missing"],
+    outcome: "assembled"
+  });
   oferta = ponteIntegridadeComercial.oferta || oferta;
   metadataFinal = ponteIntegridadeComercial.metadata || metadataFinal;
   const resultadoEspelhoComercialV24 = construirEspelhoComercialV24Seguro({
@@ -5254,6 +5280,16 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
         RETURNING id`,
       [ofertaId, metadataFinalPersistida]
     );
+    const persistedBridge = metadataFinal?.intelligenceV1Routing || null;
+    const persistedValidation = persistedBridge ? validateRoutingBridge(persistedBridge) : null;
+    observeMetadataBoundary("persistence", {
+      present: Boolean(persistedBridge),
+      valid: persistedValidation?.valid === true,
+      reasons: persistedValidation
+        ? reasonClassesFromValidationErrors(persistedValidation.errors)
+        : ["envelope_missing"],
+      outcome: atualizacaoMetadata.ok === true ? "written" : "write_failed"
+    });
     medirPersistenciaMetadata.fim({
       ok: atualizacaoMetadata.ok === true
     });
