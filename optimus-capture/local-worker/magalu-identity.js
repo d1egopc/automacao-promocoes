@@ -114,7 +114,8 @@
       if (!confirmacao) throw new Error("magalu_identity_captura_url_nao_produto");
       if (!atual || confirmacao.url !== final.url || atual.url !== final.url) throw new Error("magalu_identity_url_trocada");
       if (texto(produto.produtoId).toLowerCase() !== final.productId) throw new Error("magalu_identity_produto_id_divergente");
-      if (texto(produto.sku).toLowerCase() !== final.productId) throw new Error("magalu_identity_sku_divergente");
+      // SKU is seller/variant metadata, not the canonical product ID from the URL.
+      // The URL and produtoId checks above remain the identity proof.
       if (texto(produto.titulo).length < 10) throw new Error("magalu_identity_titulo_ausente");
       if (!imagemOficial(produto.imagem)) throw new Error("magalu_identity_imagem_nao_oficial");
       return final;
