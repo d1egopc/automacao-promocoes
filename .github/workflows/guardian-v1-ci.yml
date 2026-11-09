@@ -6,6 +6,7 @@ on:
       - validation/guardian-v1-*
       - validation/ml-title-identity-reconciled-20261108
       - validation/magalu-identity-subreason-20261108
+      - validation/magalu-anchor-identity-20261109
       - validation/intelligence-metadata-reconciled-20261108
       - validation/mensageiro-v4-20261025
       - validation/mensageiro-v4-canary-runtime-20261025
@@ -524,7 +525,7 @@ jobs:
             ! grep -E 'MODULE_NOT_FOUND|SyntaxError|ERR_MODULE_NOT_FOUND' "$RUNNER_TEMP/$file-candidate.log" "$RUNNER_TEMP/$file-baseline.log"
           done
       - name: Magalu first-party Worker - isolated fixtures only
-        if: github.ref == 'refs/heads/validation/magalu-firstparty-worker-v3-20261027' || github.ref == 'refs/heads/validation/magalu-recovery-focal-main-20261108' || github.ref == 'refs/heads/validation/guardian-v1-magalu-sku-identity-20261108'
+        if: github.ref == 'refs/heads/validation/magalu-firstparty-worker-v3-20261027' || github.ref == 'refs/heads/validation/magalu-recovery-focal-main-20261108' || github.ref == 'refs/heads/validation/guardian-v1-magalu-sku-identity-20261108' || github.ref == 'refs/heads/validation/magalu-anchor-identity-20261109'
         shell: bash
         run: |
           set -euo pipefail

@@ -112,6 +112,17 @@ async function testarNavegacao(caso, alterarProduto = produto => produto) {
         sourceUrl: caso.sourceUrl,
         identityKey: teste.identityKey
       }).identidadeValidada, true);
+      const now = Date.parse(resultado.collectedAt);
+      assert.throws(() => validarResultadoMagaluIdentity(resultado, {
+        sourceUrl: caso.sourceUrl,
+        identityKey: teste.identityKey,
+        agoraMs: now + 10 * 60 * 1000
+      }), /magalu_identity_resultado_stale/, "resultado antigo não pode validar nova tentativa");
+      assert.throws(() => validarResultadoMagaluIdentity(resultado, {
+        sourceUrl: casos[0].sourceUrl === caso.sourceUrl ? casos[1].sourceUrl : casos[0].sourceUrl,
+        identityKey: teste.identityKey,
+        agoraMs: now
+      }), /magalu_identity_task_invalida/, "resultado não atravessa tarefas de links diferentes");
     }
     for (const { alterar, motivo } of [
       { alterar: produto => ({ ...produto, produtoId: "produto-alheio" }), motivo: /magalu_identity_produto_id_divergente/ },
