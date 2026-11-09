@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { normalizarOfertaImportada } = require('../modules/engine/importer/importer.service');
+const { normalizarOfertaImportada, reclassificarCategoriaFinalEngine } = require('../modules/engine/importer/importer.service');
 const { tituloComercialUniversalValido } = require('../modules/radar/comercial-precedencia');
 
 for (const [marketplace, titulo] of [
@@ -36,4 +36,71 @@ const oficial = normalizarOfertaImportada({ marketplace: 'shopee',
 assert.equal(oficial.titulo, 'Fone Bluetooth JBL Tune 520BT Preto');
 assert.equal(oficial.categoria, 'Áudio e Vídeo');
 assert.equal(oficial.produtoIdDetectado, '123/456');
+
+const ofertaAncorada = (idLink, idProduto = idLink) => normalizarOfertaImportada({
+  marketplace: 'shopee', titulo: 'Grupo de ofertas Gerais', preco: 32,
+  precoOriginal: 49, cupom: 'RADAR10',
+  linkOriginal: `https://shopee.com.br/product/123/${idLink}`,
+  linkExpandido: `https://shopee.com.br/product/123/${idLink}`,
+  produtoIdDetectado: `123/${idLink}`,
+  metadata: { adapter: 'shopee', produto: {
+    titulo: 'Fone Bluetooth JBL Tune 520BT Preto', shopId: '123', itemId: idProduto,
+    identidadeProdutoValidada: { shopId: '123', itemId: idProduto, fonte: 'api.productOfferV2' }
+  }, linksComerciais: [
+    { papelLink: 'produto', urlOriginal: `https://shopee.com.br/product/123/${idLink}` },
+    { papelLink: 'resgate', urlOriginal: 'https://shopee.com.br/voucher/ABC' }
+  ] }
+}, { marketplace: 'shopee', cliente_id: 'workspace_a' });
+const mesmoProduto = ofertaAncorada('456');
+assert.equal(mesmoProduto.titulo, 'Fone Bluetooth JBL Tune 520BT Preto');
+const textoRadarPlausivel = ofertaAncorada('456');
+textoRadarPlausivel.titulo = 'Fone sem fio em promoção';
+const oficialPrevalece = normalizarOfertaImportada({
+  marketplace: 'shopee', titulo: textoRadarPlausivel.titulo,
+  linkExpandido: 'https://shopee.com.br/product/123/456', produtoIdDetectado: '123/456',
+  metadata: { adapter: 'shopee', produto: { titulo: 'Fone Bluetooth JBL Tune 520BT Preto',
+    shopId: '123', itemId: '456' } }
+}, { marketplace: 'shopee' });
+assert.equal(oficialPrevalece.titulo, 'Fone Bluetooth JBL Tune 520BT Preto');
+assert.equal(mesmoProduto.cupom, 'RADAR10');
+assert.equal(mesmoProduto.metadata.linksComerciais.length, 2);
+assert.equal(mesmoProduto.linkOriginal, 'https://shopee.com.br/product/123/456');
+assert.equal(ofertaAncorada('456', '999').titulo, '');
+assert.equal(ofertaAncorada('456', '999').categoria, 'Diversos');
+const divergenteFinal = ofertaAncorada('456', '999');
+assert.equal(reclassificarCategoriaFinalEngine(divergenteFinal, divergenteFinal.metadata,
+  { marketplace: 'shopee' }).oferta.categoria, 'Diversos');
+
+const fallbackRadar = normalizarOfertaImportada({ marketplace: 'amazon',
+  titulo: 'Placa de captura HDMI USB 3.0 1080P 60 FPS', preco: 77,
+  metadata: { adapter: 'amazon', diagnosticoAmazon: { tituloOrigem: 'radar_mirror' },
+    produto: { titulo: '', urlFinal: '' } }
+}, { marketplace: 'amazon' });
+assert.equal(fallbackRadar.titulo, 'Placa de captura HDMI USB 3.0 1080P 60 FPS');
+assert.equal(normalizarOfertaImportada({ marketplace: 'amazon', titulo: 'Grupo de ofertas Gerais',
+  metadata: { adapter: 'amazon', diagnosticoAmazon: { tituloOrigem: 'radar_mirror' }, produto: {} }
+}, { marketplace: 'amazon' }).titulo, '');
+
+for (const [marketplace, linkExpandido, productId, produto, metadataExtra, tituloOficial] of [
+  ['aliexpress', 'https://www.aliexpress.com/item/1005010148896613.html', '1005010148896613',
+    { productId: '1005010148896613' }, { produtoCanonico: { produtoId: '1005010148896613' } }, 'SSD NVMe Movespeed 4TB'],
+  ['amazon', 'https://www.amazon.com.br/dp/B012345678', '',
+    { urlFinal: 'https://www.amazon.com.br/dp/B012345678' },
+    { diagnosticoAmazon: { tituloOrigem: 'amazon_importer', importadorBloqueado: false } }, 'Placa de captura HDMI USB 3.0'],
+  ['magalu', 'https://www.magazineluiza.com.br/produto/p/abc123/te/ga07/', 'abc123',
+    { produtoId: 'abc123' }, { fallbackRadar: { identidadeProdutoConfirmada: true } }, 'Kit Utensílios Cozinha com Suporte']
+]) {
+  const base = { marketplace, titulo: 'Grupo de ofertas Gerais', produtoIdDetectado: productId,
+    linkExpandido, preco: 25, cupom: 'RADAR',
+    metadata: { adapter: marketplace, produto: { ...produto, titulo: tituloOficial }, ...metadataExtra } };
+  const confirmado = normalizarOfertaImportada(base, { marketplace, cliente_id: 'workspace_a' });
+  assert.equal(confirmado.titulo, tituloOficial, `${marketplace}: título oficial`);
+  assert.equal(confirmado.preco, 25);
+  assert.equal(confirmado.cupom, 'RADAR');
+  if (marketplace !== 'amazon') {
+    const divergente = normalizarOfertaImportada({ ...base, produtoIdDetectado: 'produto-diferente' },
+      { marketplace, cliente_id: 'workspace_b' });
+    assert.equal(divergente.titulo, '', `${marketplace}: ID divergente`);
+  }
+}
 console.log('engine-anchor-title-category-focal.test.cjs OK');
