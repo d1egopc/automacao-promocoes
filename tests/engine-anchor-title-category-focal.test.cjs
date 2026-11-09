@@ -53,6 +53,23 @@ const ofertaAncorada = (idLink, idProduto = idLink) => normalizarOfertaImportada
 }, { marketplace: 'shopee', cliente_id: 'workspace_a' });
 const mesmoProduto = ofertaAncorada('456');
 assert.equal(mesmoProduto.titulo, 'Fone Bluetooth JBL Tune 520BT Preto');
+for (const propagandaRadar of [
+  'Bot de Alertas: @TalkPCAlertasBot',
+  'Aproveita e convida os amigos pro grupo enviando o link abaixo:',
+  'Todo mundo vai perguntar qual é o seu perfume'
+]) {
+  const oferta = normalizarOfertaImportada({
+    marketplace: 'shopee', titulo: propagandaRadar, categoria: 'Diversos',
+    linkExpandido: 'https://shopee.com.br/product/123/456', produtoIdDetectado: '123/456',
+    preco: 32, cupom: 'RADAR10', metadata: { adapter: 'shopee', produto: {
+      titulo: 'Fone Bluetooth JBL Tune 520BT Preto', shopId: '123', itemId: '456'
+    } }
+  }, { marketplace: 'shopee' });
+  assert.equal(oferta.titulo, 'Fone Bluetooth JBL Tune 520BT Preto');
+  assert.equal(oferta.categoria, 'Audio TV');
+  assert.equal(oferta.preco, 32);
+  assert.equal(oferta.cupom, 'RADAR10');
+}
 const textoRadarPlausivel = ofertaAncorada('456');
 textoRadarPlausivel.titulo = 'Fone sem fio em promoção';
 const oficialPrevalece = normalizarOfertaImportada({
