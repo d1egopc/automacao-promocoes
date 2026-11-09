@@ -15,7 +15,7 @@ const product = {
   urlOriginal: finalUrl
 };
 
-function setup({ missingAlways = false, error = "", pageUrl = finalUrl, productOverride = {} } = {}) {
+function setup({ missingAlways = false, error = "", pageUrl = finalUrl, productOverride = {}, captures = null } = {}) {
   const calls = [];
   const removed = [];
   const delays = [];
@@ -28,7 +28,8 @@ function setup({ missingAlways = false, error = "", pageUrl = finalUrl, productO
       if (missingAlways || calls.length === 1) {
         throw new Error("Could not establish connection. Receiving end does not exist.");
       }
-      return { ok: true, produto: { ...product, ...productOverride } };
+      const change = captures ? captures[Math.min(calls.length - 2, captures.length - 1)] : productOverride;
+      return { ok: true, produto: { ...product, ...change } };
     },
     remove: async id => removed.push(id),
     onUpdated: { addListener() {}, removeListener() {} }
@@ -66,6 +67,24 @@ test("late document_idle receiver retries in the same tab and validates identity
     assert.deepEqual(fixture.calls[1].options, { frameId: 0 });
     assert.deepEqual(fixture.removed, [71]);
     assert.equal(validarResultadoMagaluIdentity(result, { sourceUrl, identityKey: chaveIdentidadeMagalu(sourceUrl) }).identidadeValidada, true);
+  } finally { fixture.restore(); }
+});
+
+test("late official title is read again from the same product tab after HTTP 403", async () => {
+  const fixture = setup({ captures: [{ titulo: "" }, { titulo: product.titulo }] });
+  try {
+    const result = await resolverAtual();
+    assert.equal(result.observedProductId, product.produtoId);
+    assert.equal(fixture.calls.length, 3, "receiver retry, incomplete title, then official title");
+    assert.deepEqual(fixture.removed, [71]);
+  } finally { fixture.restore(); }
+});
+
+test("late title cannot validate a different product", async () => {
+  const fixture = setup({ captures: [{ titulo: "" }, { titulo: product.titulo, produtoId: "999999999" }] });
+  try {
+    await assert.rejects(resolverAtual(), /magalu_identity_produto_id_divergente/);
+    assert.deepEqual(fixture.removed, [71]);
   } finally { fixture.restore(); }
 });
 
