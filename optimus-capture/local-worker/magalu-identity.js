@@ -5,7 +5,6 @@
   const CONTRACT_VERSION = 1;
   const TIMEOUT_MS = 6500;
   const BROWSER_TIMEOUT_MS = 12000;
-  const TITLE_RECHECK_MS = 400;
   const CAMINHO_SENSIVEL = /(?:^|\/)(?:token|secret|api[_-]?key|authorization|bearer|password|session|cookie|signature|access[_-]?token)(?:\/|$)/i;
 
   function texto(valor = "") { return String(valor ?? "").trim(); }
@@ -104,29 +103,19 @@
       });
       const final = produtoFinal(pronta?.url);
       if (!final) throw new Error("magalu_identity_url_final_nao_produto");
-      let captura = await comPrazo(
+      const captura = await comPrazo(
         capturarComReceptor(tabs, aba.id, final),
         "magalu_identity_browser_timeout"
       );
-      const titleDeadline = Date.now() + BROWSER_TIMEOUT_MS;
-      while (true) {
-        const produto = captura?.produto || {};
-        const confirmacao = produtoFinal(produto.urlOriginal);
-        const atual = produtoFinal((await comPrazo(tabs.get(aba.id), "magalu_identity_browser_timeout"))?.url);
-        if (!captura?.produto) throw new Error("magalu_identity_captura_sem_produto");
-        if (!confirmacao) throw new Error("magalu_identity_captura_url_nao_produto");
-        if (!atual || confirmacao.url !== final.url || atual.url !== final.url) throw new Error("magalu_identity_url_trocada");
-        if (texto(produto.produtoId).toLowerCase() !== final.productId) throw new Error("magalu_identity_produto_id_divergente");
-        // SKU is seller/variant metadata, not the canonical product ID from the URL.
-        if (texto(produto.titulo).length >= 10) {
-          if (!imagemOficial(produto.imagem)) throw new Error("magalu_identity_imagem_nao_oficial");
-          break;
-        }
-        if (Date.now() + TITLE_RECHECK_MS >= titleDeadline) throw new Error("magalu_identity_titulo_ausente");
-        await new Promise(resolve => setTimeout(resolve, TITLE_RECHECK_MS));
-        captura = await comPrazo(tabs.sendMessage(aba.id, { type: "OPTIMUS_CAPTURE_PAGE" }, { frameId: 0 }),
-          "magalu_identity_browser_timeout");
-      }
+      const produto = captura?.produto || {};
+      const confirmacao = produtoFinal(produto.urlOriginal);
+      const atual = produtoFinal((await comPrazo(tabs.get(aba.id), "magalu_identity_browser_timeout"))?.url);
+      if (!captura?.produto) throw new Error("magalu_identity_captura_sem_produto");
+      if (!confirmacao) throw new Error("magalu_identity_captura_url_nao_produto");
+      if (!atual || confirmacao.url !== final.url || atual.url !== final.url) throw new Error("magalu_identity_url_trocada");
+      if (texto(produto.produtoId).toLowerCase() !== final.productId) throw new Error("magalu_identity_produto_id_divergente");
+      // SKU is seller/variant metadata, not the canonical product ID from the URL.
+      if (!imagemOficial(produto.imagem)) throw new Error("magalu_identity_imagem_nao_oficial");
       return final;
     } finally {
       if (Number.isInteger(aba?.id)) {

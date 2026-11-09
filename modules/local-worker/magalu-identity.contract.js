@@ -89,7 +89,8 @@ function validarResultadoMagaluIdentity(payload = {}, opcoes = {}) {
   if (texto(prova.capability) !== MAGALU_IDENTITY_CAPABILITY || Number(prova.contractVersion) !== MAGALU_IDENTITY_CONTRACT_VERSION ||
     texto(prova.source) !== "local_first_party" || texto(prova.provenance) !== "local_worker.magalu_identity_v1" ||
     texto(prova.identityKey) !== identityKey || texto(prova.observedProductId).toLowerCase() !== observedProductId ||
-    prova.redirected !== true || sanitizarUrlProdutoMagalu(prova.finalUrl) !== finalUrl) {
+    prova.redirected !== true || sanitizarUrlProdutoMagalu(prova.finalUrl) !== finalUrl ||
+    Date.parse(texto(prova.collectedAt)) !== coletado.getTime()) {
     throw erroContrato("magalu_identity_prova_invalida");
   }
   return {

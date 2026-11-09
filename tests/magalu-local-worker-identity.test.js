@@ -5,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const {
   MAGALU_IDENTITY_CAPABILITY,
+  MAGALU_IDENTITY_RESULT_TTL_MS,
   sanitizarUrlOneLinkMagalu,
   chaveIdentidadeMagalu,
   validarResultadoMagaluIdentity
@@ -61,6 +62,35 @@ function storageFake(dados) {
   const validado = validarResultadoMagaluIdentity(resolvido, { sourceUrl, identityKey });
   assert.strictEqual(validado.identidadeValidada, true);
   assert.strictEqual(validado.observedProductId, "123456789");
+  assert.strictEqual(Object.hasOwn(resolvido, "titulo"), false, "official identity result remains valid without a title");
+  const agoraIdentidadeMs = Date.now();
+  const dadosComTimestamp = (collectedAt, proofCollectedAt = collectedAt) => ({
+    ...resolvido,
+    collectedAt,
+    provaTecnica: { ...resolvido.provaTecnica, collectedAt: proofCollectedAt }
+  });
+  for (const collectedAt of [
+    "data-invalida",
+    new Date(agoraIdentidadeMs + 30_001).toISOString(),
+    new Date(agoraIdentidadeMs - MAGALU_IDENTITY_RESULT_TTL_MS).toISOString()
+  ]) {
+    assert.throws(
+      () => validarResultadoMagaluIdentity(dadosComTimestamp(collectedAt), { sourceUrl, identityKey, agoraMs: agoraIdentidadeMs }),
+      /magalu_identity_resultado_stale/
+    );
+  }
+  const timestampRecente = new Date(agoraIdentidadeMs - MAGALU_IDENTITY_RESULT_TTL_MS + 1).toISOString();
+  assert.strictEqual(validarResultadoMagaluIdentity(
+    dadosComTimestamp(timestampRecente), { sourceUrl, identityKey, agoraMs: agoraIdentidadeMs }
+  ).identidadeValidada, true);
+  assert.throws(() => validarResultadoMagaluIdentity(
+    dadosComTimestamp(timestampRecente, new Date(agoraIdentidadeMs - 1000).toISOString()),
+    { sourceUrl, identityKey, agoraMs: agoraIdentidadeMs }
+  ), /magalu_identity_prova_invalida/);
+  assert.throws(() => validarResultadoMagaluIdentity(
+    { ...dadosComTimestamp(timestampRecente), provaTecnica: null },
+    { sourceUrl, identityKey, agoraMs: agoraIdentidadeMs }
+  ), /magalu_identity_prova_invalida/);
 
   let garantirArgs = null;
   let cache = null;
@@ -153,11 +183,90 @@ function storageFake(dados) {
     resolver: async () => resolvido
   };
   delete require.cache[require.resolve("../optimus-capture/local-worker/task-runner.js")];
-  const runner = require("../optimus-capture/local-worker/task-runner.js");
+  let runner = require("../optimus-capture/local-worker/task-runner.js");
+  const agoraWorkerMs = Date.now();
+  assert.strictEqual(runner.classificarFrescorMagaluIdentity("data-invalida", agoraWorkerMs), "magalu_identity_resultado_stale_timestamp_invalido");
+  assert.strictEqual(runner.classificarFrescorMagaluIdentity(new Date(agoraWorkerMs + 30_001).toISOString(), agoraWorkerMs), "magalu_identity_resultado_stale_timestamp_futuro");
+  assert.strictEqual(runner.classificarFrescorMagaluIdentity(new Date(agoraWorkerMs - MAGALU_IDENTITY_RESULT_TTL_MS).toISOString(), agoraWorkerMs), "magalu_identity_resultado_stale_timestamp_expirado");
+  assert.strictEqual(runner.classificarFrescorMagaluIdentity(new Date(agoraWorkerMs - MAGALU_IDENTITY_RESULT_TTL_MS + 1).toISOString(), agoraWorkerMs), "");
   await runner.processar();
   assert.strictEqual(results, 1);
   assert.strictEqual(local[runner.STORAGE_KEYS.STATE], undefined);
   assert.strictEqual(session[runner.STORAGE_KEYS.LEASE], undefined);
+
+  let identityCaptures = 0;
+  let identityResults = 0;
+  const postedIdentity = [];
+  const identityTask = { ...task, id: "502", leaseToken: "lease-502", attempts: 1 };
+  global.OptimusLocalWorkerClient = {
+    CAPABILITY: "magalu_image_v1",
+    MAGALU_IDENTITY_CAPABILITY,
+    bootstrap: async () => ({ token: "worker-token", workerId: "worker-1" }),
+    claim: async () => ({ task: { ...identityTask } }),
+    heartbeat: async () => ({ ok: true }),
+    result: async (_task, payload) => {
+      identityResults += 1;
+      postedIdentity.push(payload);
+      if (identityResults === 1) throw Object.assign(new Error("local_worker_request_timeout"), { name: "AbortError" });
+      return { ok: true };
+    },
+    failure: async () => { throw new Error("failure_not_expected"); }
+  };
+  global.OptimusMagaluIdentityResolver = {
+    sourceUrlSegura: valor => sanitizarUrlOneLinkMagalu(valor),
+    resolver: async () => {
+      identityCaptures += 1;
+      const collectedAt = new Date().toISOString();
+      return { ...resolvido, collectedAt, provaTecnica: { ...resolvido.provaTecnica, collectedAt } };
+    }
+  };
+  await runner.processar();
+  assert.strictEqual(local[runner.STORAGE_KEYS.STATE].stage, runner.STAGES.RESULT_PENDING, "ambiguous result send keeps pending proof");
+  const timestampAntigo = new Date(Date.now() - MAGALU_IDENTITY_RESULT_TTL_MS - 1000).toISOString();
+  local[runner.STORAGE_KEYS.STATE].collectedAt = timestampAntigo;
+  local[runner.STORAGE_KEYS.STATE].provaTecnica.collectedAt = timestampAntigo;
+  await runner.processar();
+  assert.strictEqual(identityCaptures, 2, "expired RESULT_PENDING is replaced by one new real capture");
+  assert.strictEqual(identityResults, 2, "old proof is not resent after backend expiry");
+  assert.notStrictEqual(postedIdentity[1].collectedAt, timestampAntigo);
+  assert.strictEqual(postedIdentity[1].collectedAt, postedIdentity[1].provaTecnica.collectedAt);
+  assert.strictEqual(local[runner.STORAGE_KEYS.BREADCRUMBS].some(item => item.stage === "MAGALU_IDENTITY_RESULT_REFRESH" && item.motivo === "magalu_identity_resultado_stale_timestamp_expirado"), true);
+  assert.strictEqual(local[runner.STORAGE_KEYS.STATE], undefined);
+
+  let futureCaptures = 0;
+  let futureResults = 0;
+  const futureTask = { ...task, id: "503", leaseToken: "lease-503", attempts: 1 };
+  global.OptimusLocalWorkerClient = {
+    CAPABILITY: "magalu_image_v1",
+    MAGALU_IDENTITY_CAPABILITY,
+    bootstrap: async () => ({ token: "worker-token", workerId: "worker-1" }),
+    claim: async () => ({ task: { ...futureTask } }),
+    heartbeat: async () => ({ ok: true }),
+    result: async () => {
+      futureResults += 1;
+      if (futureResults === 1) {
+        const erro = new Error("magalu_identity_resultado_stale");
+        erro.codigo = erro.message;
+        erro.status = 422;
+        throw erro;
+      }
+      return { ok: true };
+    },
+    failure: async () => { throw new Error("failure_not_expected"); }
+  };
+  global.OptimusMagaluIdentityResolver = {
+    sourceUrlSegura: valor => sanitizarUrlOneLinkMagalu(valor),
+    resolver: async () => {
+      futureCaptures += 1;
+      const collectedAt = new Date().toISOString();
+      return { ...resolvido, collectedAt, provaTecnica: { ...resolvido.provaTecnica, collectedAt } };
+    }
+  };
+  await runner.processar();
+  assert.strictEqual(futureCaptures, 2, "backend stale rejects current result then requests one fresh capture");
+  assert.strictEqual(futureResults, 2);
+  assert.strictEqual(local[runner.STORAGE_KEYS.BREADCRUMBS].some(item => item.stage === "MAGALU_IDENTITY_RESULT_REFRESH" && item.motivo === "magalu_identity_resultado_stale_backend"), true);
+  assert.strictEqual(local[runner.STORAGE_KEYS.STATE], undefined);
 
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "optimus-capture", "manifest.json"), "utf8"));
   assert(manifest.host_permissions.includes("https://magazineluiza.onelink.me/*"));

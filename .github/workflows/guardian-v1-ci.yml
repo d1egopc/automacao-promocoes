@@ -543,7 +543,7 @@ jobs:
           test -z "${DATABASE_URL:-}"
           node --check optimus-capture/local-worker/magalu-identity.js
           node --check optimus-capture/adapters/magalu.js
-          node --test tests/magalu-worker-boundary-focal.test.cjs tests/magalu-firstparty-identity-fallback.test.cjs tests/magalu-local-worker-identity.test.js tests/magalu-local-worker-sku-identity.test.cjs tests/optimus-capture-magalu.test.js tests/optimus-capture-magalu-opportunity.test.js tests/magalu-v2-golden-path.test.js tests/magalu-recovery-retry.test.cjs tests/magalu-image-resolver.test.js tests/magalu-identity-engine-importer.test.js tests/local-worker-platform-architecture.test.cjs tests/optimus-capture-extension.test.js tests/manual-v2-import-magalu.test.js > "$RUNNER_TEMP/magalu-firstparty-tests.log" 2>&1 || {
+          node --test tests/magalu-worker-boundary-focal.test.cjs tests/magalu-firstparty-identity-fallback.test.cjs tests/magalu-local-worker-identity.test.js tests/magalu-local-worker-sku-identity.test.cjs tests/optimus-capture-magalu.test.js tests/optimus-capture-magalu-opportunity.test.js tests/magalu-v2-golden-path.test.js tests/magalu-recovery-retry.test.cjs tests/magalu-image-resolver.test.js tests/magalu-identity-engine-importer.test.js tests/magalu-engine-importer.test.js tests/local-worker-platform-architecture.test.cjs tests/optimus-capture-extension.test.js tests/manual-v2-import-magalu.test.js > "$RUNNER_TEMP/magalu-firstparty-tests.log" 2>&1 || {
             tail -n 120 "$RUNNER_TEMP/magalu-firstparty-tests.log"
             exit 1
           }

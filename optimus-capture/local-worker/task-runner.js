@@ -21,6 +21,8 @@
   const MAX_BREADCRUMBS = 20;
   const MAGALU_HOST = "www.magazinevoce.com.br";
   const MAGALU_IDENTITY_CAPABILITY = "magalu_identity_v1";
+  const MAGALU_IDENTITY_RESULT_TTL_MS = 10 * 60 * 1000;
+  const MAGALU_IDENTITY_MAX_FUTURE_SKEW_MS = 30_000;
   const MAGALU_OPPORTUNITY_CAPABILITY = "magalu_opportunity_v1";
   const ML_CAPABILITY = "ml_image_v1";
   const ML_IDENTITY_CAPABILITY = "ml_identity_v1";
@@ -49,6 +51,21 @@
   function erroTexto(erro, fallback = "local_worker_falhou") {
     const bruto = texto(erro?.codigo || erro?.message || erro) || fallback;
     return bruto.replace(/[^a-zA-Z0-9_.:-]+/g, "_").slice(0, 160);
+  }
+  function classificarFrescorMagaluIdentity(collectedAt, agoraMs = Date.now()) {
+    const collectedAtMs = Date.parse(texto(collectedAt));
+    if (!Number.isFinite(collectedAtMs)) return "magalu_identity_resultado_stale_timestamp_invalido";
+    if (collectedAtMs > Number(agoraMs) + MAGALU_IDENTITY_MAX_FUTURE_SKEW_MS) return "magalu_identity_resultado_stale_timestamp_futuro";
+    if (Number(agoraMs) - collectedAtMs >= MAGALU_IDENTITY_RESULT_TTL_MS) return "magalu_identity_resultado_stale_timestamp_expirado";
+    return "";
+  }
+  function motivoFrescorResultadoMagaluIdentity(erro, collectedAt) {
+    const codigo = erroTexto(erro, "").toLowerCase();
+    if (/^magalu_identity_resultado_stale_timestamp_(?:invalido|futuro|expirado)$/.test(codigo)) return codigo;
+    if (codigo === "magalu_identity_resultado_stale") {
+      return classificarFrescorMagaluIdentity(collectedAt) || "magalu_identity_resultado_stale_backend";
+    }
+    return "";
   }
   function storageLocal() { return global.chrome?.storage?.local || null; }
   function storageSession() { return global.chrome?.storage?.session || null; }
@@ -151,6 +168,7 @@
       canonicalUrl: texto(valor.canonicalUrl),
       variationId: texto(valor.variationId),
       collectedAt: texto(valor.collectedAt),
+      freshCaptureCount: Math.max(0, Number(valor.freshCaptureCount || 0)),
       finalUrl: texto(valor.finalUrl),
       checkedAt: texto(valor.checkedAt),
       provaTecnica: valor.provaTecnica ? provaPublica(valor.provaTecnica) : null,
@@ -300,6 +318,25 @@
       }
       throw erro;
     }
+  }
+  async function prepararRecapturaMagaluIdentity(estado, task, motivo) {
+    if (Number(estado?.freshCaptureCount || 0) >= 1) {
+      await registrarBreadcrumb("MAGALU_IDENTITY_RESULT_REFRESH_LIMIT", task, { motivo, taskStage: estado?.stage });
+      return null;
+    }
+    if (!await validarLease(task, estado)) return false;
+    const identidadeLimpa = {
+      identityKey: "",
+      observedProductId: "",
+      identidadeValidada: false,
+      finalUrl: "",
+      canonicalUrl: "",
+      collectedAt: "",
+      provaTecnica: null,
+      freshCaptureCount: Number(estado?.freshCaptureCount || 0) + 1
+    };
+    await registrarBreadcrumb("MAGALU_IDENTITY_RESULT_REFRESH", task, { motivo, taskStage: estado?.stage });
+    return marcarStage(estado, STAGES.RESOLVING_PAGE, identidadeLimpa, { motivo });
   }
   async function marcarStage(estado, stage, extras = {}, opcoes = {}) {
     const mudou = texto(estado?.stage) !== texto(stage);
@@ -593,6 +630,13 @@
         continue;
       }
       if (atual.stage === STAGES.RESULT_PENDING) {
+        const frescorLocal = classificarFrescorMagaluIdentity(atual.collectedAt);
+        if (frescorLocal) {
+          const recapturada = await prepararRecapturaMagaluIdentity(atual, task, frescorLocal);
+          if (recapturada === false) return;
+          if (recapturada) { atual = recapturada; continue; }
+          throw new Error(frescorLocal);
+        }
         try {
           const resposta = await global.OptimusLocalWorkerClient.result(task, {
             leaseToken: task.leaseToken,
@@ -614,6 +658,13 @@
           return;
         } catch (erro) {
           await registrarBreadcrumb("MAGALU_IDENTITY_RESULT_ERROR", task, { motivo: erroTexto(erro), status: erro?.status, taskStage: atual.stage });
+          const motivoFrescor = motivoFrescorResultadoMagaluIdentity(erro, atual.collectedAt);
+          if (motivoFrescor) {
+            const recapturada = await prepararRecapturaMagaluIdentity(atual, task, motivoFrescor);
+            if (recapturada === false) return;
+            if (recapturada) { atual = recapturada; continue; }
+            throw new Error(motivoFrescor);
+          }
           if (erroAmbiguo(erro)) return;
           throw erro;
         }
@@ -814,6 +865,6 @@
       }
     } catch (_) {}
   }
-  global.OptimusLocalWorkerRunner = { iniciar, processar, limparEstado, INTERVAL_MINUTES, ALARM_NAME, STAGES, STORAGE_KEYS, MAX_BREADCRUMBS, LIVENESS, MAGALU_IDENTITY_CAPABILITY, ML_CAPABILITY, ML_IDENTITY_CAPABILITY };
+  global.OptimusLocalWorkerRunner = { iniciar, processar, limparEstado, INTERVAL_MINUTES, ALARM_NAME, STAGES, STORAGE_KEYS, MAX_BREADCRUMBS, LIVENESS, MAGALU_IDENTITY_CAPABILITY, classificarFrescorMagaluIdentity, ML_CAPABILITY, ML_IDENTITY_CAPABILITY };
   if (typeof module !== "undefined" && module.exports) module.exports = global.OptimusLocalWorkerRunner;
 })(typeof globalThis !== "undefined" ? globalThis : self);
