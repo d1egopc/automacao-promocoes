@@ -19,7 +19,10 @@ const {
   sqlRetryPreImporter
 } = require("../frescor-pre-importer.service");
 const { normalizarTexto } = require("../normalizers");
-const { classificarCategoriaOferta } = require("../../../marketplaces/inteligencia/classificador-categorias");
+const { classificarCategoriaOferta, avaliarEvidenciaCategoria } = require("../../../marketplaces/inteligencia/classificador-categorias");
+const { extrairIdsShopee } = require("../../../marketplaces/shopee/normalizacao");
+const { extrairProductIdAliExpressManual } = require("../../../marketplaces/aliexpress/importar");
+const { produtoIdPorUrl: produtoIdMagaluPorUrl } = require("../../marketplaces/magalu/magalu-parser");
 const {
   htmlDecode,
   extrairMeta,
@@ -143,9 +146,18 @@ function categoriaGenericaEngine(categoria = "") {
 
 function resolverCategoriaEngine(resultado = {}, job = {}) {
   const categoria = normalizarTexto(resultado.categoria || resultado.categoriaProduto || "");
+  const titulo = normalizarTexto(resultado.titulo || resultado.nome || "");
+  if (!categoriaGenericaEngine(categoria) && tituloComercialUniversalValido(titulo, {
+    marketplace: resultado.marketplace || job.marketplace || job.marketplace_detectado || ""
+  })) {
+    const evidencia = avaliarEvidenciaCategoria({ titulo, nome: titulo, categoria }, titulo);
+    if (evidencia?.origem === "identidade_produto" && evidencia.divergencia === true &&
+        (evidencia.confianca === "alta" || evidencia.motivo === "natureza_nautica_sem_taxonomia")) {
+      return evidencia.categoria;
+    }
+  }
   if (!categoriaGenericaEngine(categoria)) return categoria;
 
-  const titulo = normalizarTexto(resultado.titulo || resultado.nome || "");
   return classificarCategoriaOferta({
     titulo,
     nome: titulo,
@@ -249,7 +261,10 @@ function resolverTituloFactualEngine(oferta = {}, metadataFinal = {}, job = {}) 
   const metadata = objetoSeguro(metadataFinal);
   const produto = objetoSeguro(metadata.produto || oferta.metadata?.produto);
   const precedencia = objetoSeguro(metadata.precedenciaComercial);
-  const candidatos = [
+  const candidatos = metadata.adapter ? [
+    ["oferta.titulo", oferta.titulo || oferta.nome],
+    ["oferta.tituloFactual", oferta.tituloFactual]
+  ] : [
     ["metadata.produto.titulo", produto.titulo || produto.nome || produto.name || produto.title],
     ["metadata.produto.tituloOriginal", produto.tituloOriginal || produto.tituloFactual],
     ["oferta.titulo", oferta.titulo || oferta.nome],
@@ -1039,6 +1054,47 @@ async function registrarEtapaImportacao(jobId, etapa, status, motivo = "", detal
   });
 }
 
+function comprovarTituloTecnicoDoLink(resultado = {}, produto = {}, mlConfirmado = false) {
+  const metadata = resultado.metadata || {};
+  const adapter = normalizarTexto(metadata.adapter || "").toLowerCase();
+  const link = normalizarTexto(resultado.linkExpandido || metadata.url_expandida || produto.urlFinal || produto.linkExpandido || "");
+  const id = normalizarTexto(resultado.produtoIdDetectado || resultado.produtoId || metadata.produtoId || "");
+  if (adapter === "mercadolivre" || mlConfirmado) return { confirmada: mlConfirmado, fallbackRadar: Boolean(metadata.fallbackMercadoLivreRadar) };
+  if (adapter === "shopee") {
+    const idsLink = extrairIdsShopee(link);
+    const idsProduto = produto.identidadeProdutoValidada || produto;
+    return { confirmada: Boolean(idsLink.shopId && idsLink.itemId &&
+      String(idsLink.shopId) === String(idsProduto.shopId) && String(idsLink.itemId) === String(idsProduto.itemId) &&
+      `${idsLink.shopId}/${idsLink.itemId}` === id) };
+  }
+  if (adapter === "aliexpress") {
+    const idLink = extrairProductIdAliExpressManual(link);
+    const idProduto = normalizarTexto(produto.productId || produto.produtoId || produto.product_id || "");
+    return { confirmada: Boolean(idLink && idLink === id && id === idProduto &&
+      id === normalizarTexto(metadata.produtoCanonico?.produtoId || "")) };
+  }
+  if (adapter === "amazon") {
+    const asinLink = link.match(/\/(?:dp|gp\/product)\/([a-z0-9]{10})(?:[/?#]|$)/i)?.[1] || "";
+    const asinProduto = normalizarTexto(produto.asin || produto.productId || "") ||
+      (normalizarTexto(produto.urlFinal || "").match(/\/(?:dp|gp\/product)\/([a-z0-9]{10})(?:[/?#]|$)/i)?.[1] || "");
+    const origem = metadata.diagnosticoAmazon?.tituloOrigem;
+    return { confirmada: Boolean(asinLink && asinProduto && asinLink.toUpperCase() === asinProduto.toUpperCase() &&
+      origem === "amazon_importer" && metadata.diagnosticoAmazon?.importadorBloqueado !== true),
+      fallbackRadar: origem === "radar_mirror" };
+  }
+  if (adapter === "magalu") {
+    const idLink = produtoIdMagaluPorUrl(link);
+    return { confirmada: Boolean(idLink && idLink.toLowerCase() === id.toLowerCase() &&
+      metadata.fallbackRadar?.identidadeProdutoConfirmada === true),
+      fallbackRadar: metadata.fallbackRadar?.tituloRadarUsado === true };
+  }
+  if (adapter === "awin_kabum") {
+    const idLink = link.match(/kabum\.com\.br\/produto\/(\d+)/i)?.[1] || "";
+    return { confirmada: Boolean(idLink && idLink === normalizarTexto(produto.produtoIdCanonico || produto.produtoId)) };
+  }
+  return { confirmada: false };
+}
+
 function normalizarOfertaImportada(resultado = {}, job = {}) {
   const produtoMetadata = resultado?.metadata?.produto && typeof resultado.metadata.produto === "object"
     ? resultado.metadata.produto
@@ -1058,13 +1114,21 @@ function normalizarOfertaImportada(resultado = {}, job = {}) {
     && !resultado.metadata?.fallbackMercadoLivreClonador
     && !resultado.metadata?.fallbackMercadoLivreRadar;
   const tituloMetadata = normalizarTexto(produtoMetadata.titulo || produtoMetadata.nome || produtoMetadata.title || "");
-  const tituloParaCategoria = tituloSeguro || (
-    tituloOficialConfirmado && tituloComercialUniversalValido(tituloMetadata, { marketplace: marketplaceTitulo }) ? tituloMetadata : ""
-  );
+  const identidadeTecnica = comprovarTituloTecnicoDoLink(resultado, produtoMetadata, tituloOficialConfirmado);
+  const tituloTecnico = identidadeTecnica.confirmada &&
+    tituloComercialUniversalValido(tituloMetadata, { marketplace: marketplaceTitulo })
+    ? tituloMetadata : "";
+  // Um título proveniente do Radar só serve de descrição do produto se passar
+  // pelo filtro factual. Ele nunca substitui um título oficial ancorado.
+  const tituloFallback = tituloSeguro && tituloFactualConfiavelEngine(tituloSeguro, marketplaceTitulo) &&
+    (!resultado.metadata?.adapter || identidadeTecnica.fallbackRadar === true)
+    ? tituloSeguro : "";
+  const tituloParaCategoria = tituloTecnico || tituloFallback;
   const resultadoParaCategoria = tituloParaCategoria
     ? { ...resultado, titulo: tituloParaCategoria, nome: tituloParaCategoria }
-    : { ...resultado, titulo: "", nome: "" };
-  const tituloFactual = resolverTituloFactualEngine({
+    : { ...resultado, titulo: "", nome: "",
+        ...(resultado.metadata?.adapter ? { categoria: "", categoriaProduto: "" } : {}) };
+  const tituloFactualAnterior = resolverTituloFactualEngine({
     ...resultado,
     titulo: tituloSeguro,
     nome: tituloSeguro,
@@ -1072,7 +1136,8 @@ function normalizarOfertaImportada(resultado = {}, job = {}) {
     linkOriginal: resultado.linkOriginal || "",
     linkExpandido: resultado.linkExpandido || resultado.urlFinal || ""
   }, resultado.metadata || {}, job);
-  const tituloFinal = tituloSeguro || (tituloOficialConfirmado ? tituloFactual.titulo : "");
+  const tituloFinal = tituloTecnico || tituloFallback || (tituloOficialConfirmado ? tituloFactualAnterior.titulo : "");
+  const tituloFactual = resultado.metadata?.adapter ? { titulo: tituloFinal } : tituloFactualAnterior;
   const origemFluxo = resolverOrigemFluxo(resultado, job);
 
   return {

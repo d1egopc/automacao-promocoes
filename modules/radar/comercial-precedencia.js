@@ -34,6 +34,8 @@ function normalizarPapelComercial(valor = "") {
 function tituloPublicitarioOuInstrucao(titulo = "") {
   const normalizado = normalizarPapelComercial(titulo);
   if (!normalizado) return false;
+  if (/^(?:bot de alertas?\b|grupo de ofertas?\b|grupos? (?:de )?(?:ofertas?|promocoes?)\b)/.test(normalizado)) return true;
+  if (/^(?:no|na) (?:app|aplicativo)\b.*\b(?:abrir|abre|pagina|moedas)\b/.test(normalizado)) return true;
   if (/^(?:use|utilize|aplique|resgate|clique|acesse|toque|selecione|va|siga)\b/.test(normalizado)) return true;
   if (/\b(?:beneficio|beneficios)\b.*\b(?:esse|essa|este|esta|item|oferta|bebida|casa)\b/.test(normalizado)) return true;
   if (/\b(?:tem|confira|veja)\b.*\b(?:beneficio|oferta)\b.*\b(?:item|bebida|casa)\b/.test(normalizado)) return true;

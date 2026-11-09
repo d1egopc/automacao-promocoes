@@ -7,6 +7,7 @@ on:
       - validation/ml-title-identity-reconciled-20261108
       - validation/magalu-identity-subreason-20261108
       - validation/magalu-anchor-identity-20261109
+      - validation/universal-anchor-title-category-20261109
       - validation/intelligence-metadata-reconciled-20261108
       - validation/mensageiro-v4-20261025
       - validation/mensageiro-v4-canary-runtime-20261025
@@ -495,6 +496,15 @@ jobs:
           test "$RUNNER_ENVIRONMENT" = github-hosted
           test -z "${DATABASE_URL:-}"
           node --test tests/intelligence-v1-metadata-boundary-observation.test.cjs tests/intelligence-v1-release-candidate.test.cjs tests/intelligence-v1-phase-d.test.cjs tests/intelligence-v1-phase-c.test.cjs
+      - name: PR 43 link-anchor title, category and Radar commercial regressions
+        if: github.ref == 'refs/heads/validation/universal-anchor-title-category-20261109'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node --test tests/engine-anchor-title-category-focal.test.cjs tests/mercadolivre-identidade-promocional-focal.test.cjs tests/diversos-titulos-focal.test.cjs tests/classificador-v3-evidencia-marketplace.test.cjs tests/classificador-universal-v3.test.cjs
+          node --test tests/links-comerciais-v2-aliexpress-shopee.test.js tests/aliexpress-app-moedas-contrato.test.js tests/aliexpress-afiliacao-workspace.test.js tests/shopee-rio-titulo-beneficio.test.js tests/ofc-v24-espelho-comercial.test.js tests/contrato-comercial-final-universal.test.js
       - name: Guardião V1 self-tests
         run: node tests/guardian-v1.test.cjs
       - name: AliExpress real source fidelity and marketplace regressions

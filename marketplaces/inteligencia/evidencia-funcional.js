@@ -53,7 +53,7 @@ function avaliarFamiliaFuncional(oferta = {}, tituloNormalizado) {
 function avaliarNaturezaFuncional(oferta = {}, tituloNormalizado) {
   const produto=oferta.metadata?.produto||oferta.raw?.metadata?.produto||{};
   if(typeof tituloNormalizado==="string"&&!oferta.descricao&&!oferta.atributos&&!oferta.raw?.descricao&&!oferta.raw?.atributos&&!produto.descricao&&!produto.atributos&&
-     !/\b(?:produto|equipamento|modelo|item|kit|impressoras?|tanquinhos?|porta|boias?|facas?|facoes|facao|canivetes?|lanternas?|refletor(?:es)?|fogao|fogareiro|cortador|earpods|ear|terno|t shirt|camisas?|camisetas?|calcas?|pants|sabonetes?|oleos?|mascaras?|nadadeiras?|snorkel|snorkeling|meias?|blocos?|panettones?|panetones?|chocottones?|chocotones?|arvores?|malas?|base|stand|suporte)\b/.test(tituloNormalizado))return null;
+     !/\b(?:produto|equipamento|modelo|item|kit|impressoras?|tanquinhos?|porta|boias?|facas?|facoes|facao|canivetes?|lanternas?|faroletes?|refletor(?:es)?|fogao|fogareiro|cortador|earpods|ear|terno|t shirt|camisas?|camisetas?|calcas?|pants|sabonetes?|oleos?|mascaras?|nadadeiras?|snorkel|snorkeling|meias?|blocos?|panettones?|panetones?|chocottones?|chocotones?|arvores?|malas?|base|stand|suporte)\b/.test(tituloNormalizado))return null;
   const fatos=extrairFatosFuncionais(oferta,tituloNormalizado),t=fatos.titulo;
   const generico=/^(?:produto|equipamento|modelo|item|kit)(?: [a-z0-9]+){0,2}$/.test(t);
   const tipo=generico?fatos.texto:t;
@@ -78,7 +78,7 @@ function avaliarNaturezaFuncional(oferta = {}, tituloNormalizado) {
   if(faca&&cozinha)add("Casa, Móveis e Decoração","utensilio_culinario_explicito");
   if(faca&&pesca&&/\b(?:camping|acampamento|sobrevivencia|filetar peixes|limpar peixes)\b/.test(contexto))
     add("Pesca e Camping","lamina_finalidade_outdoor_explicita");
-  const lanterna=/\blanternas?\b/.test(tipo);
+  const lanterna=/\b(?:lanternas?|faroletes?)\b/.test(tipo);
   if(/\brefletor(?:es)?\b/.test(tipo)&&/\b(?:fotografico|fotografia)\b/.test(tipo)&&/\bpassiv[oa]\b/.test(tipo))
     add("Diversos","refletor_passivo_sem_finalidade_eletrica");
   if(lanterna&&!/\b(?:automotiva|automotivo|traseira|veicular|farol|bicicleta)\b/.test(contexto))
