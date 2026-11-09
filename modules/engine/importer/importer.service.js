@@ -19,7 +19,7 @@ const {
   sqlRetryPreImporter
 } = require("../frescor-pre-importer.service");
 const { normalizarTexto } = require("../normalizers");
-const { classificarCategoriaOferta } = require("../../../marketplaces/inteligencia/classificador-categorias");
+const { classificarCategoriaOferta, avaliarEvidenciaCategoria } = require("../../../marketplaces/inteligencia/classificador-categorias");
 const {
   htmlDecode,
   extrairMeta,
@@ -143,9 +143,18 @@ function categoriaGenericaEngine(categoria = "") {
 
 function resolverCategoriaEngine(resultado = {}, job = {}) {
   const categoria = normalizarTexto(resultado.categoria || resultado.categoriaProduto || "");
+  const titulo = normalizarTexto(resultado.titulo || resultado.nome || "");
+  if (!categoriaGenericaEngine(categoria) && tituloComercialUniversalValido(titulo, {
+    marketplace: resultado.marketplace || job.marketplace || job.marketplace_detectado || ""
+  })) {
+    const evidencia = avaliarEvidenciaCategoria({ titulo, nome: titulo, categoria }, titulo);
+    if (evidencia?.origem === "identidade_produto" && evidencia.divergencia === true &&
+        (evidencia.confianca === "alta" || evidencia.motivo === "natureza_nautica_sem_taxonomia")) {
+      return evidencia.categoria;
+    }
+  }
   if (!categoriaGenericaEngine(categoria)) return categoria;
 
-  const titulo = normalizarTexto(resultado.titulo || resultado.nome || "");
   return classificarCategoriaOferta({
     titulo,
     nome: titulo,
