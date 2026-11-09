@@ -16,7 +16,8 @@ const NON_RUNTIME_EXACT = new Set([
   "scripts/garimpei-infra-guard.py",
   "scripts/garimpei-journal-cleanup.py",
   "optimus-capture/adapters/magalu.js",
-  "optimus-capture/local-worker/magalu-identity.js"
+  "optimus-capture/local-worker/magalu-identity.js",
+  "optimus-capture/local-worker/task-runner.js"
 ]);
 const NON_RUNTIME_PREFIXES = ["docs/", "tests/", ".github/"];
 

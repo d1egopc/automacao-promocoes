@@ -105,10 +105,10 @@ test("script inesperado e raiz desconhecida permanecem bloqueados", () => {
   }
 });
 
-test("somente os dois arquivos Magalu da extensão ficam fora do overlay backend", () => {
+test("somente os três arquivos Magalu da extensão ficam fora do overlay backend", () => {
   const repo = createRepo();
   try {
-    const permitidos = ["optimus-capture/adapters/magalu.js", "optimus-capture/local-worker/magalu-identity.js"];
+    const permitidos = ["optimus-capture/adapters/magalu.js", "optimus-capture/local-worker/magalu-identity.js", "optimus-capture/local-worker/task-runner.js"];
     for (const relativo of permitidos) {
       const destino = path.join(repo.dir, ...relativo.split("/"));
       fs.mkdirSync(path.dirname(destino), { recursive: true });
