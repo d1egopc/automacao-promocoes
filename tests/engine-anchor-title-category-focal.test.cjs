@@ -103,4 +103,20 @@ for (const [marketplace, linkExpandido, productId, produto, metadataExtra, titul
     assert.equal(divergente.titulo, '', `${marketplace}: ID divergente`);
   }
 }
+const faroleteAncorado = (titulo, itemId = '456') => normalizarOfertaImportada({
+  marketplace: 'shopee', titulo: 'Grupo de ofertas Gerais', categoria: 'Iluminação e Elétrica',
+  produtoIdDetectado: '123/456', linkExpandido: 'https://shopee.com.br/product/123/456',
+  preco: 32, cupom: 'RADAR10', metadata: { adapter: 'shopee', produto: {
+    titulo, shopId: '123', itemId
+  } }
+}, { marketplace: 'shopee', cliente_id: 'workspace_a' });
+const faroleteOutdoor = faroleteAncorado('Farolete LED recarregável para camping e pesca');
+assert.equal(faroleteOutdoor.titulo, 'Farolete LED recarregável para camping e pesca');
+assert.equal(faroleteOutdoor.categoria, 'Pesca e Camping');
+assert.equal(faroleteOutdoor.preco, 32);
+assert.equal(faroleteOutdoor.cupom, 'RADAR10');
+assert.equal(faroleteAncorado('Farolete LED para iluminação residencial').categoria, 'Iluminação e Elétrica');
+assert.equal(faroleteAncorado('Farolete LED recarregável para camping e pesca', '999').titulo, '');
+assert.equal(faroleteAncorado('Farolete LED recarregável para camping e pesca', '999').categoria, 'Diversos');
+
 console.log('engine-anchor-title-category-focal.test.cjs OK');
