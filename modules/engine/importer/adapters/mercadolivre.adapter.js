@@ -13,6 +13,8 @@ const {
   buscarImagemCanonicaMercadoLivre,
   buscarImagemOficialMercadoLivrePorMlb
 } = require("../importer.service");
+const { montarProvaTituloTecnico } = require("./prova-identidade-tecnica");
+const { resolverPrecoSemantico } = require("../../../radar/preco-semantico");
 
 function resumoTemplateInputAuditoria(templateInput = {}) {
   return {
@@ -56,7 +58,7 @@ function auditarInteligenciaUniversalMlEngine({ job = {}, produto = {}, ofertaAd
       titulo: ofertaAdapter.titulo || produto.titulo || produto.nome || "",
       marketplace: "mercadolivre",
       precoAtual: ofertaAdapter.preco || produto.precoAtual || produto.preco || "",
-      precoOriginal: ofertaAdapter.precoOriginal || produto.precoAntigo || produto.precoOriginal || "",
+      precoOriginal: ofertaAdapter.precoOriginal ?? "",
       cupom: ofertaAdapter.cupom || produto.cupom || "",
       cupomTipo: ofertaAdapter.cupomTipo || produto.tipoCupom || produto.cupomTipo || "",
       beneficioTexto: ofertaAdapter.beneficioTexto || ofertaAdapter.beneficioExtra || produto.beneficioTexto || produto.beneficioExtra || produto.avisoCupom || "",
@@ -308,7 +310,7 @@ function extrairPrecoAnteriorRadarMercadoLivre(evento = {}) {
   const radarMirror = objetoSeguro(objetoSeguro(evento.metadata).radarMirror);
   const preco = objetoSeguro(radarMirror.preco);
   const comercial = objetoSeguro(radarMirror.comercial);
-  return numeroMercadoLivre(
+  const estruturado = numeroMercadoLivre(
     preco.anteriorCapturado ??
     comercial.precoAntigo?.valor ??
     comercial.precoAnterior?.valor ??
@@ -316,6 +318,11 @@ function extrairPrecoAnteriorRadarMercadoLivre(evento = {}) {
     comercial.precoAnterior ??
     ""
   );
+  if (Number.isFinite(estruturado) && estruturado > 0) return estruturado;
+
+  const textoRadar = String(evento.texto_original || evento.textoOriginal || "").trim();
+  const semantica = textoRadar ? resolverPrecoSemantico(textoRadar) : null;
+  return numeroMercadoLivre(semantica?.precoAntigo?.valor ?? "");
 }
 
 function extrairCupomRadarMercadoLivre(evento = {}) {
@@ -2284,6 +2291,10 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
   const precoRadarComercial = extrairPrecoRadarMercadoLivre(evento);
   const temPrecoRadarComercial = Number.isFinite(precoRadarComercial) && precoRadarComercial > 0;
   const precoComercial = temPrecoRadarComercial ? precoRadarComercial : (produtoComImagemSocialResolvida.precoAtual || produtoComImagemSocialResolvida.preco || "");
+  const precoAnteriorRadar = extrairPrecoAnteriorRadarMercadoLivre(evento);
+  const precoOriginalComercial = temPrecoRadarComercial && Number.isFinite(precoAnteriorRadar) && precoAnteriorRadar > precoComercial
+    ? precoAnteriorRadar
+    : "";
   const linksConvertidosMercadoLivre = await converterOcorrenciasMercadoLivre({
     links,
     evento,
@@ -2301,7 +2312,8 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
     marketplace: "mercadolivre",
     titulo: produtoComImagemSocialResolvida.titulo || produtoComImagemSocialResolvida.nome || "",
     preco: precoComercial,
-    precoOriginal: produtoComImagemSocialResolvida.precoOriginal || produtoComImagemSocialResolvida.precoAntigo || "",
+    // O preço "De" é um dado comercial do Radar; o preço de página/API nunca o substitui.
+    precoOriginal: precoOriginalComercial,
     descontoPercentual: produtoComImagemSocialResolvida.descontoPercentual || "",
     economia: produtoComImagemSocialResolvida.economia || "",
     imagem: produtoComImagemSocialResolvida.imagem || "",
@@ -2341,9 +2353,34 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
   });
 
   const ofertaEnriquecida = enriquecerOfertaAdapterComV2(ofertaAdapter, auditoriaV2, produtoComImagemSocialResolvida, linkAfiliado);
+  const tituloOficialMercadoLivre = textoMercadoLivre(produtoComImagemSocialResolvida.titulo || produtoComImagemSocialResolvida.nome || "");
+  const produtoIdCanonicoMl = textoMercadoLivre(identidadeCanonicaMl.mlbRevalidado || "").toUpperCase();
+  const identidadeMlConfirmada = identidadeCanonicaMl.status === "consistente" &&
+    identidadeCanonicaMl.mlbForteConfirmado === true &&
+    /^MLB\d+$/.test(produtoIdCanonicoMl) &&
+    identidadeCanonicaMl.mlbProduto === produtoIdCanonicoMl &&
+    extrairMlbMercadoLivre(identidadeCanonicaMl.urlCanonicaRevalidada || "") === produtoIdCanonicoMl;
+  const tituloFonteOficialMl = textoMercadoLivre(produtoComImagemSocialResolvida.tituloFonteOficial || "");
+  const provaTituloTecnico = identidadeMlConfirmada && tituloOficialMercadoLivre && tituloFonteOficialMl &&
+    produtoComImagemSocialResolvida.fallbackTituloMercadoLivre !== true
+    ? montarProvaTituloTecnico({
+      marketplace: "mercadolivre",
+      job,
+      workspaceId: clienteId,
+      links,
+      linkEscolhido,
+      urlOriginal: urlOriginalEngine,
+      urlCanonica: identidadeCanonicaMl.urlCanonicaRevalidada,
+      produtoId: produtoIdCanonicoMl,
+      titulo: tituloOficialMercadoLivre,
+      fonteTitulo: tituloFonteOficialMl
+    })
+    : null;
 
   return {
     ...ofertaEnriquecida,
+    produtoId: produtoIdCanonicoMl,
+    produtoIdDetectado: produtoIdCanonicoMl,
     metadata: {
       auditoriaInteligenciaUniversalV2: auditoriaV2 ? {
         fonteFinal: false,
@@ -2374,6 +2411,7 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
         score: ofertaEnriquecida.score
       },
       adapter: "mercadolivre",
+      clienteId,
       origemPreco: temPrecoRadarComercial ? "texto_radar" : "importador_ml",
       jobId: job.id,
       eventoId: job.evento_id,
@@ -2398,11 +2436,15 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
       },
       identidadeCanonicaMl,
       revalidacaoMeliLa: identidadeCanonicaMl,
+      ...(provaTituloTecnico ? { provaTituloTecnico } : {}),
       camposProduto: Object.keys(produtoComImagemSocialResolvida || {}),
       linksClassificados: resumoLinksClassificados(linksConvertidosMercadoLivre, evento, "mercadolivre"),
       linksComerciais: linksConvertidosMercadoLivre,
       produto: {
         ...produtoComImagemSocialResolvida,
+        // Evita que a normalização recupere um "De" de página quando o Radar não o capturou.
+        precoOriginal: precoOriginalComercial,
+        precoAntigo: precoOriginalComercial,
         ...imagensMercadoLivre,
         metadata: produtoComImagemSocialResolvida.metadata || {}
       }

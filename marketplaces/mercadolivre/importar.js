@@ -790,6 +790,8 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
       tituloTwitter ||
       tituloHtml ||
       "Produto Mercado Livre";
+    const tituloFonteOficial = tituloJsonLd ? "jsonld.name" :
+      tituloOg ? "og:title" : tituloTwitter ? "twitter:title" : tituloHtml ? "html.title" : "";
 
     let preco = precoAuditoriaBruto;
 
@@ -887,6 +889,7 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
 
     const produtoComFallbackRadar = aplicarFallbacksRadarMercadoLivre({
       titulo: tituloLimpo,
+      tituloFonteOficial,
       precoAtual: preco,
       precoAntigo,
       precoOriginal: precoAntigo,
@@ -997,6 +1000,7 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
     return {
       marketplace: "mercadolivre",
       titulo: produtoComFallbackRadar.titulo,
+      tituloFonteOficial: produtoComFallbackRadar.tituloFonteOficial || "",
       nome: produtoComFallbackRadar.nome || produtoComFallbackRadar.titulo,
       precoAntigo: produtoComFallbackRadar.precoAntigo || precoAntigo,
       precoOriginal: produtoComFallbackRadar.precoOriginal || produtoComFallbackRadar.precoAntigo || precoAntigo,

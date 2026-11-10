@@ -52,18 +52,35 @@ assert.strictEqual(
 );
 assert.strictEqual(tituloFactualConfiavelEngine(produtoOficial, "mercadolivre"), true);
 
+const mlJob = { id: "fixture-job-ml-promo-01", evento_id: "fixture-event-ml-promo-01", cliente_id: "fixture-workspace-ml", marketplace: "mercadolivre" };
+const mlAnchor = "https://produto.mercadolivre.com.br/MLB-1234567890-perfume-_JM";
+const mlCanonical = "https://produto.mercadolivre.com.br/MLB-1234567890-perfume-oficial-_JM";
+const mlTitle = "Perfume Jean Paul Gaultier Le Beau Le Parfum 125 ml";
 const enriquecida = normalizarOfertaImportada({
+  ok: true,
   marketplace: "mercadolivre",
   titulo: "TODO MUNDO VAI PERGUNTAR QUAL É O SEU PERFUME",
   categoria: "Mercado Livre",
   preco: "168,64",
-  produtoIdDetectado: "MLB1234567890",
+  linkOriginal: mlAnchor,
+  linkExpandido: mlCanonical,
   metadata: {
-    identidadeCanonicaMl: { status: "consistente", mlbForteConfirmado: true, mlbProduto: "MLB1234567890" },
-    produto: { titulo: "Perfume Jean Paul Gaultier Le Beau Le Parfum 125 ml" }
+    adapter: "mercadolivre", jobId: String(mlJob.id), eventoId: String(mlJob.evento_id),
+    clienteId: mlJob.cliente_id, linkOriginalEngine: mlAnchor, urlFinalImportador: mlCanonical,
+    identidadeCanonicaMl: { status: "consistente", mlbForteConfirmado: true,
+      mlbProduto: "MLB1234567890", mlbRevalidado: "MLB1234567890",
+      urlOriginal: mlAnchor, urlCanonicaRevalidada: mlCanonical },
+    provaTituloTecnico: { versao: 1, marketplace: "mercadolivre", jobId: String(mlJob.id),
+      eventoId: String(mlJob.evento_id), workspaceId: mlJob.cliente_id,
+      ocorrenciaLink: { id: "ml-link-1", ordem: 1, campo: "url_original", urlOriginal: mlAnchor },
+      produto: { produtoIdCanonico: "MLB1234567890", urlCanonica: mlCanonical },
+      titulo: { valor: mlTitle, fonte: "og:title" } },
+      produto: { titulo: mlTitle, tituloFonteOficial: "og:title", urlFinal: mlCanonical },
+      linksComerciais: [{ papelLink: "produto", urlOriginal: mlAnchor,
+      ocorrenciaId: "ml-link-1", ordemCaptura: 1 }]
   }
-}, { marketplace: "mercadolivre" });
-assert.strictEqual(enriquecida.titulo, "Perfume Jean Paul Gaultier Le Beau Le Parfum 125 ml");
+}, mlJob);
+assert.strictEqual(enriquecida.titulo, mlTitle);
 assert.strictEqual(enriquecida.categoria, "Perfumaria, Farmácia e Beleza");
 
 const semProva = normalizarOfertaImportada({

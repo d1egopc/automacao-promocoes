@@ -1,0 +1,54 @@
+{
+  "fixtureType": "sanitized_persisted_production_snapshots",
+  "limitations": [
+    "These are persisted projections, not original adapter responses.",
+    "No private workspace identifiers, full captured URLs, affiliate credentials, or message payloads are included.",
+    "Missing title provenance is not reconstructed from title text or product IDs."
+  ],
+  "cases": [
+    {
+      "jobId": "1105316",
+      "eventId": "224763",
+      "marketplace": "mercadolivre",
+      "productId": "MLB19628776",
+      "productLabel": "Brastemp dishwasher",
+      "persistedTitle": "Cupons costumam esgotar rápido, garanta o seu enquanto está ativo",
+      "persistedOfficialTitleProvenance": false,
+      "persistedTechnicalTitleProof": false,
+      "terminalReason": "mercadolivre_titulo_tecnico_nao_confirmado"
+    },
+    {
+      "jobId": "1105171",
+      "eventId": "224700",
+      "marketplace": "mercadolivre",
+      "productId": "MLB5506817364",
+      "productLabel": "Philips Walita air fryer",
+      "persistedTitle": "Philips Walita Fritadeira Série 1000 XL",
+      "persistedOfficialTitleProvenance": false,
+      "persistedTechnicalTitleProof": false,
+      "terminalReason": "mercadolivre_titulo_tecnico_nao_confirmado"
+    },
+    {
+      "jobId": "1105284",
+      "eventId": "224749",
+      "marketplace": "amazon",
+      "productId": "B07K11FVBY",
+      "productLabel": "Havit Mouse Pad HV-MP861",
+      "persistedOfficialTitleProvenance": true,
+      "persistedTechnicalTitleProof": false,
+      "importerHttpStatus": 200,
+      "terminalReason": "radar_titulo_operacional_ou_ausente"
+    },
+    {
+      "jobId": "1103477",
+      "eventId": "224020",
+      "marketplace": "shopee",
+      "productId": "284312776/58258390791",
+      "productLabel": "Maleta de ferramentas",
+      "persistedImageSource": "api.productOfferV2.imageUrl",
+      "persistedOfficialTitleProvenance": false,
+      "persistedTechnicalTitleProof": false,
+      "terminalReason": "radar_identidade_titulo_nao_confirmada"
+    }
+  ]
+}

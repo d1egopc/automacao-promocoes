@@ -505,6 +505,26 @@ jobs:
           test -z "${DATABASE_URL:-}"
           node --test tests/engine-anchor-title-category-focal.test.cjs tests/mercadolivre-identidade-promocional-focal.test.cjs tests/diversos-titulos-focal.test.cjs tests/classificador-v3-evidencia-marketplace.test.cjs tests/classificador-universal-v3.test.cjs
           node --test tests/links-comerciais-v2-aliexpress-shopee.test.js tests/aliexpress-app-moedas-contrato.test.js tests/aliexpress-afiliacao-workspace.test.js tests/shopee-rio-titulo-beneficio.test.js tests/ofc-v24-espelho-comercial.test.js tests/contrato-comercial-final-universal.test.js
+      - name: Link-anchored identity proof - Node 24 and commercial regressions
+        if: github.ref == 'refs/heads/validation/guardian-v1-universal-link-anchor-identity-20261110'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          test "$(git merge-base HEAD 1b2e098827adc8e8bdba4cc20b9167ce10dcd9fe)" = 1b2e098827adc8e8bdba4cc20b9167ce10dcd9fe
+          node --test tests/link-anchor-identity-proof-focal.test.cjs tests/engine-anchor-title-category-focal.test.cjs tests/mercadolivre-identidade-promocional-focal.test.cjs
+          node tests/mercadolivre-identidade-canonica.test.js
+          node tests/mercadolivre-radar-fallback.test.js
+          node tests/amazon-shortlink-afiliacao.test.js
+          node --test tests/shopee-contextual-recovery.test.cjs tests/shopee-recovery-limits.test.cjs
+          node tests/shopee-resgate-ocorrencias.test.js
+          node tests/shopee-rio-titulo-beneficio.test.js
+          node tests/shopee-afiliacao-workspace.test.js
+          node tests/link-conversao-ocorrencia-marketplaces.test.js
+          node tests/contrato-comercial-final-universal.test.js
+          node tests/radar-commercial-fidelity.test.cjs
+          node tests/guardian-v1.test.cjs
       - name: Guardião V1 self-tests
         run: node tests/guardian-v1.test.cjs
       - name: AliExpress real source fidelity and marketplace regressions
@@ -578,6 +598,7 @@ jobs:
             refs/heads/validation/guardian-v1-ml-identity-images-20261028) base=b8f5746e4d562deaa5c4081738de89e0bf5fc508 ;;
             refs/heads/validation/guardian-v1-classifier-copy-focal-20261027) base=f800da32e987c740854a9de02d5bcc93d7f149e9 ;;
             refs/heads/validation/guardian-v1-radar-ingress-continuous-20261031) base=7708855e014d54a48825b0d3ae1f77da43294ad0 ;;
+            refs/heads/validation/guardian-v1-universal-link-anchor-identity-20261110) base=1b2e098827adc8e8bdba4cc20b9167ce10dcd9fe ;;
             refs/heads/validation/classificador-universal-v3-20261027) base=3ab4f29d7812cf0f9e996f210762fd94c1296322 ;;
             refs/heads/validation/telemetria-operacional-20261027) base=227c860e43d1d31904bd5a1332fa29b629a5b3de ;;
             refs/heads/validation/telemetria-v11-panel-first-20261027) base=ba966b2022a5489e2c794d79513714cb55accf97 ;;

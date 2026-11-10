@@ -1,6 +1,7 @@
 const { classificarCategoriaOferta } = require("../../../../marketplaces/inteligencia/classificador-categorias");
 const { avaliarOfertaUniversal } = require("../../../../modules/inteligencia-universal");
 const { normalizarNumeroMoeda } = require("../../../../utils/moeda");
+const { resolverPrecoSemantico } = require("../../../radar/preco-semantico");
 const { queryEngine } = require("../../database");
 const {
   extrairIdsShopee,
@@ -12,6 +13,7 @@ const {
 const {
   criarProvaAfiliacaoWorkspaceShopee
 } = require("../../../marketplaces/shopee/afiliacao-workspace");
+const { montarProvaTituloTecnico } = require("./prova-identidade-tecnica");
 const {
   PAPEL_LINK,
   classificarCandidatosLinks,
@@ -112,6 +114,24 @@ function extrairPrecoTextoRadarShopee(textoRadar = "") {
   }
 
   return { texto: "", valor: null };
+}
+
+function extrairPrecoAnteriorRadarShopee(evento = {}, textoRadar = "", precoAtualRadar = null) {
+  const metadata = objetoSeguroShopee(evento.metadata);
+  const mirror = objetoSeguroShopee(metadata.radarMirror);
+  const preco = objetoSeguroShopee(mirror.preco);
+  const comercial = objetoSeguroShopee(mirror.comercial);
+  const comercialAntigo = objetoSeguroShopee(comercial.precoAntigo);
+  const comercialAnterior = objetoSeguroShopee(comercial.precoAnterior);
+  const estruturado = numeroPrecoShopeeAdapter(
+    preco.anteriorCapturado ?? comercialAntigo.valor ?? comercialAnterior.valor ?? comercial.precoAntigo ?? comercial.precoAnterior ?? ""
+  );
+  const semantica = resolverPrecoSemantico(String(textoRadar || ""));
+  const textual = numeroPrecoShopeeAdapter(semantica?.precoAntigo?.valor ?? "");
+  const anterior = estruturado ?? textual;
+  const atualEspelhado = numeroPrecoShopeeAdapter(preco.atualCapturado ?? comercial.precoAtual?.valor ?? comercial.precoAtual ?? "");
+  const atual = numeroPrecoShopeeAdapter(precoAtualRadar) ?? atualEspelhado;
+  return anterior !== null && atual !== null && anterior > atual ? anterior : null;
 }
 
 function escolherPrecoShopeeComRadarSeguro(precoAdapter = null, textoRadar = "") {
@@ -981,7 +1001,8 @@ function montarLinksComerciaisShopee({ links = [], evento = {}, analiseLinksShop
     if (!['produto', 'resgate'].includes(papel)) return;
 
     const ordemCaptura = Number(link.ordemCaptura || link.ordem || link.indiceCaptura || indice + 1) || (indice + 1);
-    const ocorrenciaId = texto(link.ocorrenciaId || link.idOcorrencia || `shopee:${papel}:${ordemCaptura}:${indice + 1}`);
+    const ocorrenciaId = texto(link.ocorrenciaId || link.idOcorrencia || link.ocorrencia_id ||
+      link.id || link.link_id || `shopee:${papel}:${ordemCaptura}:${indice + 1}`);
     const chaveUrl = texto(urlOriginal).replace(/\/+$/g, "").toLowerCase();
     const chave = `${papel}|${chaveUrl}`;
     if (vistos.has(chave)) return;
@@ -1433,21 +1454,22 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
     }
     : escolherPrecoShopeeComRadarSeguro(produto.precoAtual || produto.preco || produto.precoMin || "", textoOriginalRadar);
   const precoNumerico = precoEscolhido.preco;
-  if (comercialClonador || precoEscolhido.usouRadar) {
-    produto = {
-      ...produto,
+  const precoAnteriorRadar = !comercialClonador && precoEscolhido.usouRadar
+    ? extrairPrecoAnteriorRadarShopee(evento, textoOriginalRadar, precoNumerico)
+    : null;
+  const precoAnteriorComercial = comercialClonador?.precoAnterior ?? precoAnteriorRadar;
+  produto = {
+    ...produto,
+    ...(comercialClonador || precoEscolhido.usouRadar ? {
       preco: precoNumerico,
       precoAtual: precoNumerico,
-      precoOrigem: precoEscolhido.origem,
-      ...(comercialClonador && comercialClonador.precoAnterior !== null
-        ? {
-          precoOriginal: comercialClonador.precoAnterior,
-          precoAnterior: comercialClonador.precoAnterior,
-          precoAntigo: comercialClonador.precoAnterior
-        }
-        : {})
-    };
-  }
+      precoOrigem: precoEscolhido.origem
+    } : {}),
+    // De/Por deve vir da ocorrência comercial do Radar/Clonador, nunca do preço da API.
+    precoOriginal: precoAnteriorComercial ?? "",
+    precoAnterior: precoAnteriorComercial ?? "",
+    precoAntigo: precoAnteriorComercial ?? ""
+  };
   const precoAuditoria = produto.precoAuditoria && typeof produto.precoAuditoria === "object"
     ? produto.precoAuditoria
     : {};
@@ -1648,6 +1670,26 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
 
   const auditoriaV2 = auditarV2Shopee({ job, produto, ofertaAdapter });
   const ofertaEnriquecida = enriquecerComV2(ofertaAdapter, auditoriaV2, produto);
+  const identidadeApiShopee = produto.identidadeProdutoValidada || {};
+  const tituloOficialShopee = texto(produto.titulo || produto.nome || "");
+  const urlCanonicaShopee = texto(identidadeApiShopee.urlCanonica || produto.linkExpandido || "");
+  const provaTituloTecnico = identidadeApiShopee.fonte === "api.productOfferV2" &&
+    produto.tituloOrigem === "api.productOfferV2" &&
+    String(identidadeApiShopee.shopId || "") === String(idsProduto.shopId || "") &&
+    String(identidadeApiShopee.itemId || "") === String(idsProduto.itemId || "")
+    ? montarProvaTituloTecnico({
+      marketplace: "shopee",
+      job,
+      workspaceId: clienteId,
+      links,
+      linkEscolhido,
+      urlOriginal: urlOriginalEngine,
+      urlCanonica: urlCanonicaShopee,
+      produtoId: `${idsProduto.shopId}/${idsProduto.itemId}`,
+      titulo: tituloOficialShopee,
+      fonteTitulo: identidadeApiShopee.fonte
+    })
+    : null;
 
   logAuditoriaShopee({
     jobId: job.id,
@@ -1668,8 +1710,11 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
 
   return {
     ...ofertaEnriquecida,
+    produtoId: ofertaAdapter.produtoIdDetectado,
+    produtoIdDetectado: ofertaAdapter.produtoIdDetectado,
     metadata: {
       adapter: "shopee",
+      clienteId,
       jobId: job.id,
       eventoId: job.evento_id,
       linkOriginalEngine: urlOriginalEngine,
@@ -1701,6 +1746,7 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
       precoRadarTexto: precoEscolhido.precoRadarTexto || "",
       textoRadarTemCupom: Boolean(extrairCupomTextoRadarShopee(textoOriginalRadar).cupom),
       camposProduto: Object.keys(produto || {}),
+      ...(provaTituloTecnico ? { provaTituloTecnico } : {}),
       produto,
       auditoriaInteligenciaUniversalV2: auditoriaV2 ? {
         fonteFinal: false,

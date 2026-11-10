@@ -704,7 +704,14 @@ function extrairRadarMirrorFidelidade(oferta = {}, metadata = {}) {
 function identidadeOficialRadarConfirmada(oferta = {}, metadata = {}) {
   const metadataOferta = oferta.metadata && typeof oferta.metadata === "object" ? oferta.metadata : {};
   const fontes = [metadata, metadataOferta, oferta].filter(item => item && typeof item === "object");
+  const tituloOferta = texto(oferta.titulo || oferta.nome || "");
   for (const fonte of fontes) {
+    const provaTitulo = fonte.provaTituloTecnicoValidada;
+    if (provaTitulo?.validacao === "confirmada_pelo_importador" &&
+        texto(provaTitulo.titulo?.valor || "") === tituloOferta &&
+        texto(provaTitulo.produto?.produtoIdCanonico || "") &&
+        texto(provaTitulo.produto?.urlCanonica || "")) return true;
+
     const ml = fonte.identidadeCanonicaMl || fonte.revalidacaoMeliLa;
     if (ml?.status === "consistente" && (
       (ml.mlbForteConfirmado === true && Boolean(ml.mlbProduto) && ml.mlbProduto === ml.mlbRevalidado) ||

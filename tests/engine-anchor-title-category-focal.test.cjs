@@ -2,6 +2,15 @@ const assert = require('node:assert/strict');
 const { normalizarOfertaImportada, reclassificarCategoriaFinalEngine } = require('../modules/engine/importer/importer.service');
 const { tituloComercialUniversalValido } = require('../modules/radar/comercial-precedencia');
 
+const jobShopee = { id: 'fixture-job-shopee-anchor-01', evento_id: 'fixture-event-shopee-anchor-01', cliente_id: 'fixture-workspace-a', marketplace: 'shopee' };
+const provaShopee = (itemId = '456', titulo = 'Fone Bluetooth JBL Tune 520BT Preto', url = `https://shopee.com.br/product/123/${itemId}`) => ({
+  versao: 1, marketplace: 'shopee', jobId: jobShopee.id, eventoId: jobShopee.evento_id,
+  workspaceId: jobShopee.cliente_id,
+  ocorrenciaLink: { id: 'link-shopee-1', ordem: 1, campo: 'url_original', urlOriginal: url },
+  produto: { produtoIdCanonico: `123/${itemId}`, urlCanonica: url },
+  titulo: { valor: titulo, fonte: 'api.productOfferV2' }
+});
+
 for (const [marketplace, titulo] of [
   ['shopee', 'Bot de Alertas: @TalkPCAlertasBot'],
   ['shopee', 'Grupo de ofertas Gerais'],
@@ -43,14 +52,20 @@ const ofertaAncorada = (idLink, idProduto = idLink) => normalizarOfertaImportada
   linkOriginal: `https://shopee.com.br/product/123/${idLink}`,
   linkExpandido: `https://shopee.com.br/product/123/${idLink}`,
   produtoIdDetectado: `123/${idLink}`,
-  metadata: { adapter: 'shopee', produto: {
+  metadata: { adapter: 'shopee', jobId: jobShopee.id, eventoId: jobShopee.evento_id,
+    clienteId: jobShopee.cliente_id, linkOriginalEngine: `https://shopee.com.br/product/123/${idLink}`,
+    provaTituloTecnico: provaShopee(idProduto), produto: {
     titulo: 'Fone Bluetooth JBL Tune 520BT Preto', shopId: '123', itemId: idProduto,
-    identidadeProdutoValidada: { shopId: '123', itemId: idProduto, fonte: 'api.productOfferV2' }
+    tituloOrigem: 'api.productOfferV2',
+    identidadeProdutoValidada: { shopId: '123', itemId: idProduto, fonte: 'api.productOfferV2',
+      urlCanonica: `https://shopee.com.br/product/123/${idProduto}` }
   }, linksComerciais: [
-    { papelLink: 'produto', urlOriginal: `https://shopee.com.br/product/123/${idLink}` },
-    { papelLink: 'resgate', urlOriginal: 'https://shopee.com.br/voucher/ABC' }
+    { papelLink: 'produto', urlOriginal: `https://shopee.com.br/product/123/${idLink}`,
+      ocorrenciaId: 'link-shopee-1', ordemCaptura: 1 },
+    { papelLink: 'resgate', urlOriginal: 'https://shopee.com.br/voucher/ABC',
+      ocorrenciaId: 'link-shopee-2', ordemCaptura: 2 }
   ] }
-}, { marketplace: 'shopee', cliente_id: 'workspace_a' });
+}, jobShopee);
 const mesmoProduto = ofertaAncorada('456');
 assert.equal(mesmoProduto.titulo, 'Fone Bluetooth JBL Tune 520BT Preto');
 for (const propagandaRadar of [
@@ -61,10 +76,16 @@ for (const propagandaRadar of [
   const oferta = normalizarOfertaImportada({
     marketplace: 'shopee', titulo: propagandaRadar, categoria: 'Diversos',
     linkExpandido: 'https://shopee.com.br/product/123/456', produtoIdDetectado: '123/456',
-    preco: 32, cupom: 'RADAR10', metadata: { adapter: 'shopee', produto: {
-      titulo: 'Fone Bluetooth JBL Tune 520BT Preto', shopId: '123', itemId: '456'
-    } }
-  }, { marketplace: 'shopee' });
+    linkOriginal: 'https://shopee.com.br/product/123/456',
+    preco: 32, cupom: 'RADAR10', metadata: { adapter: 'shopee', jobId: jobShopee.id,
+      eventoId: jobShopee.evento_id, clienteId: jobShopee.cliente_id,
+      linkOriginalEngine: 'https://shopee.com.br/product/123/456', provaTituloTecnico: provaShopee(),
+      linksComerciais: [{ papelLink: 'produto', urlOriginal: 'https://shopee.com.br/product/123/456',
+        ocorrenciaId: 'link-shopee-1', ordemCaptura: 1 }],
+      produto: { titulo: 'Fone Bluetooth JBL Tune 520BT Preto', tituloOrigem: 'api.productOfferV2',
+        shopId: '123', itemId: '456', identidadeProdutoValidada: { shopId: '123', itemId: '456',
+          fonte: 'api.productOfferV2', urlCanonica: 'https://shopee.com.br/product/123/456' } } }
+  }, jobShopee);
   assert.equal(oferta.titulo, 'Fone Bluetooth JBL Tune 520BT Preto');
   assert.equal(oferta.categoria, 'Audio TV');
   assert.equal(oferta.preco, 32);
@@ -73,11 +94,8 @@ for (const propagandaRadar of [
 const textoRadarPlausivel = ofertaAncorada('456');
 textoRadarPlausivel.titulo = 'Fone sem fio em promoção';
 const oficialPrevalece = normalizarOfertaImportada({
-  marketplace: 'shopee', titulo: textoRadarPlausivel.titulo,
-  linkExpandido: 'https://shopee.com.br/product/123/456', produtoIdDetectado: '123/456',
-  metadata: { adapter: 'shopee', produto: { titulo: 'Fone Bluetooth JBL Tune 520BT Preto',
-    shopId: '123', itemId: '456' } }
-}, { marketplace: 'shopee' });
+  ...textoRadarPlausivel, titulo: textoRadarPlausivel.titulo
+}, jobShopee);
 assert.equal(oficialPrevalece.titulo, 'Fone Bluetooth JBL Tune 520BT Preto');
 assert.equal(mesmoProduto.cupom, 'RADAR10');
 assert.equal(mesmoProduto.metadata.linksComerciais.length, 2);
@@ -107,26 +125,48 @@ for (const [marketplace, linkExpandido, productId, produto, metadataExtra, titul
   ['magalu', 'https://www.magazineluiza.com.br/produto/p/abc123/te/ga07/', 'abc123',
     { produtoId: 'abc123' }, { fallbackRadar: { identidadeProdutoConfirmada: true } }, 'Kit Utensílios Cozinha com Suporte']
 ]) {
+  const jobAmazon = { id: 'fixture-job-amazon-anchor-01', evento_id: 'fixture-event-amazon-anchor-01', cliente_id: 'fixture-workspace-a', marketplace: 'amazon' };
+  const metadataAmazon = marketplace === 'amazon' ? {
+    jobId: jobAmazon.id, eventoId: jobAmazon.evento_id, clienteId: jobAmazon.cliente_id,
+    linkOriginalEngine: linkExpandido,
+    provaTituloTecnico: { versao: 1, marketplace: 'amazon', jobId: jobAmazon.id,
+      eventoId: jobAmazon.evento_id, workspaceId: jobAmazon.cliente_id,
+      ocorrenciaLink: { id: 'amazon-link-1', ordem: 1, campo: 'url_original', urlOriginal: linkExpandido },
+      produto: { produtoIdCanonico: 'B012345678', urlCanonica: linkExpandido },
+      titulo: { valor: tituloOficial, fonte: 'amazon_importer' } }
+  } : {};
   const base = { marketplace, titulo: 'Grupo de ofertas Gerais', produtoIdDetectado: productId,
-    linkExpandido, preco: 25, cupom: 'RADAR',
-    metadata: { adapter: marketplace, produto: { ...produto, titulo: tituloOficial }, ...metadataExtra } };
-  const confirmado = normalizarOfertaImportada(base, { marketplace, cliente_id: 'workspace_a' });
+    linkOriginal: linkExpandido, linkExpandido, preco: 25, cupom: 'RADAR',
+    metadata: { adapter: marketplace, produto: { ...produto, titulo: tituloOficial }, ...metadataAmazon, ...metadataExtra } };
+  if (marketplace === 'amazon') {
+    base.metadata.linksComerciais = [{ papelLink: 'produto', urlOriginal: linkExpandido,
+      ocorrenciaId: 'amazon-link-1', ordemCaptura: 1 }];
+  }
+  const jobBase = marketplace === 'amazon' ? jobAmazon : { marketplace, cliente_id: 'workspace_a' };
+  const confirmado = normalizarOfertaImportada(base, jobBase);
   assert.equal(confirmado.titulo, tituloOficial, `${marketplace}: título oficial`);
   assert.equal(confirmado.preco, 25);
   assert.equal(confirmado.cupom, 'RADAR');
   if (marketplace !== 'amazon') {
     const divergente = normalizarOfertaImportada({ ...base, produtoIdDetectado: 'produto-diferente' },
-      { marketplace, cliente_id: 'workspace_b' });
+      { ...jobBase, cliente_id: 'workspace_b' });
     assert.equal(divergente.titulo, '', `${marketplace}: ID divergente`);
   }
 }
 const faroleteAncorado = (titulo, itemId = '456') => normalizarOfertaImportada({
   marketplace: 'shopee', titulo: 'Grupo de ofertas Gerais', categoria: 'Iluminação e Elétrica',
-  produtoIdDetectado: '123/456', linkExpandido: 'https://shopee.com.br/product/123/456',
-  preco: 32, cupom: 'RADAR10', metadata: { adapter: 'shopee', produto: {
-    titulo, shopId: '123', itemId
-  } }
-}, { marketplace: 'shopee', cliente_id: 'workspace_a' });
+  produtoIdDetectado: '123/456', linkOriginal: 'https://shopee.com.br/product/123/456',
+  linkExpandido: 'https://shopee.com.br/product/123/456',
+  preco: 32, cupom: 'RADAR10', metadata: { adapter: 'shopee', jobId: jobShopee.id,
+    eventoId: jobShopee.evento_id, clienteId: jobShopee.cliente_id,
+    linkOriginalEngine: 'https://shopee.com.br/product/123/456',
+    provaTituloTecnico: provaShopee(itemId, titulo, 'https://shopee.com.br/product/123/456'), produto: {
+      titulo, tituloOrigem: 'api.productOfferV2', shopId: '123', itemId,
+      identidadeProdutoValidada: { fonte: 'api.productOfferV2', shopId: '123', itemId,
+        urlCanonica: 'https://shopee.com.br/product/123/456' }
+    }, linksComerciais: [{ papelLink: 'produto', urlOriginal: 'https://shopee.com.br/product/123/456',
+      ocorrenciaId: 'link-shopee-1', ordemCaptura: 1 }] }
+}, jobShopee);
 const faroleteOutdoor = faroleteAncorado('Farolete LED recarregável para camping e pesca');
 assert.equal(faroleteOutdoor.titulo, 'Farolete LED recarregável para camping e pesca');
 assert.equal(faroleteOutdoor.categoria, 'Pesca e Camping');

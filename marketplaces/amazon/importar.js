@@ -474,6 +474,16 @@ function criarImportarAmazon(deps = {}) {
       }
     }
 
+    let urlProdutoCanonica = response.url || urlBuscaAmazon;
+    try {
+      const urlCanonica = new URL(urlProdutoCanonica);
+      urlCanonica.search = "";
+      urlCanonica.hash = "";
+      urlProdutoCanonica = urlCanonica.toString();
+    } catch {
+      urlProdutoCanonica = "";
+    }
+
     const tituloLimpo = htmlDecode(titulo)
       .replace("Amazon.com.br:", "")
       .replace("Amazon.com:", "")
@@ -595,6 +605,7 @@ const linkFinal = usarLinksOptimus
     return {
       marketplace: "amazon",
       titulo: tituloLimpo,
+      urlProdutoCanonica,
       precoAntigo,
       precoAtual: preco,
       parcelamento,
