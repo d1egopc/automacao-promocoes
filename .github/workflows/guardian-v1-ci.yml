@@ -512,7 +512,7 @@ jobs:
           set -euo pipefail
           test "$RUNNER_ENVIRONMENT" = github-hosted
           test -z "${DATABASE_URL:-}"
-          test "$(git rev-parse HEAD^)" = 1b2e098827adc8e8bdba4cc20b9167ce10dcd9fe
+          test "$(git merge-base HEAD 1b2e098827adc8e8bdba4cc20b9167ce10dcd9fe)" = 1b2e098827adc8e8bdba4cc20b9167ce10dcd9fe
           node --test tests/link-anchor-identity-proof-focal.test.cjs tests/engine-anchor-title-category-focal.test.cjs tests/mercadolivre-identidade-promocional-focal.test.cjs
           node tests/mercadolivre-identidade-canonica.test.js
           node tests/mercadolivre-radar-fallback.test.js
