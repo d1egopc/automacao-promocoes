@@ -12,6 +12,23 @@ function sanitizarMotivoPreflight(reason = "") {
     : "send_preflight_denied";
 }
 
+// Only fixed operational codes may be persisted from provider revalidation.
+const RELEASE_REASONS = new Set([
+  "destination_session_unavailable", "destination_window_closed", "destination_daily_limit_reached",
+  "destination_cadence_wait", "destination_cadence_invalid", "destination_clock_invalid",
+  "destination_not_current", "workspace_inactive", "workspace_not_operational",
+  "workspace_credits_unavailable", "required_media_unpublishable", "commercial_link_unproven",
+  "destination_template_unavailable", "destination_dedup_blocked", "destination_channel_invalid",
+  "universal_send_identity_or_t0_invalid", "universal_send_offer_identity_mismatch",
+  "captura_expirada_pos_classificacao", "commercial_freshness_denied",
+  "universal_commercial_claim_missing", "commercial_reservation_unavailable",
+  "universal_preprovider_context_changed", "universal_commercial_owner_not_current"
+]);
+function motivoLiberacao(reason, fallback) {
+  const code = String(reason || "").trim();
+  return RELEASE_REASONS.has(code) ? code : fallback;
+}
+
 function criarExecutorFilaUniversal({ pool, getPool = null, prepare, dispatch, checkWorkspace,
   repository = queue, oneShot = false }) {
   if (!pool || typeof pool.connect !== "function" ||
@@ -50,7 +67,8 @@ function criarExecutorFilaUniversal({ pool, getPool = null, prepare, dispatch, c
       prepared = await prepare(claim);
     } catch (error) {
       await repository.releaseUnstarted({ pool: poolAtual(),
-        destinationId: claim.id, leaseToken: claim.leaseToken });
+        destinationId: claim.id, leaseToken: claim.leaseToken,
+        preflightReason: "send_prepare_exception" });
       throw error;
     }
     if (prepared?.ready !== true) {
@@ -96,6 +114,7 @@ function criarExecutorFilaUniversal({ pool, getPool = null, prepare, dispatch, c
       if (!crossedProviderBoundary) {
         await repository.releaseUnstarted({ pool: poolAtual(), destinationId: claim.id,
           leaseToken: claim.leaseToken,
+          preflightReason: motivoLiberacao(error?.message, "send_dispatch_exception_before_transport"),
           retryAt: new Date(Date.now() + 1000).toISOString() });
         return { ok: false, reason: String(error?.message || error),
           beforeProvider: true };
@@ -106,6 +125,7 @@ function criarExecutorFilaUniversal({ pool, getPool = null, prepare, dispatch, c
     if (!crossedProviderBoundary) {
       const released = await repository.releaseUnstarted({ pool: poolAtual(),
         destinationId: claim.id, leaseToken: claim.leaseToken,
+        preflightReason: motivoLiberacao(result?.reason, "provider_not_started"),
         retryAt: result?.retryAt || new Date(Date.now() + 1000).toISOString() });
       return { ok: false, reason: result?.reason || "provider_not_started",
         released: released.ok === true };
