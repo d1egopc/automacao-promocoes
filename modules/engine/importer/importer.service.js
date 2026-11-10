@@ -15,6 +15,7 @@ const {
 } = require("../processor.service");
 const {
   calcularCotasFrescorPreImporter,
+  avaliarFrescorPreImporter,
   sqlFrescorComercialPreImporter,
   sqlRetryPreImporter
 } = require("../frescor-pre-importer.service");
@@ -5781,12 +5782,30 @@ function planoRetryImagemMagaluLocal(job = {}, agora = new Date(), detalhes = {}
     ? 0 : Number(anterior.tentativas || 0);
   const tentativa = Number.isInteger(tentativasAnteriores) && tentativasAnteriores >= 0 ? tentativasAnteriores + 1 : 1;
   if (etapa === "identidade" && imagemAnterior) return { reagendar: false, tentativa, tentativasAnteriores };
-  const atrasoMs = [30_000, 120_000, 300_000][tentativa - 1] || null;
+  let atrasoMs = [30_000, 120_000, 300_000][tentativa - 1] || null;
   const dataBase = agora instanceof Date ? agora : new Date(agora);
+  let identidadeTask;
+  if (etapa === "identidade" && detalhes.identidadeTask) {
+    const task = detalhes.identidadeTask;
+    const old = anterior.identidadeTask;
+    const bound = task.jobId === String(job.id) && task.eventoId === String(job.evento_id) &&
+      task.workspaceId === String(job.cliente_id) && task.linkId && task.taskId && task.identityKey &&
+      ["pending", "leased"].includes(task.status) &&
+      (!old || ["jobId", "eventoId", "workspaceId", "linkId", "identityKey", "taskId"]
+        .every(k => String(old[k]) === String(task[k])));
+    const fresh = avaliarFrescorPreImporter(job, { agoraMs: dataBase.getTime() });
+    const deadline = Math.min(Date.parse(task.expiresAt), Date.parse(task.createdAt) + 15 * 60_000,
+      old ? Date.parse(old.deadline) : Infinity, fresh.manualV2 ? Infinity : Date.parse(fresh.expiraEmComercial));
+    if (!bound || fresh.expirada || !Number.isFinite(deadline) || deadline <= dataBase.getTime()) {
+      return { reagendar: false, tentativa, tentativasAnteriores };
+    }
+    identidadeTask = { ...task, deadline: new Date(deadline).toISOString() };
+    atrasoMs = Math.min(atrasoMs || 30_000, deadline - dataBase.getTime());
+  }
   if (!Number.isFinite(dataBase.getTime()) || !atrasoMs) return { reagendar: false, tentativa, tentativasAnteriores };
   const proximaTentativaEm = new Date(dataBase.getTime() + atrasoMs);
   const etapaPersistida = etapa || (identidadeAnterior ? "identidade" : imagemAnterior ? "imagem" : "");
-  return { reagendar: true, tentativa, tentativasAnteriores, atrasoMs, proximaTentativaEm: proximaTentativaEm.toISOString(), proximaTentativaEmMs: proximaTentativaEm.getTime(), ...(etapaPersistida ? { etapa: etapaPersistida } : {}) };
+  return { reagendar: true, tentativa, tentativasAnteriores, atrasoMs, ...(identidadeTask ? { identidadeTask } : {}), proximaTentativaEm: proximaTentativaEm.toISOString(), proximaTentativaEmMs: proximaTentativaEm.getTime(), ...(etapaPersistida ? { etapa: etapaPersistida } : {}) };
 }
 
 async function agendarRetryImagemMagaluLocal(job = {}, detalhes = {}, opcoes = {}) {
@@ -5794,6 +5813,7 @@ async function agendarRetryImagemMagaluLocal(job = {}, detalhes = {}, opcoes = {
   if (!plano.reagendar) return { ok: false, esgotado: true, motivo: "sem_imagem_apos_retries", ...plano };
   const estadoRetry = {
     tentativas: plano.tentativa,
+    ...(plano.identidadeTask ? { identidadeTask: plano.identidadeTask } : {}),
     ...(plano.etapa ? { etapa: plano.etapa, capability: plano.etapa === "identidade" ? "magalu_identity_v1" : "magalu_image_v1" } : {}),
     motivo: "sem_imagem_local_worker_pendente",
     ultimoErroEm: new Date(opcoes.agora || Date.now()).toISOString(),

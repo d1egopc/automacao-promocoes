@@ -6,7 +6,9 @@ function texto(valor = "") { return String(valor ?? "").trim(); }
 
 function payloadErro(e, fallback = "local_worker_falhou") {
   const motivo = texto(e?.codigo || e?.motivo || e?.message || fallback) || fallback;
-  return { ok: false, erro: motivo, motivo };
+  return { ok: false, erro: motivo, motivo,
+    ...(["timestamp_invalido", "timestamp_futuro", "timestamp_expirado"].includes(e?.submotivo)
+      ? { submotivo: e.submotivo } : {}) };
 }
 
 function tokenWorker(req) {
