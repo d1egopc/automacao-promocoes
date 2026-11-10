@@ -788,7 +788,7 @@ jobs:
           set -euo pipefail
           mkdir "$RUNNER_TEMP/commercial-base"
           git archive d38a59af34db2c5d42ae204a3987f8b5888a41cb | tar -x -C "$RUNNER_TEMP/commercial-base"
-          node scripts/commercial-recovery-baseline-failures.cjs "$RUNNER_TEMP/commercial-base"
+          node tests/commercial-recovery-baseline-failures.cjs "$RUNNER_TEMP/commercial-base"
       - name: Start loopback-only disposable PostgreSQL 17
         run: |
           set -euo pipefail
