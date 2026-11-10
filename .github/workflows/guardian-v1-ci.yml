@@ -787,7 +787,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$RUNNER_ENVIRONMENT" = github-hosted
-          docker run -d --name commercial-recovery-pg17 --network host -e POSTGRES_DB=optimus_universal_fixture -e POSTGRES_HOST_AUTH_METHOD=trust postgres:17 -p 55433 -c listen_addresses=127.0.0.1
+          docker run -d --name commercial-recovery-pg17 --network host -e PGDATA="$GITHUB_WORKSPACE/.local-postgres/data" -e POSTGRES_DB=optimus_universal_fixture -e POSTGRES_HOST_AUTH_METHOD=trust postgres:17 -p 55433 -c listen_addresses=127.0.0.1
           for attempt in $(seq 1 30); do
             if docker exec commercial-recovery-pg17 pg_isready -h 127.0.0.1 -p 55433 -U postgres; then exit 0; fi
             sleep 2
@@ -798,7 +798,7 @@ jobs:
           UF_TEST_PG_PORT: '55433'
           UF_TEST_PG_EXPECTED_SERVER_HOST: 127.0.0.1
           UF_TEST_PG_EXPECTED_SERVER_PORT: '55433'
-          UF_TEST_PG_EXPECTED_DATA_DIR: /var/lib/postgresql/data
+          UF_TEST_PG_EXPECTED_DATA_DIR: ${{ github.workspace }}/.local-postgres/data
         run: |
           set -euo pipefail
           test -z "${DATABASE_URL:-}"

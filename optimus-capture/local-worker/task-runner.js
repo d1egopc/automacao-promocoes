@@ -120,8 +120,8 @@
       hostFinal: texto(prova.hostFinal),
       imagemOficialUrl: texto(prova.imagemOficialUrl),
     };
-    // Campos adicionais sÃ³ fazem parte da prova quando o resolver os produz.
-    // Isso preserva o contrato/shape histÃ³rico das provas Magalu.
+    // Campos adicionais só fazem parte da prova quando o resolver os produz.
+    // Isso preserva o contrato/shape histórico das provas Magalu.
     if (prova.provenance !== undefined) resultado.provenance = texto(prova.provenance);
     if (prova.productIdObserved !== undefined) resultado.productIdObserved = texto(prova.productIdObserved);
     if (prova.sameProductObject !== undefined) resultado.sameProductObject = prova.sameProductObject === true;

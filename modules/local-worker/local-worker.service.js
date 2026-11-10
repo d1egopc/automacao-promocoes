@@ -162,8 +162,8 @@ function criarLocalWorkerService(opcoes = {}) {
     const url = normalizarImagemMlcdn(imagemOficialUrl);
     if (!url || !hostnameMlcdnSeguro(url)) throw erro("imagem_host_invalido");
     const prova = provaTecnica && typeof provaTecnica === "object" ? provaTecnica : {};
-    // O nÃ­vel de confianÃ§a jÃ¡ foi derivado do registro autenticado em validarWorker().
-    // Campos enviados pelo worker nÃ£o participam desta decisÃ£o.
+    // O nível de confiança já foi derivado do registro autenticado em validarWorker().
+    // Campos enviados pelo worker não participam desta decisão.
     if (texto(prova.productId) !== texto(task.productId)) throw erro("prova_product_id_divergente");
     if (prova.skuConfirmado !== true || prova.hrefConfirmado !== true) throw erro("prova_produto_nao_confirmada");
     if (texto(prova.origem || prova.source) !== "local_first_party") throw erro("prova_origem_invalida");

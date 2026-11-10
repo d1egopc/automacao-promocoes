@@ -2347,7 +2347,7 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
     marketplace: "mercadolivre",
     titulo: produtoComImagemSocialResolvida.titulo || produtoComImagemSocialResolvida.nome || "",
     preco: precoComercial,
-    // O preÃ§o "De" Ã© um dado comercial do Radar; o preÃ§o de pÃ¡gina/API nunca o substitui.
+    // O preço "De" é um dado comercial do Radar; o preço de página/API nunca o substitui.
     precoOriginal: precoOriginalComercial,
     descontoPercentual: produtoComImagemSocialResolvida.descontoPercentual || "",
     economia: produtoComImagemSocialResolvida.economia || "",
@@ -2477,7 +2477,7 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
       linksComerciais: linksConvertidosMercadoLivre,
       produto: {
         ...produtoComImagemSocialResolvida,
-        // Evita que a normalizaÃ§Ã£o recupere um "De" de pÃ¡gina quando o Radar nÃ£o o capturou.
+        // Evita que a normalização recupere um "De" de página quando o Radar não o capturou.
         precoOriginal: precoOriginalComercial,
         precoAntigo: precoOriginalComercial,
         ...imagensMercadoLivre,
