@@ -1,6 +1,7 @@
 const { classificarCategoriaOferta } = require("../../../../marketplaces/inteligencia/classificador-categorias");
 const { avaliarOfertaUniversal } = require("../../../../modules/inteligencia-universal");
 const { normalizarNumeroMoeda } = require("../../../../utils/moeda");
+const { resolverPrecoSemantico } = require("../../../radar/preco-semantico");
 const { queryEngine } = require("../../database");
 const {
   extrairIdsShopee,
@@ -113,6 +114,24 @@ function extrairPrecoTextoRadarShopee(textoRadar = "") {
   }
 
   return { texto: "", valor: null };
+}
+
+function extrairPrecoAnteriorRadarShopee(evento = {}, textoRadar = "", precoAtualRadar = null) {
+  const metadata = objetoSeguroShopee(evento.metadata);
+  const mirror = objetoSeguroShopee(metadata.radarMirror);
+  const preco = objetoSeguroShopee(mirror.preco);
+  const comercial = objetoSeguroShopee(mirror.comercial);
+  const comercialAntigo = objetoSeguroShopee(comercial.precoAntigo);
+  const comercialAnterior = objetoSeguroShopee(comercial.precoAnterior);
+  const estruturado = numeroPrecoShopeeAdapter(
+    preco.anteriorCapturado ?? comercialAntigo.valor ?? comercialAnterior.valor ?? comercial.precoAntigo ?? comercial.precoAnterior ?? ""
+  );
+  const semantica = resolverPrecoSemantico(String(textoRadar || ""));
+  const textual = numeroPrecoShopeeAdapter(semantica?.precoAntigo?.valor ?? "");
+  const anterior = estruturado ?? textual;
+  const atualEspelhado = numeroPrecoShopeeAdapter(preco.atualCapturado ?? comercial.precoAtual?.valor ?? comercial.precoAtual ?? "");
+  const atual = numeroPrecoShopeeAdapter(precoAtualRadar) ?? atualEspelhado;
+  return anterior !== null && atual !== null && anterior > atual ? anterior : null;
 }
 
 function escolherPrecoShopeeComRadarSeguro(precoAdapter = null, textoRadar = "") {
@@ -1435,21 +1454,22 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
     }
     : escolherPrecoShopeeComRadarSeguro(produto.precoAtual || produto.preco || produto.precoMin || "", textoOriginalRadar);
   const precoNumerico = precoEscolhido.preco;
-  if (comercialClonador || precoEscolhido.usouRadar) {
-    produto = {
-      ...produto,
+  const precoAnteriorRadar = !comercialClonador && precoEscolhido.usouRadar
+    ? extrairPrecoAnteriorRadarShopee(evento, textoOriginalRadar, precoNumerico)
+    : null;
+  const precoAnteriorComercial = comercialClonador?.precoAnterior ?? precoAnteriorRadar;
+  produto = {
+    ...produto,
+    ...(comercialClonador || precoEscolhido.usouRadar ? {
       preco: precoNumerico,
       precoAtual: precoNumerico,
-      precoOrigem: precoEscolhido.origem,
-      ...(comercialClonador && comercialClonador.precoAnterior !== null
-        ? {
-          precoOriginal: comercialClonador.precoAnterior,
-          precoAnterior: comercialClonador.precoAnterior,
-          precoAntigo: comercialClonador.precoAnterior
-        }
-        : {})
-    };
-  }
+      precoOrigem: precoEscolhido.origem
+    } : {}),
+    // De/Por deve vir da ocorrência comercial do Radar/Clonador, nunca do preço da API.
+    precoOriginal: precoAnteriorComercial ?? "",
+    precoAnterior: precoAnteriorComercial ?? "",
+    precoAntigo: precoAnteriorComercial ?? ""
+  };
   const precoAuditoria = produto.precoAuditoria && typeof produto.precoAuditoria === "object"
     ? produto.precoAuditoria
     : {};

@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const { normalizarOfertaImportada, reclassificarCategoriaFinalEngine } = require('../modules/engine/importer/importer.service');
 const { tituloComercialUniversalValido } = require('../modules/radar/comercial-precedencia');
 
-const jobShopee = { id: '1103477', evento_id: '224020', cliente_id: 'workspace_a', marketplace: 'shopee' };
+const jobShopee = { id: 'fixture-job-shopee-anchor-01', evento_id: 'fixture-event-shopee-anchor-01', cliente_id: 'fixture-workspace-a', marketplace: 'shopee' };
 const provaShopee = (itemId = '456', titulo = 'Fone Bluetooth JBL Tune 520BT Preto', url = `https://shopee.com.br/product/123/${itemId}`) => ({
   versao: 1, marketplace: 'shopee', jobId: jobShopee.id, eventoId: jobShopee.evento_id,
   workspaceId: jobShopee.cliente_id,
@@ -125,7 +125,7 @@ for (const [marketplace, linkExpandido, productId, produto, metadataExtra, titul
   ['magalu', 'https://www.magazineluiza.com.br/produto/p/abc123/te/ga07/', 'abc123',
     { produtoId: 'abc123' }, { fallbackRadar: { identidadeProdutoConfirmada: true } }, 'Kit Utensílios Cozinha com Suporte']
 ]) {
-  const jobAmazon = { id: '1105284', evento_id: '224749', cliente_id: 'workspace_a', marketplace: 'amazon' };
+  const jobAmazon = { id: 'fixture-job-amazon-anchor-01', evento_id: 'fixture-event-amazon-anchor-01', cliente_id: 'fixture-workspace-a', marketplace: 'amazon' };
   const metadataAmazon = marketplace === 'amazon' ? {
     jobId: jobAmazon.id, eventoId: jobAmazon.evento_id, clienteId: jobAmazon.cliente_id,
     linkOriginalEngine: linkExpandido,
