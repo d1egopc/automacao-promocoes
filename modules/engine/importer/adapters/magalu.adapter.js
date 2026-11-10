@@ -204,6 +204,14 @@ function normalizarTextoComparacaoMagalu(valor = "") {
     .toLowerCase();
 }
 
+function tituloRadarPromocionalOuOperacionalMagalu(valor = "") {
+  const titulo = normalizarTextoComparacaoMagalu(valor).replace(/\s+/g, " ").trim();
+  if (!titulo) return true;
+  return /^(?:menor preco\b|pra quem\b|para quem\b|aproveita\b|aproveite\b|corre\b|convide\b|convida\b|garanta\b|grupo de ofertas\b|bot de alertas\b|cupons? costumam\b)/i.test(titulo) ||
+    /^(?:suas?\b.*\b(?:agradecem|merecem|pedem)\b)/i.test(titulo) ||
+    /\b(?:imperdivel|oferta do dia|ultimas unidades|link abaixo|enviando o link)\b/i.test(titulo);
+}
+
 function tituloRadarSeguroMagalu(valor = "") {
   if (valor && typeof valor === "object") return "";
   const titulo = texto(valor).replace(/\s+/g, " ");
@@ -216,6 +224,7 @@ function tituloRadarSeguroMagalu(valor = "") {
   if (/\b(captcha|complete o captcha|nao e possivel acessar a pagina)\b/i.test(normalizado)) return "";
   if (/^(?:oferta|promocao|promo|produto|achadinho)\s*(?:magalu|magazine luiza)?$/i.test(normalizado)) return "";
   if (/^(?:por|de|pix|preco|valor|parcel|cupom|codigo|cod|frete|desconto|economia|off|link)\b/i.test(normalizado)) return "";
+  if (tituloRadarPromocionalOuOperacionalMagalu(titulo)) return "";
 
   return titulo;
 }
@@ -269,6 +278,33 @@ function identidadeProdutoMagaluConfirmada({ produto = {}, urlOriginal = "", pro
     .map(url => texto(produtoIdPorUrl(url)).toLowerCase())
     .filter(Boolean);
   return idsUrl.length > 0 && idsUrl.every(id => id === esperado);
+}
+
+function tituloOficialMagaluVinculadoProduto(produto = {}, produtoIdEsperado = "") {
+  const esperado = texto(produtoIdEsperado).toLowerCase();
+  const titulo = tituloRadarSeguroMagalu(produto.titulo || produto.nome);
+  const fontes = produto.metadata?.fontes || {};
+  const resolverFactualOk = produto.metadata?.factualResolver?.status === "ok";
+  const tentativas = Array.isArray(produto.metadata?.factualResolver?.tentativas)
+    ? produto.metadata.factualResolver.tentativas
+    : [];
+  const identidadeAceita = tentativas.some(tentativa =>
+    tentativa?.statusFactual === "aceita" &&
+    tentativa?.canonicalValida === true &&
+    texto(tentativa.productIdObservado).toLowerCase() === esperado &&
+    ["canonical", "og:url"].includes(texto(tentativa.canonicalOrigem))
+  );
+  const idsObservados = [
+    produto.produtoId || produto.codigo,
+    produtoIdPorUrl(produto.urlOriginal),
+    produtoIdPorUrl(produto.urlCanonica),
+    produtoIdPorUrl(produto.urlAfiliavelComprovada)
+  ].map(texto).filter(Boolean).map(id => id.toLowerCase());
+  const tituloOficial = ["jsonld.name", "meta_ou_title"].includes(texto(fontes.titulo));
+
+  if (!esperado || !titulo || !tituloOficial || !resolverFactualOk || !identidadeAceita || idsObservados.length < 4) return "";
+  if (idsObservados.some(id => id !== esperado)) return "";
+  return titulo;
 }
 
 function escolherLinkMagalu(links = [], evento = {}) {
@@ -666,6 +702,7 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
       metadata: {
         ...(resolucao?.fatos?.metadata || {}),
         factualResolver: {
+          status: resolucao?.ok === true ? "ok" : "falhou",
           fonteUsada: resolucao?.fonteUsada || "",
           tentativas: Array.isArray(resolucao?.tentativas) ? resolucao.tentativas : []
         }
@@ -687,6 +724,7 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
       avisos: ["magalu_resolver_factual_falhou"],
       metadata: {
         factualResolver: {
+          status: "falhou",
           fonteUsada: "",
           tentativas: [],
           erro: e.message
@@ -749,10 +787,8 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
     urlOriginal: urlOriginalEngine,
     produtoIdRadar
   });
-  const tituloPaginaSeguro = identidadeProdutoConfirmada
-    ? tituloRadarSeguroMagalu(produto.titulo || produto.nome)
-    : "";
-  const tituloFinal = tituloRadarSeguro || tituloPaginaSeguro;
+  const tituloOficialVinculado = tituloOficialMagaluVinculadoProduto(produto, produtoIdRadar);
+  const tituloFinal = tituloRadarSeguro || tituloOficialVinculado;
   const precoRadarSeguro = extrairPrecoRadarSeguroMagalu(evento);
   const radarDefiniuPreco = numeroPreco(precoRadarSeguro) !== null;
   const precoAtual = radarDefiniuPreco ? precoRadarSeguro : "";
@@ -1074,8 +1110,9 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
       afiliacaoWorkspace: provaAfiliado,
       fallbackRadar: {
         usado: !texto(produto.titulo) || erroResolver !== null || produto.ok === false,
-        tituloRadarUsado: !texto(produto.titulo) && Boolean(tituloRadarSeguro),
-        tituloPaginaUsado: !Boolean(tituloRadarSeguro) && Boolean(tituloPaginaSeguro),
+        tituloRadarUsado: Boolean(tituloRadarSeguro && tituloFinal === tituloRadarSeguro),
+        tituloOficialUsado: Boolean(tituloOficialVinculado && tituloFinal === tituloOficialVinculado),
+        tituloPaginaUsado: !Boolean(tituloRadarSeguro) && Boolean(tituloOficialVinculado),
         identidadeProdutoConfirmada,
         resolverFalhou: erroResolver !== null,
         motivoResolver: produto?.motivo || "",

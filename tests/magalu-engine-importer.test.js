@@ -659,6 +659,12 @@ async function testarTituloDaPaginaComIdentidadeConfirmadaPodeSerUsado() {
       produtoId: "240466500",
       sellerIdOriginal: "magazineluiza",
       fonteUsada: "magazinevoce_magazine_promoter",
+      tentativas: [{
+        statusFactual: "aceita",
+        canonicalValida: true,
+        productIdObservado: "240466500",
+        canonicalOrigem: "canonical"
+      }],
       fatos: {
         urlOriginal: url,
         urlCanonica: url,
@@ -668,7 +674,8 @@ async function testarTituloDaPaginaComIdentidadeConfirmadaPodeSerUsado() {
         codigo: "240466500",
         titulo: "Smartphone Samsung A07 128GB Preto",
         imagem: "https://a-static.mlcdn.com.br/800x560/samsung-a07.jpg",
-        avisos: []
+        avisos: [],
+        metadata: { fontes: { titulo: "jsonld.name" } }
       },
       avisos: []
     })

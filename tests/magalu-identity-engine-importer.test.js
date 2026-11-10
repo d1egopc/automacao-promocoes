@@ -130,7 +130,143 @@ async function testarOneLinkAguardaEReutilizaIdentidadeLocal() {
   assert.strictEqual(recuperada.metadata.identidadeLocalWorker.observedProductId, "123456789");
 }
 
+const urlTituloFixture = "https://www.magazineluiza.com.br/smart-tv-samsung-50/p/123456789/et/elit/";
+const urlTituloWorkspaceFixture = "https://www.magazinevoce.com.br/magazined1egopc/smart-tv-samsung-50/p/123456789/et/elit/";
+
+function resolucaoOficialTitulo({
+  productId = "123456789",
+  canonicalProductId = productId,
+  titulo = "Smart TV Samsung 50 polegadas",
+  tituloFonte = "jsonld.name",
+  identidadeAceita = true
+} = {}) {
+  const canonicalUrl = `https://www.magazinevoce.com.br/magazined1egopc/smart-tv-samsung-50/p/${canonicalProductId}/et/elit/`;
+  return {
+    ok: identidadeAceita,
+    produtoId: productId,
+    fonteUsada: "magazinevoce_magazine_promoter",
+    tentativas: [{
+      fonte: "magazinevoce_magazine_promoter",
+      statusFactual: identidadeAceita ? "aceita" : "rejeitada",
+      canonicalValida: identidadeAceita && canonicalProductId === productId,
+      productIdObservado: productId,
+      canonicalOrigem: "canonical"
+    }],
+    fatos: {
+      urlOriginal: urlTituloFixture,
+      urlCanonica: canonicalUrl,
+      urlAfiliavelComprovada: canonicalUrl,
+      magaluWorkspaceValidado: true,
+      produtoId: productId,
+      codigo: productId,
+      titulo,
+      precoAtual: "85,41",
+      imagem: "https://a-static.mlcdn.com.br/320x320/123456789-worktask.jpg",
+      categoria: "Utilidades Domésticas",
+      seller: "Magalu",
+      avisos: [],
+      metadata: { fontes: { urlCanonica: "canonical", titulo: tituloFonte } }
+    },
+    avisos: []
+  };
+}
+
+async function importarComTitulo({ tituloRadar = "", resolucao = resolucaoOficialTitulo() } = {}) {
+  const textoRadar = [tituloRadar, "DE R$ 99,90 | POR R$ 85,41", "Cupom: GARIMPEI1000", urlTituloFixture]
+    .filter(Boolean)
+    .join("\n");
+  return importarProdutoMagaluEngine({
+    job: { id: 594, evento_id: 694, cliente_id: "workspace_magalu", marketplace: "magalu" },
+    evento: { titulo: tituloRadar, texto_original: textoRadar, precoAnterior: "99,90", precoAtual: "85,41", cupom: "GARIMPEI1000", links_extraidos: [urlTituloFixture] },
+    links: [{ ...linkRow(93, urlTituloFixture), url_expandida: urlTituloFixture, url_normalizada: urlTituloFixture }],
+    deps: {
+      ...baseDeps(),
+      resolverFatosMagalu: async ({ urlOriginal }) => ({
+        ...resolucao,
+        fatos: { ...(resolucao.fatos || {}), urlOriginal }
+      })
+    }
+  });
+}
+
+async function testarPreservaTituloRadarSeguro() {
+  const resultado = await importarComTitulo({ tituloRadar: "Smart TV Samsung 50 polegadas" });
+  assert.strictEqual(resultado.ok, true, JSON.stringify(resultado));
+  assert.strictEqual(resultado.titulo, "Smart TV Samsung 50 polegadas");
+}
+
+async function testarSloganRadarUsaTituloOficialDoMesmoProduto() {
+  const tituloOficial = "Smart TV Samsung 50 polegadas 4K UHD";
+  const resultado = await importarComTitulo({
+    tituloRadar: "PRA QUEM NÃO NEGOCIA A EVOLUÇÃO DIÁRIA",
+    resolucao: resolucaoOficialTitulo({ titulo: tituloOficial })
+  });
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.titulo, tituloOficial);
+  assert.strictEqual(resultado.preco, 85.41);
+  assert.strictEqual(resultado.precoOriginal, "99,90");
+  assert.strictEqual(resultado.cupom, "GARIMPEI1000");
+  assert.strictEqual(resultado.linkAfiliado, urlTituloWorkspaceFixture);
+  assert.strictEqual(resultado.linkExpandido, urlTituloWorkspaceFixture);
+  assert.strictEqual(resultado.linkOriginal, urlTituloFixture);
+  assert.strictEqual(resultado.metadata.linksComerciais[0].urlOriginal, urlTituloFixture);
+}
+
+async function testarSemTituloRadarUsaTituloOficialDoMesmoProduto() {
+  const resultado = await importarComTitulo({
+    resolucao: resolucaoOficialTitulo({ titulo: "Smart TV Samsung 50 polegadas 4K UHD" })
+  });
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.titulo, "Smart TV Samsung 50 polegadas 4K UHD");
+}
+
+async function testarRejeitaTituloOficialComProductIdDivergente() {
+  const resultado = await importarComTitulo({
+    tituloRadar: "Menor preço que já vimos nos últimos 60 dias",
+    resolucao: resolucaoOficialTitulo({ productId: "999999999", canonicalProductId: "999999999" })
+  });
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "titulo_indisponivel");
+}
+
+async function testarIdentidadeNaoConfirmadaNaoLiberaTituloOficial() {
+  const resultado = await importarComTitulo({
+    tituloRadar: "Menor preço que já vimos nos últimos 60 dias",
+    resolucao: resolucaoOficialTitulo({ identidadeAceita: false })
+  });
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "titulo_indisponivel");
+}
+
+async function testarSemTituloConfiavelRetemOferta() {
+  const resultado = await importarComTitulo({
+    tituloRadar: "Grupo de ofertas Gerais",
+    resolucao: resolucaoOficialTitulo({ titulo: "Produto Magalu" })
+  });
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "titulo_indisponivel");
+}
+
+async function testarTituloOficialSemProvenienciaRetemOferta() {
+  const resultado = await importarComTitulo({
+    tituloRadar: "Aproveita e convida os amigos pro grupo enviando o link abaixo:",
+    resolucao: resolucaoOficialTitulo({
+      titulo: "Smart TV Samsung 50 polegadas 4K UHD",
+      tituloFonte: "texto_nao_confiavel"
+    })
+  });
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "titulo_indisponivel");
+}
+
 testarOneLinkAguardaEReutilizaIdentidadeLocal()
+  .then(testarPreservaTituloRadarSeguro)
+  .then(testarSloganRadarUsaTituloOficialDoMesmoProduto)
+  .then(testarSemTituloRadarUsaTituloOficialDoMesmoProduto)
+  .then(testarRejeitaTituloOficialComProductIdDivergente)
+  .then(testarIdentidadeNaoConfirmadaNaoLiberaTituloOficial)
+  .then(testarSemTituloConfiavelRetemOferta)
+  .then(testarTituloOficialSemProvenienciaRetemOferta)
   .then(() => console.log("magalu-identity-engine-importer.test.js ok"))
   .catch((erro) => {
     console.error(erro);

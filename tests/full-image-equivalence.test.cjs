@@ -42,10 +42,12 @@ test("manifesto inclui código runtime e hash de dependências, omitindo conteú
   fs.mkdirSync(path.join(root, "node_modules", "pkg"), { recursive: true });
   fs.mkdirSync(path.join(root, "docs"), { recursive: true });
   fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
+  fs.mkdirSync(path.join(root, "optimus-capture", "local-worker"), { recursive: true });
   fs.writeFileSync(path.join(root, "index.js"), "secret-like app content is represented only by hash");
   fs.writeFileSync(path.join(root, "node_modules", "pkg", "index.js"), "dependency bytes");
   fs.writeFileSync(path.join(root, "docs", "note.md"), "doc");
   fs.writeFileSync(path.join(root, "scripts", "guardian-v1.cjs"), "build control");
+  fs.writeFileSync(path.join(root, "optimus-capture", "local-worker", "task-runner.js"), "extension only");
   const facts = `${root}-host-facts`;
   fixtures.push(facts);
   fs.mkdirSync(facts, { recursive: true });

@@ -70,18 +70,20 @@ test("late document_idle receiver retries in the same tab and validates identity
   } finally { fixture.restore(); }
 });
 
-test("late official title is read again from the same product tab after HTTP 403", async () => {
-  const fixture = setup({ captures: [{ titulo: "" }, { titulo: product.titulo }] });
+test("identity remains valid without a title after HTTP 403", async () => {
+  const fixture = setup({ captures: [{ titulo: "" }] });
   try {
     const result = await resolverAtual();
     assert.equal(result.observedProductId, product.produtoId);
-    assert.equal(fixture.calls.length, 3, "receiver retry, incomplete title, then official title");
+    assert.equal(Object.hasOwn(result, "titulo"), false, "title is enrichment, not identity");
+    assert.equal(fixture.calls.length, 2, "receiver retry then identity capture without a title");
+    assert.equal(validarResultadoMagaluIdentity(result, { sourceUrl, identityKey: chaveIdentidadeMagalu(sourceUrl) }).identidadeValidada, true);
     assert.deepEqual(fixture.removed, [71]);
   } finally { fixture.restore(); }
 });
 
-test("late title cannot validate a different product", async () => {
-  const fixture = setup({ captures: [{ titulo: "" }, { titulo: product.titulo, produtoId: "999999999" }] });
+test("a title cannot validate a different product", async () => {
+  const fixture = setup({ captures: [{ titulo: "", produtoId: "999999999" }] });
   try {
     await assert.rejects(resolverAtual(), /magalu_identity_produto_id_divergente/);
     assert.deepEqual(fixture.removed, [71]);
