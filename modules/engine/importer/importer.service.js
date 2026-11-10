@@ -18,7 +18,7 @@ const {
   sqlFrescorComercialPreImporter,
   sqlRetryPreImporter
 } = require("../frescor-pre-importer.service");
-const { normalizarTexto } = require("../normalizers");
+const { normalizarTexto, detectarMarketplaceLink } = require("../normalizers");
 const { classificarCategoriaOferta, avaliarEvidenciaCategoria } = require("../../../marketplaces/inteligencia/classificador-categorias");
 const { extrairIdsShopee } = require("../../../marketplaces/shopee/normalizacao");
 const { extrairProductIdAliExpressManual } = require("../../../marketplaces/aliexpress/importar");
@@ -1054,12 +1054,152 @@ async function registrarEtapaImportacao(jobId, etapa, status, motivo = "", detal
   });
 }
 
-function comprovarTituloTecnicoDoLink(resultado = {}, produto = {}, mlConfirmado = false) {
+function extrairIdMercadoLivreDaUrl(url = "") {
+  return String(url || "").match(/\bMLB-?(\d{6,})\b/i)?.[1]
+    ? `MLB${String(url || "").match(/\bMLB-?(\d{6,})\b/i)[1]}`.toUpperCase()
+    : "";
+}
+
+function extrairAsinDaUrlAncora(url = "") {
+  try {
+    const parsed = new URL(String(url || ""));
+    if (!/^(?:(?:www|m)\.)?amazon\.[a-z.]+$/i.test(parsed.hostname)) return "";
+    return parsed.pathname.match(/\/(?:dp|gp\/product)\/([a-z0-9]{10})(?:[/?#]|$)/i)?.[1]?.toUpperCase() || "";
+  } catch {
+    return "";
+  }
+}
+
+function validarProvaTituloTecnico(resultado = {}, produto = {}, job = {}) {
+  const metadata = resultado.metadata || {};
+  const prova = metadata.provaTituloTecnico;
+  const adapter = normalizarTexto(metadata.adapter || "").toLowerCase();
+  if (!prova || prova.versao !== 1 || prova.marketplace !== adapter) return null;
+
+  const jobId = String(job.id ?? "");
+  const eventoId = String(job.evento_id ?? "");
+  const workspaceId = String(job.cliente_id || job.clienteId || "");
+  const anchorUrl = normalizarTexto(prova.ocorrenciaLink?.urlOriginal || "");
+  const canonicalUrl = normalizarTexto(prova.produto?.urlCanonica || "");
+  const productId = normalizarTexto(prova.produto?.produtoIdCanonico || "");
+  const title = normalizarTexto(prova.titulo?.valor || "");
+  const source = normalizarTexto(prova.titulo?.fonte || "");
+  const occurrence = prova.ocorrenciaLink || {};
+  const linkId = normalizarTexto(occurrence.id || "");
+  const order = Number(occurrence.ordem) || 0;
+  const adapterCanonicalUrl = normalizarTexto(resultado.linkExpandido || resultado.urlFinal || metadata.urlFinalImportador || "");
+  const productTitle = normalizarTexto(produto.titulo || produto.nome || produto.title || "");
+  const metadataOriginal = normalizarTexto(metadata.linkOriginalEngine || "");
+  const resultOriginal = normalizarTexto(resultado.linkOriginal || "");
+
+  if (!jobId || !eventoId || !workspaceId ||
+      String(prova.jobId || "") !== jobId || String(prova.eventoId || "") !== eventoId ||
+      String(prova.workspaceId || "") !== workspaceId ||
+      String(metadata.jobId || "") !== jobId || String(metadata.eventoId || "") !== eventoId ||
+      String(metadata.clienteId || "") !== workspaceId ||
+      (!linkId && order < 1) || !anchorUrl || !canonicalUrl || !productId || !title || !source ||
+      !metadataOriginal || !resultOriginal || detectarMarketplaceLink(anchorUrl) !== adapter ||
+      !adapterCanonicalUrl || title !== productTitle ||
+      !tituloComercialUniversalValido(title, { marketplace: adapter })) {
+    return null;
+  }
+
+  const linksComerciais = Array.isArray(metadata.linksComerciais) ? metadata.linksComerciais : [];
+  const occurrenceBound = linksComerciais.some((link, index) => {
+    const linkUrl = normalizarTexto(link?.urlOriginal || link?.url_original || link?.original || link?.url || "");
+    if (linkUrl !== anchorUrl) return false;
+    const role = normalizarTexto(link?.papelLink || link?.papel || link?.tipo || "").toLowerCase();
+    if (!new Set(["produto", "product", "link_produto"]).has(role)) return false;
+    const actualId = normalizarTexto(link?.ocorrenciaId || link?.idOcorrencia || link?.ocorrencia_id ||
+      link?.id || link?.link_id || "");
+    const actualOrder = Number(link?.ordemCaptura || link?.ordem_captura || link?.ordem || index + 1) || 0;
+    const sameOccurrence = linkId ? actualId === linkId : order > 0 && actualOrder === order;
+    return sameOccurrence && (!order || actualOrder === order);
+  });
+  if (!occurrenceBound) return null;
+
+  if (adapter === "mercadolivre") {
+    const identidade = metadata.identidadeCanonicaMl || metadata.revalidacaoMeliLa || {};
+    const produtoIdCanonico = `MLB${productId.match(/(?:^|\b)MLB-?(\d{6,})\b/i)?.[1] || ""}`.toUpperCase();
+    const canonicalMlb = extrairIdMercadoLivreDaUrl(canonicalUrl);
+    const outputMlb = extrairIdMercadoLivreDaUrl(adapterCanonicalUrl);
+    const anchorMlb = extrairIdMercadoLivreDaUrl(anchorUrl);
+    const fontesOficiais = new Set(["jsonld.name", "og:title", "twitter:title", "html.title"]);
+    if (identidade.status !== "consistente" || identidade.mlbForteConfirmado !== true ||
+        identidade.mlbProduto !== identidade.mlbRevalidado || identidade.mlbRevalidado !== produtoIdCanonico ||
+        normalizarTexto(identidade.urlOriginal || "") !== anchorUrl ||
+        ([anchorMlb, extrairIdMercadoLivreDaUrl(metadataOriginal), extrairIdMercadoLivreDaUrl(resultOriginal)]
+          .some(id => id && id !== produtoIdCanonico)) ||
+        normalizarTexto(identidade.urlCanonicaRevalidada || "") !== canonicalUrl ||
+        canonicalMlb !== produtoIdCanonico || outputMlb !== produtoIdCanonico || identityFallbackMercadoLivre(metadata, produto) ||
+        fontesOficiais.has(source) !== true || produto.tituloFonteOficial !== source ||
+        produto.fallbackTituloMercadoLivre === true) return null;
+  } else if (adapter === "amazon") {
+    const diagnostico = metadata.diagnosticoAmazon || {};
+    const asinAnchor = extrairAsinDaUrlAncora(anchorUrl);
+    const asinMetadataOriginal = extrairAsinDaUrlAncora(metadataOriginal);
+    const asinCanonical = extrairAsinDaUrlAncora(canonicalUrl);
+    const asinOutput = extrairAsinDaUrlAncora(adapterCanonicalUrl);
+    const asinProduto = normalizarTexto(produto.asin || produto.productId || "").toUpperCase();
+    const asinResultOriginal = extrairAsinDaUrlAncora(resultOriginal);
+    if (detectarMarketplaceLink(metadataOriginal) !== "amazon" || detectarMarketplaceLink(resultOriginal) !== "amazon" ||
+        diagnostico.tituloOrigem !== "amazon_importer" || diagnostico.importadorBloqueado === true ||
+        diagnostico.tituloGenerico === true || (asinAnchor && asinAnchor !== productId.toUpperCase()) ||
+        asinCanonical !== productId.toUpperCase() || asinOutput !== productId.toUpperCase() ||
+        [asinMetadataOriginal, asinResultOriginal].some(asin => asin && asin !== productId.toUpperCase()) ||
+        (asinProduto && asinProduto !== productId.toUpperCase())) return null;
+  } else if (adapter === "shopee") {
+    const identidade = produto.identidadeProdutoValidada || {};
+    const idsAnchor = extrairIdsShopee(anchorUrl);
+    const idsMetadataOriginal = extrairIdsShopee(metadataOriginal);
+    const idsCanonical = extrairIdsShopee(canonicalUrl);
+    const idsOutput = extrairIdsShopee(adapterCanonicalUrl);
+    const idsResultOriginal = extrairIdsShopee(resultOriginal);
+    const [shopId, itemId] = productId.split("/");
+    if (identidade.fonte !== "api.productOfferV2" ||
+        String(identidade.shopId || "") !== shopId || String(identidade.itemId || "") !== itemId ||
+        String(produto.shopId || "") !== shopId || String(produto.itemId || "") !== itemId ||
+        String(idsCanonical.shopId || "") !== shopId || String(idsCanonical.itemId || "") !== itemId ||
+        String(idsOutput.shopId || "") !== shopId || String(idsOutput.itemId || "") !== itemId ||
+        (idsAnchor.shopId && String(idsAnchor.shopId) !== shopId) ||
+        (idsAnchor.itemId && String(idsAnchor.itemId) !== itemId) ||
+        [idsMetadataOriginal, idsResultOriginal].some(ids =>
+          (ids.shopId && String(ids.shopId) !== shopId) || (ids.itemId && String(ids.itemId) !== itemId)) ||
+        normalizarTexto(identidade.urlCanonica || "") !== canonicalUrl) return null;
+  } else {
+    return null;
+  }
+
+  return {
+    ...prova,
+    validacao: "confirmada_pelo_importador",
+    marketplace: adapter,
+    produto: { produtoIdCanonico: productId, urlCanonica: canonicalUrl },
+    titulo: { valor: title, fonte: source }
+  };
+}
+
+function identityFallbackMercadoLivre(metadata = {}, produto = {}) {
+  return metadata.fallbackMercadoLivreClonador === true || metadata.fallbackMercadoLivreRadar === true ||
+    produto.fallbackTituloMercadoLivre === true || produto.tituloOrigem === "texto_radar" || produto.tituloOrigem === "slug_url";
+}
+
+function comprovarTituloTecnicoDoLink(resultado = {}, produto = {}, job = {}, mlConfirmado = false) {
   const metadata = resultado.metadata || {};
   const adapter = normalizarTexto(metadata.adapter || "").toLowerCase();
+  const provaValidada = validarProvaTituloTecnico(resultado, produto, job);
+  if (adapter === "mercadolivre" || adapter === "amazon" || adapter === "shopee") {
+    return {
+      confirmada: Boolean(provaValidada),
+      prova: provaValidada,
+      fallbackRadar: adapter === "amazon"
+        ? metadata.diagnosticoAmazon?.tituloOrigem === "radar_mirror"
+        : Boolean(metadata.fallbackMercadoLivreRadar)
+    };
+  }
   const link = normalizarTexto(resultado.linkExpandido || metadata.url_expandida || produto.urlFinal || produto.linkExpandido || "");
   const id = normalizarTexto(resultado.produtoIdDetectado || resultado.produtoId || metadata.produtoId || "");
-  if (adapter === "mercadolivre" || mlConfirmado) return { confirmada: mlConfirmado, fallbackRadar: Boolean(metadata.fallbackMercadoLivreRadar) };
+  if (mlConfirmado) return { confirmada: false, fallbackRadar: Boolean(metadata.fallbackMercadoLivreRadar) };
   if (adapter === "shopee") {
     const idsLink = extrairIdsShopee(link);
     const idsProduto = produto.identidadeProdutoValidada || produto;
@@ -1103,18 +1243,10 @@ function normalizarOfertaImportada(resultado = {}, job = {}) {
   const tituloImportado = normalizarTexto(resultado.titulo || resultado.nome || "");
   const marketplaceTitulo = normalizarTexto(resultado.marketplace || job.marketplace || job.marketplace_detectado);
   const tituloSeguro = tituloComercialUniversalValido(tituloImportado, { marketplace: marketplaceTitulo }) ? tituloImportado : "";
-  const identidadeMl = resultado.metadata?.identidadeCanonicaMl || {};
-  const mlbProduto = normalizarTexto(identidadeMl.mlbProduto || "").toUpperCase();
-  const mlbResultado = normalizarTexto(resultado.produtoIdDetectado || resultado.produtoId || "").toUpperCase();
-  const tituloOficialConfirmado = marketplaceTitulo.toLowerCase() === "mercadolivre"
-    && identidadeMl.status === "consistente"
-    && identidadeMl.mlbForteConfirmado === true
-    && /^MLB\d+$/.test(mlbProduto)
-    && mlbProduto === mlbResultado
-    && !resultado.metadata?.fallbackMercadoLivreClonador
-    && !resultado.metadata?.fallbackMercadoLivreRadar;
+  const provaTituloValidada = validarProvaTituloTecnico(resultado, produtoMetadata, job);
+  const tituloOficialConfirmado = marketplaceTitulo.toLowerCase() === "mercadolivre" && Boolean(provaTituloValidada);
   const tituloMetadata = normalizarTexto(produtoMetadata.titulo || produtoMetadata.nome || produtoMetadata.title || "");
-  const identidadeTecnica = comprovarTituloTecnicoDoLink(resultado, produtoMetadata, tituloOficialConfirmado);
+  const identidadeTecnica = comprovarTituloTecnicoDoLink(resultado, produtoMetadata, job, tituloOficialConfirmado);
   const tituloTecnico = identidadeTecnica.confirmada &&
     tituloComercialUniversalValido(tituloMetadata, { marketplace: marketplaceTitulo })
     ? tituloMetadata : "";
@@ -1154,7 +1286,8 @@ function normalizarOfertaImportada(resultado = {}, job = {}) {
     statusHttp: normalizarNumero(resultado.statusHttp),
     shopId: normalizarTexto(resultado.shopId || produtoMetadata.shopId || ""),
     itemId: normalizarTexto(resultado.itemId || produtoMetadata.itemId || ""),
-    produtoIdDetectado: normalizarTexto(resultado.produtoIdDetectado || resultado.produtoId || produtoMetadata.produtoId || ""),
+    produtoIdDetectado: normalizarTexto(resultado.produtoIdDetectado || resultado.produtoId || produtoMetadata.produtoId ||
+      provaTituloValidada?.produto?.produtoIdCanonico || ""),
     linkOriginal: normalizarTexto(resultado.linkOriginal || ""),
     linkExpandido: normalizarTexto(resultado.linkExpandido || resultado.urlFinal || ""),
     linkAfiliado: normalizarTexto(resultado.linkAfiliado || resultado.linkFinal || resultado.link || ""),
@@ -1162,7 +1295,10 @@ function normalizarOfertaImportada(resultado = {}, job = {}) {
     cupom: normalizarTexto(resultado.cupom || ""),
     cupomTipo: normalizarTexto(resultado.cupomTipo || resultado.tipoCupom || ""),
     score: normalizarNumero(resultado.score),
-    metadata: resultado.metadata || resultado
+    metadata: {
+      ...(resultado.metadata || resultado),
+      ...(provaTituloValidada ? { provaTituloTecnicoValidada: provaTituloValidada } : {})
+    }
   };
 }
 
@@ -3804,6 +3940,24 @@ function avaliarGateIdentidadeMercadoLivre(oferta = {}, metadata = {}) {
       precoRadar: identidade.precoRadar ?? null,
       precoImportador: identidade.precoImportador ?? null,
       tituloSimilaridade: identidade.tituloSimilaridade ?? null
+    };
+  }
+
+  const provaTitulo = objetoSeguro(metadata.provaTituloTecnicoValidada);
+  const provaOficialCorrespondente = provaTitulo.validacao === "confirmada_pelo_importador" &&
+    provaTitulo.marketplace === "mercadolivre" &&
+    normalizarTexto(provaTitulo.produto?.produtoIdCanonico || "").toUpperCase() ===
+      normalizarTexto(identidade.mlbRevalidado || identidade.mlbProduto || "").toUpperCase() &&
+    normalizarTexto(provaTitulo.titulo?.valor || "") === normalizarTexto(oferta.titulo || oferta.nome || "");
+  if (identidade.status === "consistente" && identidade.mlbForteConfirmado === true &&
+      metadata.fallbackMercadoLivreRadar !== true && metadata.fallbackMercadoLivreClonador !== true &&
+      !provaOficialCorrespondente) {
+    return {
+      retida: true,
+      status: "retida_v2",
+      motivo: "mercadolivre_titulo_tecnico_nao_confirmado",
+      reprocessavel: true,
+      sinais: ["prova_titulo_tecnico_nao_propagada"]
     };
   }
 

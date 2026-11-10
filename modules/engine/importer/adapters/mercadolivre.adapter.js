@@ -13,6 +13,7 @@ const {
   buscarImagemCanonicaMercadoLivre,
   buscarImagemOficialMercadoLivrePorMlb
 } = require("../importer.service");
+const { montarProvaTituloTecnico } = require("./prova-identidade-tecnica");
 
 function resumoTemplateInputAuditoria(templateInput = {}) {
   return {
@@ -2341,9 +2342,34 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
   });
 
   const ofertaEnriquecida = enriquecerOfertaAdapterComV2(ofertaAdapter, auditoriaV2, produtoComImagemSocialResolvida, linkAfiliado);
+  const tituloOficialMercadoLivre = textoMercadoLivre(produtoComImagemSocialResolvida.titulo || produtoComImagemSocialResolvida.nome || "");
+  const produtoIdCanonicoMl = textoMercadoLivre(identidadeCanonicaMl.mlbRevalidado || "").toUpperCase();
+  const identidadeMlConfirmada = identidadeCanonicaMl.status === "consistente" &&
+    identidadeCanonicaMl.mlbForteConfirmado === true &&
+    /^MLB\d+$/.test(produtoIdCanonicoMl) &&
+    identidadeCanonicaMl.mlbProduto === produtoIdCanonicoMl &&
+    extrairMlbMercadoLivre(identidadeCanonicaMl.urlCanonicaRevalidada || "") === produtoIdCanonicoMl;
+  const tituloFonteOficialMl = textoMercadoLivre(produtoComImagemSocialResolvida.tituloFonteOficial || "");
+  const provaTituloTecnico = identidadeMlConfirmada && tituloOficialMercadoLivre && tituloFonteOficialMl &&
+    produtoComImagemSocialResolvida.fallbackTituloMercadoLivre !== true
+    ? montarProvaTituloTecnico({
+      marketplace: "mercadolivre",
+      job,
+      workspaceId: clienteId,
+      links,
+      linkEscolhido,
+      urlOriginal: urlOriginalEngine,
+      urlCanonica: identidadeCanonicaMl.urlCanonicaRevalidada,
+      produtoId: produtoIdCanonicoMl,
+      titulo: tituloOficialMercadoLivre,
+      fonteTitulo: tituloFonteOficialMl
+    })
+    : null;
 
   return {
     ...ofertaEnriquecida,
+    produtoId: produtoIdCanonicoMl,
+    produtoIdDetectado: produtoIdCanonicoMl,
     metadata: {
       auditoriaInteligenciaUniversalV2: auditoriaV2 ? {
         fonteFinal: false,
@@ -2374,6 +2400,7 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
         score: ofertaEnriquecida.score
       },
       adapter: "mercadolivre",
+      clienteId,
       origemPreco: temPrecoRadarComercial ? "texto_radar" : "importador_ml",
       jobId: job.id,
       eventoId: job.evento_id,
@@ -2398,6 +2425,7 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
       },
       identidadeCanonicaMl,
       revalidacaoMeliLa: identidadeCanonicaMl,
+      ...(provaTituloTecnico ? { provaTituloTecnico } : {}),
       camposProduto: Object.keys(produtoComImagemSocialResolvida || {}),
       linksClassificados: resumoLinksClassificados(linksConvertidosMercadoLivre, evento, "mercadolivre"),
       linksComerciais: linksConvertidosMercadoLivre,

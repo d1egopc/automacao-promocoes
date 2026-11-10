@@ -4,6 +4,7 @@ const { tituloComercialUniversalValido } = require("../../../radar/comercial-pre
 const { queryEngine } = require("../../database");
 const { resumoLinksClassificados } = require("../../link-role.service");
 const { detectarMarketplaceLink } = require("../../normalizers");
+const { montarProvaTituloTecnico } = require("./prova-identidade-tecnica");
 
 function texto(valor = "") {
   return String(valor || "").trim();
@@ -118,6 +119,15 @@ function imagemAmazonConfiavel(produto = {}) {
 
 function linkAmazonReconhecido(url = "") {
   return detectarMarketplaceLink(url) === "amazon";
+}
+
+function asinAmazonPorUrl(url = "") {
+  if (!linkAmazonReconhecido(url)) return "";
+  try {
+    return new URL(String(url)).pathname.match(/\/(?:dp|gp\/product)\/([a-z0-9]{10})(?:[/?#]|$)/i)?.[1]?.toUpperCase() || "";
+  } catch {
+    return "";
+  }
 }
 
 function escolherLinkAmazon(links = [], evento = {}) {
@@ -541,6 +551,28 @@ async function importarAmazonEngine({ job = {}, evento = {}, links = [], deps = 
   const beneficioExtra = produto.beneficioExtra || produto.beneficioTexto || produto.avisoCupom || "";
   const tituloAmazon = selecionarTituloAmazonConfiavel(produto, evento, job);
   const imagemAmazon = imagemAmazonConfiavel(produto);
+  const asinAnchor = asinAmazonPorUrl(urlOriginalEngine);
+  const urlCanonicaAmazon = texto(produto.urlProdutoCanonica || produto.urlFinal || produto.productLink ||
+    produto.linkOriginal || "");
+  const asinCanonical = asinAmazonPorUrl(urlCanonicaAmazon);
+  const asinProdutoInformado = texto(produto.asin || produto.productId || "").toUpperCase();
+  const provaTituloTecnico = tituloAmazon.origem === "amazon_importer" &&
+    !tituloAmazon.importadorBloqueado && !tituloAmazon.tituloGenerico &&
+    detectarMarketplaceLink(urlOriginalEngine) === "amazon" && asinCanonical &&
+    (!asinAnchor || asinAnchor === asinCanonical) && (!asinProdutoInformado || asinProdutoInformado === asinCanonical)
+    ? montarProvaTituloTecnico({
+      marketplace: "amazon",
+      job,
+      workspaceId: clienteId,
+      links,
+      linkEscolhido,
+      urlOriginal: urlOriginalEngine,
+      urlCanonica: urlCanonicaAmazon,
+      produtoId: asinCanonical,
+      titulo: tituloAmazon.titulo,
+      fonteTitulo: "amazon_importer"
+    })
+    : null;
   const ofertaAdapter = {
     ok: true,
     marketplace: "amazon",
@@ -576,8 +608,10 @@ async function importarAmazonEngine({ job = {}, evento = {}, links = [], deps = 
 
   return {
     ...ofertaEnriquecida,
+    ...(asinCanonical ? { produtoId: asinCanonical, produtoIdDetectado: asinCanonical } : {}),
     metadata: {
       adapter: "amazon",
+      clienteId,
       jobId: job.id,
       eventoId: job.evento_id,
       linkOriginalEngine: urlOriginalEngine,
@@ -595,6 +629,7 @@ async function importarAmazonEngine({ job = {}, evento = {}, links = [], deps = 
         tituloGenerico: tituloAmazon.tituloGenerico === true,
         importadorBloqueado: tituloAmazon.importadorBloqueado === true
       },
+      ...(provaTituloTecnico ? { provaTituloTecnico } : {}),
       produto,
       auditoriaInteligenciaUniversalV2: auditoriaV2 ? {
         fonteFinal: false,

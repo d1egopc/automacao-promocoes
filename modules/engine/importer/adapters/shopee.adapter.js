@@ -12,6 +12,7 @@ const {
 const {
   criarProvaAfiliacaoWorkspaceShopee
 } = require("../../../marketplaces/shopee/afiliacao-workspace");
+const { montarProvaTituloTecnico } = require("./prova-identidade-tecnica");
 const {
   PAPEL_LINK,
   classificarCandidatosLinks,
@@ -981,7 +982,8 @@ function montarLinksComerciaisShopee({ links = [], evento = {}, analiseLinksShop
     if (!['produto', 'resgate'].includes(papel)) return;
 
     const ordemCaptura = Number(link.ordemCaptura || link.ordem || link.indiceCaptura || indice + 1) || (indice + 1);
-    const ocorrenciaId = texto(link.ocorrenciaId || link.idOcorrencia || `shopee:${papel}:${ordemCaptura}:${indice + 1}`);
+    const ocorrenciaId = texto(link.ocorrenciaId || link.idOcorrencia || link.ocorrencia_id ||
+      link.id || link.link_id || `shopee:${papel}:${ordemCaptura}:${indice + 1}`);
     const chaveUrl = texto(urlOriginal).replace(/\/+$/g, "").toLowerCase();
     const chave = `${papel}|${chaveUrl}`;
     if (vistos.has(chave)) return;
@@ -1648,6 +1650,26 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
 
   const auditoriaV2 = auditarV2Shopee({ job, produto, ofertaAdapter });
   const ofertaEnriquecida = enriquecerComV2(ofertaAdapter, auditoriaV2, produto);
+  const identidadeApiShopee = produto.identidadeProdutoValidada || {};
+  const tituloOficialShopee = texto(produto.titulo || produto.nome || "");
+  const urlCanonicaShopee = texto(identidadeApiShopee.urlCanonica || produto.linkExpandido || "");
+  const provaTituloTecnico = identidadeApiShopee.fonte === "api.productOfferV2" &&
+    produto.tituloOrigem === "api.productOfferV2" &&
+    String(identidadeApiShopee.shopId || "") === String(idsProduto.shopId || "") &&
+    String(identidadeApiShopee.itemId || "") === String(idsProduto.itemId || "")
+    ? montarProvaTituloTecnico({
+      marketplace: "shopee",
+      job,
+      workspaceId: clienteId,
+      links,
+      linkEscolhido,
+      urlOriginal: urlOriginalEngine,
+      urlCanonica: urlCanonicaShopee,
+      produtoId: `${idsProduto.shopId}/${idsProduto.itemId}`,
+      titulo: tituloOficialShopee,
+      fonteTitulo: identidadeApiShopee.fonte
+    })
+    : null;
 
   logAuditoriaShopee({
     jobId: job.id,
@@ -1668,8 +1690,11 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
 
   return {
     ...ofertaEnriquecida,
+    produtoId: ofertaAdapter.produtoIdDetectado,
+    produtoIdDetectado: ofertaAdapter.produtoIdDetectado,
     metadata: {
       adapter: "shopee",
+      clienteId,
       jobId: job.id,
       eventoId: job.evento_id,
       linkOriginalEngine: urlOriginalEngine,
@@ -1701,6 +1726,7 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
       precoRadarTexto: precoEscolhido.precoRadarTexto || "",
       textoRadarTemCupom: Boolean(extrairCupomTextoRadarShopee(textoOriginalRadar).cupom),
       camposProduto: Object.keys(produto || {}),
+      ...(provaTituloTecnico ? { provaTituloTecnico } : {}),
       produto,
       auditoriaInteligenciaUniversalV2: auditoriaV2 ? {
         fonteFinal: false,

@@ -4,7 +4,10 @@ const {
   importarMercadoLivreEngine,
   _test
 } = require("../modules/engine/importer/adapters/mercadolivre.adapter");
-const { avaliarGateIdentidadeMercadoLivre } = require("../modules/engine/importer/importer.service");
+const {
+  avaliarGateIdentidadeMercadoLivre,
+  normalizarOfertaImportada
+} = require("../modules/engine/importer/importer.service");
 const { resolverImagemCanonicaFinalEvento } = require("../modules/imagens/cache-canonico-evento");
 
 const IMG_OFICIAL = "https://http2.mlstatic.com/D_NQ_NP_2X_123-MLB1234567890_012024-F.webp";
@@ -53,6 +56,7 @@ function produtoMl({
     marketplace: "mercadolivre",
     titulo,
     nome: titulo,
+    tituloFonteOficial: "og:title",
     precoAtual: preco,
     preco,
     linkOriginal: `https://produto.mercadolivre.com.br/${mlb}-produto-_JM`,
@@ -132,6 +136,32 @@ async function testarLinkDiretoSemRegressao() {
   assert.strictEqual(resultado.ok, true);
   assert.strictEqual(contexto.chamadas.importador[0], direto);
   assert.strictEqual(resultado.metadata.identidadeCanonicaMl.status, "consistente");
+  assert.equal(resultado.metadata.provaTituloTecnico?.titulo?.fonte, "og:title");
+  const oferta = normalizarOfertaImportada(resultado, job());
+  assert.equal(oferta.metadata.provaTituloTecnicoValidada?.validacao, "confirmada_pelo_importador");
+  assert.equal(oferta.metadata.provaTituloTecnicoValidada?.produto?.produtoIdCanonico, "MLB5271769078");
+}
+
+async function testarProvaOficialClonadorVinculadaAoMesmoLink() {
+  const direto = "https://produto.mercadolivre.com.br/MLB-5271769078-body-splash-_JM";
+  const contexto = depsBasicas();
+  const resultado = await importarMercadoLivreEngine({
+    job: job(),
+    evento: { ...eventoRadar(), origem: "clonador_grupos", origemFluxo: "clonador_grupos" },
+    links: [{
+      ...linkMeli({ original: direto, expandida: direto })[0],
+      id: "clonador-occurrence-1",
+      ocorrencia_id: "clonador-occurrence-1",
+      ordem_captura: 1,
+      papelLink: "produto"
+    }],
+    deps: contexto.deps
+  });
+
+  assert.equal(resultado.ok, true);
+  assert.equal(resultado.metadata.provaTituloTecnico?.ocorrenciaLink?.id, "clonador-occurrence-1");
+  const oferta = normalizarOfertaImportada(resultado, job());
+  assert.equal(oferta.metadata.provaTituloTecnicoValidada?.validacao, "confirmada_pelo_importador");
 }
 
 async function testarProdutoConfirmadoPrecoMudouContinuaPublicando() {
@@ -409,6 +439,7 @@ async function testarImagemOficialMlVenceRadarMirror() {
   await testarMeliLaContaminadoCorrigeParaShortlinkRevalidado();
   await testarMeliLaCorretoContinuaPublicando();
   await testarLinkDiretoSemRegressao();
+  await testarProvaOficialClonadorVinculadaAoMesmoLink();
   await testarProdutoConfirmadoPrecoMudouContinuaPublicando();
   await testarTituloPequenaVariacaoContinuaPublicando();
   testarMesmoMlbComMedidasTextuaisDiferentesContinuaPublicando();

@@ -49,6 +49,7 @@ async function testarClassificacaoShopeePreservaProduto() {
     links: [linkRow(1, cupom), linkRow(2, produto)],
     deps: {
       getIntegracaoCliente: () => ({ credenciais: { appId: "app", secret: "secret" } }),
+      expandirShortlinkShopee: async (url) => url,
       importarShopee: async (url) => {
         chamadasImportador.push(url);
         return {
@@ -56,10 +57,13 @@ async function testarClassificacaoShopeePreservaProduto() {
           precoAtual: "229.00",
           precoOriginal: "399.00",
           imagem: "https://img.test/water-cooler.jpg",
-          linkAfiliado: "https://shopee.test/afiliado",
+          linkAfiliado: "https://shopee.com.br/product/123/456?mmp_pid=an_app",
           linkExpandido: "https://shopee.com.br/product/123/456",
           shopId: "123",
           itemId: "456",
+          tituloOrigem: "api.productOfferV2",
+          identidadeProdutoValidada: { fonte: "api.productOfferV2", shopId: "123", itemId: "456",
+            urlCanonica: "https://shopee.com.br/product/123/456" },
           categoria: "informatica"
         };
       }
@@ -71,6 +75,7 @@ async function testarClassificacaoShopeePreservaProduto() {
   assert.strictEqual(resultado.metadata.papelLinkEscolhido, "produto");
   assert.strictEqual(resultado.metadata.linksClassificados[0].papelLink, "cupom");
   assert.strictEqual(resultado.metadata.linksClassificados[1].papelLink, "produto");
+  assert.equal(resultado.metadata.provaTituloTecnico?.titulo?.fonte, "api.productOfferV2");
 }
 
 async function testarShopeeResgateProdutoComParametroLpAff() {
@@ -96,7 +101,7 @@ async function testarShopeeResgateProdutoComParametroLpAff() {
     links: [linkRow(1, resgate), linkRow(2, produto)],
     deps: {
       getIntegracaoCliente: () => ({ credenciais: { appId: "app", secret: "secret" } }),
-      expandirShortlinkShopee: async () => "",
+      expandirShortlinkShopee: async (url) => url,
       gerarShortLinkShopee: async () => ({ ok: false, motivo: "fixture_sem_generate_shortlink" }),
       importarShopee: async (url) => {
         chamadasImportador.push(url);
@@ -104,10 +109,13 @@ async function testarShopeeResgateProdutoComParametroLpAff() {
           titulo: "Smartphone Poco",
           precoAtual: "725.00",
           imagem: "https://img.test/poco.jpg",
-          linkAfiliado: "https://shopee.test/poco-afiliado",
+          linkAfiliado: "https://shopee.com.br/product/111/222?mmp_pid=an_app",
           linkExpandido: "https://shopee.com.br/product/111/222",
           shopId: "111",
           itemId: "222",
+          tituloOrigem: "api.productOfferV2",
+          identidadeProdutoValidada: { fonte: "api.productOfferV2", shopId: "111", itemId: "222",
+            urlCanonica: "https://shopee.com.br/product/111/222" },
           categoria: "celulares"
         };
       }
@@ -145,7 +153,7 @@ async function testarShopeeResgateProdutoSemRotuloExplicito() {
     links: [linkRow(1, resgate), linkRow(2, produto)],
     deps: {
       getIntegracaoCliente: () => ({ credenciais: { appId: "app", secret: "secret" } }),
-      expandirShortlinkShopee: async () => "",
+      expandirShortlinkShopee: async (url) => url,
       gerarShortLinkShopee: async () => ({ ok: false, motivo: "fixture_sem_generate_shortlink" }),
       importarShopee: async (url) => {
         chamadasImportador.push(url);
@@ -153,10 +161,13 @@ async function testarShopeeResgateProdutoSemRotuloExplicito() {
           titulo: "Memoria Servidor 32GB",
           precoAtual: "192.00",
           imagem: "https://img.test/memoria.jpg",
-          linkAfiliado: "https://shopee.test/memoria-afiliado",
+          linkAfiliado: "https://shopee.com.br/product/333/444?mmp_pid=an_app",
           linkExpandido: "https://shopee.com.br/product/333/444",
           shopId: "333",
           itemId: "444",
+          tituloOrigem: "api.productOfferV2",
+          identidadeProdutoValidada: { fonte: "api.productOfferV2", shopId: "333", itemId: "444",
+            urlCanonica: "https://shopee.com.br/product/333/444" },
           categoria: "informatica"
         };
       }
@@ -195,10 +206,13 @@ async function testarShopeeShortlinkGenericoChegaAoImportador() {
           titulo: "Produto Shopee Confirmado",
           precoAtual: "99.90",
           imagem: "https://img.test/shopee.jpg",
-          linkAfiliado: "https://shopee.test/afiliado",
+          linkAfiliado: "https://shopee.com.br/product/321/654?mmp_pid=an_app",
           linkExpandido: "https://shopee.com.br/product/321/654",
           shopId: "321",
           itemId: "654",
+          tituloOrigem: "api.productOfferV2",
+          identidadeProdutoValidada: { fonte: "api.productOfferV2", shopId: "321", itemId: "654",
+            urlCanonica: "https://shopee.com.br/product/321/654" },
           categoria: "shopee"
         };
       }
@@ -272,10 +286,13 @@ async function testarShopeeTentaProximoCandidatoQuandoPrimeiroNaoConfirmaProduto
           titulo: "Produto Shopee Valido",
           precoAtual: "59.90",
           imagem: "https://img.test/produto.jpg",
-          linkAfiliado: "https://shopee.test/afiliado2",
+          linkAfiliado: "https://shopee.com.br/product/987/654?mmp_pid=an_app",
           linkExpandido: "https://shopee.com.br/product/987/654",
           shopId: "987",
           itemId: "654",
+          tituloOrigem: "api.productOfferV2",
+          identidadeProdutoValidada: { fonte: "api.productOfferV2", shopId: "987", itemId: "654",
+            urlCanonica: "https://shopee.com.br/product/987/654" },
           categoria: "shopee"
         };
       }
@@ -311,16 +328,19 @@ async function testarShopeePreservaPrecoRadarQuandoApiIncompativel() {
     links: [linkRow(1, resgate), linkRow(2, produto)],
     deps: {
       getIntegracaoCliente: () => ({ credenciais: { appId: "app", secret: "secret" } }),
-      expandirShortlinkShopee: async () => "",
+      expandirShortlinkShopee: async (url) => url,
       gerarShortLinkShopee: async () => ({ ok: false, motivo: "fixture_sem_generate_shortlink" }),
       importarShopee: async () => ({
         titulo: "Wi-Fi Placa Mae Msi B550m Pro-vdh Wifi Ddr4 Socket Am4 Cor Preto",
         precoAtual: "7,19",
         imagem: "https://img.test/placa.jpg",
-        linkAfiliado: "https://shopee.test/placa-afiliada",
+        linkAfiliado: "https://shopee.com.br/product/123/789?mmp_pid=an_app",
         linkExpandido: "https://shopee.com.br/product/123/789",
         shopId: "123",
         itemId: "789",
+        tituloOrigem: "api.productOfferV2",
+        identidadeProdutoValidada: { fonte: "api.productOfferV2", shopId: "123", itemId: "789",
+          urlCanonica: "https://shopee.com.br/product/123/789" },
         categoria: "Gamer e Hardware"
       })
     }
@@ -331,6 +351,7 @@ async function testarShopeePreservaPrecoRadarQuandoApiIncompativel() {
   assert.strictEqual(resultado.metadata.precoRadarUsado, true);
   assert.strictEqual(resultado.metadata.papelLinkEscolhido, "produto");
   assert.strictEqual(resultado.metadata.linksAuxiliaresShopee.length, 1);
+  assert.equal(resultado.metadata.provaTituloTecnico?.titulo?.fonte, "api.productOfferV2");
 }
 
 async function testarClassificacaoAliExpressPreservaProduto() {

@@ -125,6 +125,7 @@ async function executarAdapterAmazon(produto, { radarMirror = radarMirrorAmazon(
   return importarAmazonEngine({
     job: {
       id: 101,
+      evento_id: 201,
       cliente_id: "cliente_amazon",
       marketplace: "amazon",
       marketplace_detectado: "amazon"
@@ -172,10 +173,13 @@ async function testarImportadorCaptchaDiagnostico() {
 }
 
 async function testarAdapterUsaAmazonReal() {
+  const { normalizarOfertaImportada } = require("../modules/engine/importer/importer.service");
   const resultado = await executarAdapterAmazon({
     marketplace: "amazon",
     titulo: "Echo Dot 5a Geracao",
     precoAtual: "299,90",
+    urlProdutoCanonica: "https://www.amazon.com.br/dp/B0TESTE123",
+    linkOriginal: "https://www.amazon.com.br/dp/B0TESTE123?tag=tag-20",
     imagem: "https://m.media-amazon.com/images/I/echo.jpg",
     linkAfiliado: "https://www.amazon.com.br/dp/B0TESTE123?tag=tag-20",
     categoria: "Amazon",
@@ -189,6 +193,12 @@ async function testarAdapterUsaAmazonReal() {
   assert.strictEqual(resultado.titulo, "Echo Dot 5a Geracao");
   assert.strictEqual(resultado.imagem, "https://m.media-amazon.com/images/I/echo.jpg");
   assert.strictEqual(resultado.metadata.diagnosticoAmazon.tituloOrigem, "amazon_importer");
+  assert.equal(resultado.metadata.provaTituloTecnico?.produto?.produtoIdCanonico, "B0TESTE123");
+  const normalizada = normalizarOfertaImportada(resultado, {
+    id: 101, evento_id: 201, cliente_id: "cliente_amazon", marketplace: "amazon"
+  });
+  assert.equal(normalizada.titulo, "Echo Dot 5a Geracao");
+  assert.equal(normalizada.metadata.provaTituloTecnicoValidada?.marketplace, "amazon");
 }
 
 async function testarAdapterBloqueadoPreservaRadar() {

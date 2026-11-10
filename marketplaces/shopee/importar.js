@@ -714,6 +714,7 @@ return async function importarShopee(url, config) {
   }
 
   let produto = null;
+  let produtoApiOfferV2Ancorado = false;
 
   // 1) Tenta buscar pelo itemId do próprio link
   if (ids.itemId) {
@@ -749,12 +750,11 @@ return async function importarShopee(url, config) {
       const data = await chamarShopeeGraphQL(bodyPayload);
       const nodes = data?.data?.productOfferV2?.nodes || [];
 
-      produto = config.contextoEngine?.shopeeIdentidadeResolvida
-        ? nodes.find(p => String(p.itemId) === String(ids.itemId) && String(p.shopId) === String(ids.shopId)) || null
-        :
-        nodes.find((p) => String(p.itemId) === String(ids.itemId)) ||
-        nodes[0] ||
-        null;
+      produto = nodes.find((p) => String(p.itemId) === String(ids.itemId) &&
+        (!ids.shopId || String(p.shopId) === String(ids.shopId))) || null;
+      produtoApiOfferV2Ancorado = Boolean(produto && ids.itemId &&
+        String(produto.itemId) === String(ids.itemId) &&
+        (!ids.shopId || String(produto.shopId) === String(ids.shopId)));
     } catch (e) {
       console.error("[ERRO] [SHOPEE] SHOPEE ITEMID ERRO:", e.message);
     }
@@ -1016,6 +1016,9 @@ console.log("[SHOPEE-IMAGEM-ORIGEM]", JSON.stringify({
  const tituloFinalApi = tituloShopeeValido(produto?.productName || "")
    ? produto.productName
    : (tituloShopeeValido(dadosHtmlApi.titulo || "") ? dadosHtmlApi.titulo : "");
+ const tituloOrigemTecnico = tituloShopeeValido(produto?.productName || "")
+   ? "api.productOfferV2"
+   : (tituloShopeeValido(dadosHtmlApi.titulo || "") ? "html_fallback" : "");
  if (!tituloFinalApi) {
    return {
      ok: false,
@@ -1177,9 +1180,13 @@ logPrecoOrigemShopee({
 
   return {
     marketplace: "shopee",
-    ...(config.contextoEngine?.shopeeIdentidadeResolvida ? {identidadeProdutoValidada: {
-      fonte: "api.productOfferV2", shopId: String(produto.shopId), itemId: String(produto.itemId)
-    }} : {}),
+    tituloOrigem: tituloOrigemTecnico,
+    ...(produtoApiOfferV2Ancorado && ids.shopId && ids.itemId &&
+      String(produto.shopId) === String(ids.shopId) && String(produto.itemId) === String(ids.itemId)
+      ? { identidadeProdutoValidada: {
+        fonte: "api.productOfferV2", shopId: String(produto.shopId), itemId: String(produto.itemId), urlCanonica: url
+      } }
+      : {}),
     titulo: htmlDecode(tituloFinalApi)
       .replace(" | Shopee Brasil", "")
       .replace(" | Shopee", "")
