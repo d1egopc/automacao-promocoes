@@ -1990,6 +1990,35 @@ function motivoIdentidadeMeliClonadorNaoComprovada({ evento = {}, job = {}, urlO
   return "identidade_ml_nao_comprovada";
 }
 
+async function recuperarProdutoOficialShowProduct({ resolucaoProduto, clienteId, integracao,
+  deps, evento, job, urlOriginalEngine }) {
+  const transporte = provaTransporteShowProductMercadoLivre(resolucaoProduto);
+  const mlb = transporte?.mlbItem;
+  if (!mlb || typeof deps.gerarLinkAfiliadoMercadoLivre !== "function") return null;
+  try {
+    const buscar = deps.buscarImagemOficialMercadoLivrePorMlb || buscarImagemOficialMercadoLivrePorMlb;
+    const oficial = await buscar(mlb, { clienteId, integracao,
+      getIntegracaoCliente: deps.getIntegracaoCliente });
+    const proof = oficial?.provaTituloOficial;
+    if (normalizarMlbItemApiMercadoLivre(oficial?.mlb) !== mlb ||
+        proof?.produtoIdCanonico !== mlb || proof?.fonte !== "api_mercadolibre.items.title" ||
+        proof?.urlApi !== `https://api.mercadolibre.com/items/${mlb}` ||
+        !oficial.tituloOficial || tituloTecnicoBloqueadoMercadoLivre(oficial.tituloOficial)) return null;
+    const afiliado = textoMercadoLivre(await deps.gerarLinkAfiliadoMercadoLivre(
+      transporte.linkResolvidoTecnico, integracao, { clienteId }));
+    if (!afiliado) return null;
+    // Technical recovery never imports API prices/coupons or the source affiliate.
+    return { titulo: oficial.tituloOficial, nome: oficial.tituloOficial,
+      tituloFonteOficial: proof.fonte, provaTituloOficial: proof,
+      produtoId: mlb, produtoIdDetectado: mlb,
+      urlFinal: transporte.linkResolvidoTecnico, linkOriginal: urlOriginalEngine,
+      linkAfiliado: afiliado, imagem: oficial.imagem || "", imagemOrigem: oficial.origem || "",
+      preco: extrairPrecoClonadorMercadoLivre(evento, job) || extrairPrecoRadarMercadoLivre(evento),
+      cupom: extrairCupomClonadorMercadoLivre(evento, job) || extrairCupomRadarMercadoLivre(evento),
+      beneficioTexto: extrairBeneficioClonadorMercadoLivre(evento, job) || extrairBeneficioRadarMercadoLivre(evento) };
+  } catch { return null; }
+}
+
 async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], deps = {} } = {}) {
   const clienteId = String(job.cliente_id || "").trim();
   const linkEscolhido = escolherLinkMercadoLivreDetalhado(links, evento);
@@ -2118,7 +2147,7 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
 
   const textoOriginalRadar = String(evento.texto_original || evento.textoOriginal || "").trim();
   let falhaImportadorMercadoLivre = null;
-  const produto = await deps.importarMercadoLivre(urlImportador, clienteId, {
+  let produto = await deps.importarMercadoLivre(urlImportador, clienteId, {
     getIntegracaoCliente: deps.getIntegracaoCliente,
     gerarLinkAfiliadoMercadoLivre: deps.gerarLinkAfiliadoMercadoLivre,
     textoOriginal: textoOriginalRadar,
@@ -2165,6 +2194,10 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
     temLink: Boolean(produto?.link)
   }));
 
+  if (!produto) {
+    produto = await recuperarProdutoOficialShowProduct({ resolucaoProduto, clienteId,
+      integracao, deps, evento, job, urlOriginalEngine });
+  }
   if (!produto) {
     if (falhaImportadorMercadoLivre?.motivo === "ml_wall_captcha") {
       if (origemClonadorGruposMercadoLivre(evento, job)) {
@@ -2288,10 +2321,12 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
   const avisoCupom = produtoComImagemSocialResolvida.avisoCupom || "";
   const cupomTipo = produtoComImagemSocialResolvida.tipoCupom || produtoComImagemSocialResolvida.cupomTipo || "";
   const imagensMercadoLivre = metadadosImagemMercadoLivre(produtoComImagemSocialResolvida);
-  const precoRadarComercial = extrairPrecoRadarMercadoLivre(evento);
+  const precoRadarComercial = extrairPrecoRadarMercadoLivre(evento) ||
+    (produtoComImagemSocialResolvida.provaTituloOficial ? extrairPrecoClonadorMercadoLivre(evento, job) : null);
   const temPrecoRadarComercial = Number.isFinite(precoRadarComercial) && precoRadarComercial > 0;
   const precoComercial = temPrecoRadarComercial ? precoRadarComercial : (produtoComImagemSocialResolvida.precoAtual || produtoComImagemSocialResolvida.preco || "");
-  const precoAnteriorRadar = extrairPrecoAnteriorRadarMercadoLivre(evento);
+  const precoAnteriorRadar = extrairPrecoAnteriorRadarMercadoLivre(evento) ||
+    (produtoComImagemSocialResolvida.provaTituloOficial ? extrairPrecoAnteriorClonadorMercadoLivre(evento, job) : null);
   const precoOriginalComercial = temPrecoRadarComercial && Number.isFinite(precoAnteriorRadar) && precoAnteriorRadar > precoComercial
     ? precoAnteriorRadar
     : "";
@@ -2455,6 +2490,7 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
 module.exports = {
   importarMercadoLivreEngine,
   _test: {
+    recuperarProdutoOficialShowProduct,
     avaliarIdentidadeCanonicaMercadoLivre,
     escolherLinkMercadoLivreDetalhado,
     extrairMlbMercadoLivre,

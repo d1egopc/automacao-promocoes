@@ -83,7 +83,10 @@ function validarResultadoMagaluIdentity(payload = {}, opcoes = {}) {
   const agoraMs = Number(opcoes.agoraMs || Date.now());
   const ttlMs = Math.max(60_000, Number(opcoes.ttlMs || MAGALU_IDENTITY_RESULT_TTL_MS));
   if (!Number.isFinite(coletado.getTime()) || coletado.getTime() > agoraMs + 30_000 || agoraMs - coletado.getTime() >= ttlMs) {
-    throw erroContrato("magalu_identity_resultado_stale");
+    const erro = erroContrato("magalu_identity_resultado_stale");
+    erro.submotivo = !Number.isFinite(coletado.getTime()) ? "timestamp_invalido"
+      : coletado.getTime() > agoraMs + 30_000 ? "timestamp_futuro" : "timestamp_expirado";
+    throw erro;
   }
   const prova = payload.provaTecnica && typeof payload.provaTecnica === "object" ? payload.provaTecnica : {};
   if (texto(prova.capability) !== MAGALU_IDENTITY_CAPABILITY || Number(prova.contractVersion) !== MAGALU_IDENTITY_CONTRACT_VERSION ||

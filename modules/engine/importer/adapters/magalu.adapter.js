@@ -28,7 +28,8 @@ const {
 const {
   sanitizarUrlOneLinkMagalu,
   sanitizarUrlProdutoMagalu,
-  produtoIdUrlMagalu
+  produtoIdUrlMagalu,
+  chaveIdentidadeMagalu
 } = require("../../../local-worker/magalu-identity.contract");
 const { tituloPublicitarioOuInstrucao } = require("../../../radar/comercial-precedencia");
 
@@ -549,6 +550,17 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
           erro: texto(erro?.message).slice(0, 180)
         });
       }
+      const task = taskIdentidade?.task;
+      const identityKey = chaveIdentidadeMagalu(oneLinkPendente.url);
+      const taskBinding = task && String(task.productId) === identityKey &&
+        sanitizarUrlOneLinkMagalu(task.sourceUrl) === sanitizarUrlOneLinkMagalu(oneLinkPendente.url) &&
+        task.capability === "magalu_identity_v1" && job.id && job.evento_id && clienteId &&
+        oneLinkPendente.link?.id && Number.isFinite(Date.parse(task.createdAt)) &&
+        Number.isFinite(Date.parse(task.expiresAt))
+        ? { taskId: String(task.id), status: task.status, expiresAt: task.expiresAt,
+            createdAt: task.createdAt, identityKey, jobId: String(job.id),
+            eventoId: String(job.evento_id), workspaceId: clienteId,
+            linkId: String(oneLinkPendente.link?.id || "") } : null;
       return {
         ok: false,
         marketplace: "magalu",
@@ -560,7 +572,7 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
           adapter: "magalu",
           linksClassificados,
           localWorkerIdentity: taskIdentidade?.task
-            ? { taskId: taskIdentidade.task.id, status: taskIdentidade.task.status, capability: taskIdentidade.task.capability }
+            ? { taskId: taskIdentidade.task.id, status: taskIdentidade.task.status, capability: taskIdentidade.task.capability, ...(taskBinding ? { binding: taskBinding } : {}) }
             : null
         }
       };

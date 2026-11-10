@@ -290,7 +290,14 @@ async function main() {
     const firstNew = await queue.claimDestination({ pool,
       workspaceId: "ws_NEW" });
     assert.equal((await queue.releaseUnstarted({ pool,
-      destinationId: firstNew.id, leaseToken: firstNew.leaseToken })).ok, true);
+      destinationId: firstNew.id, leaseToken: firstNew.leaseToken,
+      preflightReason: "send_dispatch_exception_before_transport" })).ok, true);
+    const decision = (await admin.query(`SELECT last_preflight_reason,last_preflight_at,
+      preflight_denial_count,available_at FROM engine_universal_queue_destinations WHERE id=$1`,
+    [firstNew.id])).rows[0];
+    assert.equal(decision.last_preflight_reason,"send_dispatch_exception_before_transport");
+    assert.equal(Number(decision.preflight_denial_count),1);
+    assert.ok(decision.last_preflight_at && decision.available_at);
     assert.equal((await queue.markSendStarted({ pool,
       destinationId: firstNew.id, leaseToken: firstNew.leaseToken })).ok, false);
     const afterReleaseNew = await queue.claimDestination({ pool,

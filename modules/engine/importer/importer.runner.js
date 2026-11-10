@@ -194,6 +194,7 @@ async function tratarFalhaRetriavelMagalu(job = {}, resultadoAdapter = {}, marke
     : agendarRetryImagemMagaluLocal;
   const agendamento = await agendar(job, {
     motivo: motivoPendente,
+    identidadeTask: identidadePendente ? resultadoAdapter.metadata?.localWorkerIdentity?.binding : null,
     capability: resultadoAdapter.metadata?.localWorkerIdentity?.capability || resultadoAdapter.metadata?.localWorker?.capability || ""
   });
   if (agendamento?.ok) {

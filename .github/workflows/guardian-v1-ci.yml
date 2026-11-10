@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - validation/guardian-v1-*
+      - validation/commercial-recovery-p0-20261110
       - validation/ml-title-identity-reconciled-20261108
       - validation/magalu-identity-subreason-20261108
       - validation/magalu-anchor-identity-20261109
@@ -752,3 +753,66 @@ jobs:
           export V4_FIXTURE_SERVER_HOST="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' '${{ job.services.postgres.id }}')"
           test -n "$V4_FIXTURE_SERVER_HOST"
           node --test tests/mensageiro-v4-credit-scope.postgres.test.cjs
+
+  commercial-recovery-p0:
+    if: github.ref == 'refs/heads/validation/commercial-recovery-p0-20261110'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Clean declared dependencies
+        run: npm ci
+      - name: Candidate scope and isolated environment
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          git merge-base --is-ancestor d38a59af34db2c5d42ae204a3987f8b5888a41cb HEAD
+          git diff --exit-code d38a59af34db2c5d42ae204a3987f8b5888a41cb HEAD -- .github/workflows/deploy-backend-vps.yml package.json package-lock.json
+          node --check index.js
+      - name: Three patches and Universal RIO contract gates
+        run: |
+          set -euo pipefail
+          node --test tests/ml-show-product-title-recovery.test.cjs tests/magalu-task-bound-wait.test.cjs tests/universal-flow-queue-executor.test.js tests/universal-flow-queue-preflight.test.js tests/magalu-recovery-retry.test.cjs
+          node --test tests/mercadolivre-identidade-canonica.test.js tests/mercadolivre-social-show-product.test.js tests/mercadolivre-imagem-oficial-fallback.test.js tests/link-anchor-identity-proof-focal.test.cjs tests/magalu-local-worker-identity.test.js tests/magalu-worker-boundary-focal.test.cjs tests/magalu-local-worker-sku-identity.test.cjs tests/magalu-identity-engine-importer.test.js tests/magalu-firstparty-identity-fallback.test.cjs tests/contrato-comercial-final-universal.test.js tests/link-conversao-ocorrencia-marketplaces.test.js tests/guardian-v1.test.cjs
+          node --test tests/cadencia-v2-autoridade.test.js tests/cupom-turbo-normalizacao.test.js tests/universal-flow-turbo-commercial.test.js tests/engine-distributor-origem-fairness.test.js tests/engine-importer-origem-fairness.test.js tests/optimus-capture-local-worker-liveness.test.js tests/optimus-capture-local-worker-resume.test.js tests/local-worker-idempotency.test.js
+      - name: Exact comparison of the three existing Guardian assertion failures
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/commercial-base"
+          git archive d38a59af34db2c5d42ae204a3987f8b5888a41cb | tar -x -C "$RUNNER_TEMP/commercial-base"
+          node tests/commercial-recovery-baseline-failures.cjs "$RUNNER_TEMP/commercial-base"
+      - name: Start loopback-only disposable PostgreSQL 17
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          docker run -d --name commercial-recovery-pg17 --network host -e PGDATA="$GITHUB_WORKSPACE/.local-postgres/data" -e POSTGRES_DB=optimus_universal_fixture -e POSTGRES_HOST_AUTH_METHOD=trust postgres:17 -p 55433 -c listen_addresses=127.0.0.1
+          for attempt in $(seq 1 30); do
+            if docker exec commercial-recovery-pg17 pg_isready -h 127.0.0.1 -p 55433 -U postgres; then exit 0; fi
+            sleep 2
+          done
+          exit 1
+      - name: PostgreSQL 17 persistence, concurrency, fairness, expiry and ACK
+        env:
+          UF_TEST_PG_PORT: '55433'
+          UF_TEST_PG_EXPECTED_SERVER_HOST: 127.0.0.1
+          UF_TEST_PG_EXPECTED_SERVER_PORT: '55433'
+          UF_TEST_PG_EXPECTED_DATA_DIR: ${{ github.workspace }}/.local-postgres/data
+        run: |
+          set -euo pipefail
+          test -z "${DATABASE_URL:-}"
+          node tests/universal-flow-queue-epoch.postgres.js
+          node tests/universal-flow-credits.postgres.js
+          node tests/universal-flow-expired-fresh.postgres.js
+          node tests/universal-flow-fanout-owner.postgres.js
+          node tests/universal-flow-fairness-real-transitions.postgres.js
+      - name: Remove disposable lab only
+        if: always()
+        run: docker rm -f commercial-recovery-pg17 || true

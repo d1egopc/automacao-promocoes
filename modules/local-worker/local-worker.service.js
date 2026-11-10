@@ -301,7 +301,13 @@ function criarLocalWorkerService(opcoes = {}) {
           ttlMs: MAGALU_IDENTITY_RESULT_TTL_MS
         });
       } catch (falha) {
-        throw erro(texto(falha?.codigo || falha?.message || "magalu_identity_resultado_invalido"), 422);
+        const rejeicao = erro(texto(falha?.codigo || falha?.message || "magalu_identity_resultado_invalido"), 422);
+        if (["timestamp_invalido", "timestamp_futuro", "timestamp_expirado"].includes(falha?.submotivo)) {
+          rejeicao.submotivo = falha.submotivo;
+          console.warn("[MAGALU-IDENTITY-FRESHNESS-DENIED]", JSON.stringify({
+            taskId: task.id, submotivo: falha.submotivo }));
+        }
+        throw rejeicao;
       }
       return repo.completarIdentidade({
         taskId,

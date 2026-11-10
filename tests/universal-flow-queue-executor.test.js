@@ -246,3 +246,55 @@ test("missing current pool fails before claim or transport", async () => {
   active = null;
   await assert.rejects(run("ws_A"), /queue_pool_required/);
 });
+
+for (const scenario of ["prepare_exception", "dispatch_exception", "not_started"]) {
+  test(`unstarted release persists sanitized decision: ${scenario}`, async () => {
+    const releases = [];
+    let sent = 0;
+    const repository = {
+      preflightWorkspace: async () => ({ ok: true }),
+      claimDestination: async ({ workspaceId }) => ({ ...claim, workspace_id: workspaceId }),
+      releaseUnstarted: async args => { releases.push(args); return { ok: true }; },
+      markSendStarted: async () => ({ ok: true }),
+      confirmSend: async () => { sent++; return { ok: true }; }
+    };
+    const run = criarExecutorFilaUniversal({ pool, repository,
+      prepare: async c => {
+        if (c.workspace_id === "ws_A" && scenario === "prepare_exception") throw new Error("private_payload");
+        return { ready: true };
+      },
+      dispatch: async (c, _p, { startAttempt }) => {
+        if (c.workspace_id === "ws_B") {
+          await startAttempt(); return { confirmed: true, confirmationKey: "ack_B" };
+        }
+        if (scenario === "dispatch_exception") throw new Error("private_payload");
+        return { reason: "destination_session_unavailable" };
+      }
+    });
+    if (scenario === "prepare_exception") await assert.rejects(run("ws_A"), /private_payload/);
+    else await run("ws_A");
+    assert.equal(releases.length, 1);
+    assert.equal(releases[0].preflightReason, {
+      prepare_exception: "send_prepare_exception",
+      dispatch_exception: "send_dispatch_exception_before_transport",
+      not_started: "destination_session_unavailable"
+    }[scenario]);
+    await run("ws_B");
+    assert.equal(sent, 1, "another workspace continues normally");
+  });
+}
+
+test("second preflight session denial is persisted; next target in same workspace continues", async () => {
+  const releases=[];let attempt=0,sends=0;
+  const run=criarExecutorFilaUniversal({pool,repository:{
+    preflightWorkspace:async()=>({ok:true}),
+    claimDestination:async()=>({...claim,id:++attempt,target_key:`target_${attempt}`}),
+    releaseUnstarted:async x=>{releases.push(x);return {ok:true};},
+    markSendStarted:async()=>({ok:true}),confirmSend:async()=>{sends++;return {ok:true};}
+  },prepare:async()=>({ready:true}),dispatch:async(c,_p,{startAttempt})=>{
+    if(c.id===1)throw new Error("destination_session_unavailable");
+    await startAttempt();return {confirmed:true,confirmationKey:"ack_other_target"};
+  }});
+  await run("ws_A");await run("ws_A");
+  assert.equal(releases[0].preflightReason,"destination_session_unavailable");assert.equal(sends,1);
+});

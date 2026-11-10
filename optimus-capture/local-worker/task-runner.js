@@ -61,6 +61,10 @@
   }
   function motivoFrescorResultadoMagaluIdentity(erro, collectedAt) {
     const codigo = erroTexto(erro, "").toLowerCase();
+    if (codigo === "magalu_identity_resultado_stale" &&
+        ["timestamp_invalido", "timestamp_futuro", "timestamp_expirado"].includes(erro?.body?.submotivo)) {
+      return `magalu_identity_resultado_stale_${erro.body.submotivo}`;
+    }
     if (/^magalu_identity_resultado_stale_timestamp_(?:invalido|futuro|expirado)$/.test(codigo)) return codigo;
     if (codigo === "magalu_identity_resultado_stale") {
       return classificarFrescorMagaluIdentity(collectedAt) || "magalu_identity_resultado_stale_backend";
