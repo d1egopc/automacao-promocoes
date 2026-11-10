@@ -1125,6 +1125,12 @@ function validarProvaTituloTecnico(resultado = {}, produto = {}, job = {}) {
     const outputMlb = extrairIdMercadoLivreDaUrl(adapterCanonicalUrl);
     const anchorMlb = extrairIdMercadoLivreDaUrl(anchorUrl);
     const fontesOficiais = new Set(["jsonld.name", "og:title", "twitter:title", "html.title"]);
+    const apiProof = produto.provaTituloOficial || {};
+    if (source === "api_mercadolibre.items.title" && apiProof.fonte === source &&
+        apiProof.produtoIdCanonico === produtoIdCanonico &&
+        apiProof.urlApi === `https://api.mercadolibre.com/items/${produtoIdCanonico}`) {
+      fontesOficiais.add(source);
+    }
     if (identidade.status !== "consistente" || identidade.mlbForteConfirmado !== true ||
         identidade.mlbProduto !== identidade.mlbRevalidado || identidade.mlbRevalidado !== produtoIdCanonico ||
         normalizarTexto(identidade.urlOriginal || "") !== anchorUrl ||
@@ -2135,6 +2141,11 @@ async function buscarImagemOficialMercadoLivrePorMlb(mlb = "", opcoes = {}) {
     return {
       mlb: mlbApi ? `MLB${mlbApi}` : `MLB${id}`,
       tituloOficial: normalizarTexto(dados?.title || dados?.name || ""),
+      // Requested ID is not evidence: the official response must name the same item.
+      ...(mlbApi === id && response.status === 200 &&
+        (!response.url || response.url === urlApi) && normalizarTexto(dados?.title || "")
+        ? { provaTituloOficial: { produtoIdCanonico: `MLB${mlbApi}`,
+            fonte: "api_mercadolibre.items.title", urlApi } } : {}),
       imagem: imagemApi.imagem,
       origem: imagemApi.imagem ? imagemApi.origem : "",
       linkResolvido: urlApi,
