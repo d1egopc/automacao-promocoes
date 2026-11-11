@@ -130,6 +130,54 @@ async function testarOneLinkAguardaEReutilizaIdentidadeLocal() {
   assert.strictEqual(recuperada.metadata.identidadeLocalWorker.observedProductId, "123456789");
 }
 
+async function testarIdentidadeSemImagemAindaBloqueiaPublicacao() {
+  let identidadeConsultada = false;
+  let tarefaIdentidadeCriada = false;
+  let productIdTarefaImagem = "";
+  let resolverChamado = false;
+  const evento = {
+    cupom: "GARIMPEI1000",
+    texto_original: `Bumper Potes Herméticos 10 Peças\nPor R$ 85,41\nCupom: GARIMPEI1000\n${oneLink}`,
+    links_extraidos: [oneLink]
+  };
+  const result = await importarProdutoMagaluEngine({
+    job: { id: 594, evento_id: 694, cliente_id: "workspace_magalu", marketplace: "magalu" },
+    evento,
+    links: [linkRow(94, oneLink)],
+    deps: {
+      ...baseDeps(),
+      obterIdentidadeMagaluLocalWorker: async ({ sourceUrl }) => {
+        assert.strictEqual(sourceUrl, oneLink);
+        identidadeConsultada = true;
+        return {
+          capability: "magalu_identity_v1",
+          identityKey: "url_0123456789abcdef0123456789abcdef",
+          sourceUrl,
+          observedProductId: "123456789",
+          identidadeValidada: true,
+          finalUrl: urlIdentificada,
+          canonicalUrl: urlIdentificada,
+          collectedAt: new Date().toISOString()
+        };
+      },
+      garantirIdentidadeMagaluLocalWorker: async () => { tarefaIdentidadeCriada = true; },
+      obterImagemCacheLocalWorker: async () => null,
+      obterTaskImagemMagaluLocalWorker: async ({ productId }) => {
+        productIdTarefaImagem = productId;
+        return { ok: true, task: { id: "image-94", status: "pending", capability: "magalu_image_v1" } };
+      },
+      resolverFatosMagalu: async () => { resolverChamado = true; throw new Error("must_wait_for_official_image"); }
+    }
+  });
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(identidadeConsultada, true);
+  assert.strictEqual(tarefaIdentidadeCriada, false);
+  assert.strictEqual(productIdTarefaImagem, "123456789");
+  assert.strictEqual(resolverChamado, false);
+  assert.strictEqual(result.motivo, "sem_imagem", JSON.stringify(result));
+  assert.strictEqual(result.retriavel, true);
+}
+
 const urlTituloFixture = "https://www.magazineluiza.com.br/smart-tv-samsung-50/p/123456789/et/elit/";
 const urlTituloWorkspaceFixture = "https://www.magazinevoce.com.br/magazined1egopc/smart-tv-samsung-50/p/123456789/et/elit/";
 
@@ -260,6 +308,7 @@ async function testarTituloOficialSemProvenienciaRetemOferta() {
 }
 
 testarOneLinkAguardaEReutilizaIdentidadeLocal()
+  .then(testarIdentidadeSemImagemAindaBloqueiaPublicacao)
   .then(testarPreservaTituloRadarSeguro)
   .then(testarSloganRadarUsaTituloOficialDoMesmoProduto)
   .then(testarSemTituloRadarUsaTituloOficialDoMesmoProduto)

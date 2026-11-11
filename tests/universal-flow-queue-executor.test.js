@@ -4,6 +4,8 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const { criarExecutorFilaUniversal, sanitizarMotivoPreflight } =
   require("../modules/engine/universal-queue-executor.adapter");
+const { criarPreflightFilaUniversal } =
+  require("../modules/engine/universal-queue-preflight");
 
 const pool = { connect() {} };
 const claim = { ok: true, empty: false, id: 9, leaseToken: "lease_1",
@@ -247,7 +249,8 @@ test("missing current pool fails before claim or transport", async () => {
   await assert.rejects(run("ws_A"), /queue_pool_required/);
 });
 
-for (const scenario of ["prepare_exception", "dispatch_exception", "not_started"]) {
+for (const scenario of ["prepare_exception", "prepare_exception_unknown_stage",
+  "dispatch_exception", "not_started"]) {
   test(`unstarted release persists sanitized decision: ${scenario}`, async () => {
     const releases = [];
     let sent = 0;
@@ -260,7 +263,12 @@ for (const scenario of ["prepare_exception", "dispatch_exception", "not_started"
     };
     const run = criarExecutorFilaUniversal({ pool, repository,
       prepare: async c => {
-        if (c.workspace_id === "ws_A" && scenario === "prepare_exception") throw new Error("private_payload");
+        if (c.workspace_id === "ws_A" && scenario.startsWith("prepare_exception")) {
+          const error = new Error("private_payload");
+          if (scenario === "prepare_exception") error.preflightStage = "check_session";
+          if (scenario === "prepare_exception_unknown_stage") error.preflightStage = "private_payload";
+          throw error;
+        }
         return { ready: true };
       },
       dispatch: async (c, _p, { startAttempt }) => {
@@ -271,11 +279,12 @@ for (const scenario of ["prepare_exception", "dispatch_exception", "not_started"
         return { reason: "destination_session_unavailable" };
       }
     });
-    if (scenario === "prepare_exception") await assert.rejects(run("ws_A"), /private_payload/);
+    if (scenario.startsWith("prepare_exception")) await assert.rejects(run("ws_A"), /private_payload/);
     else await run("ws_A");
     assert.equal(releases.length, 1);
     assert.equal(releases[0].preflightReason, {
-      prepare_exception: "send_prepare_exception",
+      prepare_exception: "send_prepare_exception_check_session",
+      prepare_exception_unknown_stage: "send_prepare_exception",
       dispatch_exception: "send_dispatch_exception_before_transport",
       not_started: "destination_session_unavailable"
     }[scenario]);
@@ -297,4 +306,35 @@ test("second preflight session denial is persisted; next target in same workspac
   }});
   await run("ws_A");await run("ws_A");
   assert.equal(releases[0].preflightReason,"destination_session_unavailable");assert.equal(sends,1);
+});
+
+test("preflight exception persists only its fixed stage on the claimed target", async () => {
+  const releases = [];
+  const target = { ...claim, destination_id: "dest_A", channel: "whatsapp",
+    oferta_id: 2, evento_id: 1, capturado_em: "2026-10-10T12:10:00.000Z",
+    operationEpochStartedAt: "2026-10-10T11:00:00.000Z",
+    item_payload: { clienteId: "ws_A", engineOfertaId: 2,
+      marketplace: "mercadolivre", titulo: "fixture" } };
+  const prepare = criarPreflightFilaUniversal({ pool, now: () => Date.parse("2026-10-10T12:30:00.000Z"),
+    readClock: async () => null,
+    resolveDestination: async () => ({ ok: true,
+      destination: { id: "dest_A", tipo: "whatsapp", intervaloMinutos: 2.5 } }),
+    checkWindow: async () => ({ ok: true }),
+    checkDailyLimit: async () => ({ ok: true }),
+    checkSession: async () => { throw new Error("private destination state"); },
+    checkCredits: async () => ({ ok: true }),
+    checkMedia: async () => ({ ok: true }),
+    checkLinks: async () => ({ ok: true }),
+    checkDedup: async () => ({ ok: true }),
+    renderMessage: async () => ({ ok: true, message: "fixture" }) });
+  const run = criarExecutorFilaUniversal({ pool,
+    repository: { preflightWorkspace: async () => ({ ok: true }),
+      claimDestination: async () => target,
+      releaseUnstarted: async args => { releases.push(args); return { ok: true }; } },
+    prepare,
+    dispatch: async () => { throw new Error("must_not_send"); } });
+  await assert.rejects(run("ws_A"), /private destination state/);
+  assert.equal(releases.length, 1);
+  assert.equal(releases[0].destinationId, target.id);
+  assert.equal(releases[0].preflightReason, "send_prepare_exception_check_session");
 });

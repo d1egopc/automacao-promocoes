@@ -24,9 +24,21 @@ const RELEASE_REASONS = new Set([
   "universal_commercial_claim_missing", "commercial_reservation_unavailable",
   "universal_preprovider_context_changed", "universal_commercial_owner_not_current"
 ]);
+const PREPARE_EXCEPTION_STAGES = new Set([
+  "preflight_context", "offer_identity", "commercial_freshness",
+  "resolve_destination", "destination_cadence", "check_window",
+  "check_daily_limit", "check_session", "check_credits", "check_media",
+  "check_links", "render_message", "check_dedup"
+]);
 function motivoLiberacao(reason, fallback) {
   const code = String(reason || "").trim();
   return RELEASE_REASONS.has(code) ? code : fallback;
+}
+function motivoExcecaoPrepare(error) {
+  const stage = String(error?.preflightStage || "");
+  return PREPARE_EXCEPTION_STAGES.has(stage)
+    ? `send_prepare_exception_${stage}`
+    : "send_prepare_exception";
 }
 
 function criarExecutorFilaUniversal({ pool, getPool = null, prepare, dispatch, checkWorkspace,
@@ -68,7 +80,7 @@ function criarExecutorFilaUniversal({ pool, getPool = null, prepare, dispatch, c
     } catch (error) {
       await repository.releaseUnstarted({ pool: poolAtual(),
         destinationId: claim.id, leaseToken: claim.leaseToken,
-        preflightReason: "send_prepare_exception" });
+        preflightReason: motivoExcecaoPrepare(error) });
       throw error;
     }
     if (prepared?.ready !== true) {

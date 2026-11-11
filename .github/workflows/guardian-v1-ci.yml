@@ -6,6 +6,8 @@ on:
       - validation/guardian-v1-*
       - validation/commercial-recovery-p0-20261110
       - validation/ml-identity-propagation-p0-20261110
+      - validation/universal-commercial-recovery-p0-20261110
+      - validation/commercial-recovery-p0-composition-20261110
       - validation/ml-title-identity-reconciled-20261108
       - validation/magalu-identity-subreason-20261108
       - validation/magalu-anchor-identity-20261109
@@ -678,7 +680,7 @@ jobs:
           node tests/deploy-backend-compose-image-validation.test.cjs
           node tests/deploy-backend-manual-diagnostics.test.cjs
       - name: ML identity propagation P0 - official title, anchor and commercial fidelity
-        if: github.ref == 'refs/heads/validation/ml-identity-propagation-p0-20261110'
+        if: github.ref == 'refs/heads/validation/ml-identity-propagation-p0-20261110' || github.ref == 'refs/heads/validation/commercial-recovery-p0-composition-20261110'
         shell: bash
         run: |
           set -euo pipefail
@@ -777,7 +779,7 @@ jobs:
           node --test tests/mensageiro-v4-credit-scope.postgres.test.cjs
 
   commercial-recovery-p0:
-    if: github.ref == 'refs/heads/validation/commercial-recovery-p0-20261110'
+    if: github.ref == 'refs/heads/validation/commercial-recovery-p0-20261110' || github.ref == 'refs/heads/validation/universal-commercial-recovery-p0-20261110' || github.ref == 'refs/heads/validation/commercial-recovery-p0-composition-20261110'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -790,6 +792,10 @@ jobs:
           node-version: 24
           cache: npm
       - name: Clean declared dependencies
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: ssh://git@github.com/
         run: npm ci
       - name: Candidate scope and isolated environment
         run: |

@@ -35,14 +35,6 @@
       return { productId, url: "https://" + url.hostname.toLowerCase() + url.pathname.slice(0, 512) + sellerQuery };
     } catch (_) { return null; }
   }
-  function imagemOficial(valor = "") {
-    try {
-      const url = new URL(texto(valor));
-      const host = url.hostname.toLowerCase();
-      return url.protocol === "https:" && (host === "mlcdn.com.br" || host.endsWith(".mlcdn.com.br")) &&
-        url.pathname !== "/" && !url.username && !url.password ? url.toString() : "";
-    } catch (_) { return ""; }
-  }
   async function comPrazo(promise, motivo) {
     let timer;
     try {
@@ -114,8 +106,8 @@
       if (!confirmacao) throw new Error("magalu_identity_captura_url_nao_produto");
       if (!atual || confirmacao.url !== final.url || atual.url !== final.url) throw new Error("magalu_identity_url_trocada");
       if (texto(produto.produtoId).toLowerCase() !== final.productId) throw new Error("magalu_identity_produto_id_divergente");
-      // SKU is seller/variant metadata, not the canonical product ID from the URL.
-      if (!imagemOficial(produto.imagem)) throw new Error("magalu_identity_imagem_nao_oficial");
+      // Identity is the URL + canonical product ID. The separate magalu_image_v1
+      // capability remains responsible for proving a publishable official image.
       return final;
     } finally {
       if (Number.isInteger(aba?.id)) {

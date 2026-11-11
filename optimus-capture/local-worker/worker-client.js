@@ -20,10 +20,14 @@
   }
   function storageLocal() { return global.chrome?.storage?.local || null; }
   function storageSession() { return global.chrome?.storage?.session || null; }
-  function erroEstruturado(codigo, status = 0) {
+  function erroEstruturado(codigo, status = 0, body = null) {
     const erro = new Error(texto(codigo) || "local_worker_request_falhou");
     erro.codigo = texto(codigo) || "local_worker_request_falhou";
     erro.status = Number(status || 0);
+    if (["timestamp_invalido", "timestamp_futuro", "timestamp_expirado"]
+      .includes(body?.submotivo)) {
+      erro.body = Object.freeze({ submotivo: body.submotivo });
+    }
     return erro;
   }
   function randomId() {
@@ -102,7 +106,9 @@
         limite
       ]);
       const body = await Promise.race([response.json().catch(() => ({})), limite]);
-      if (!response.ok || body?.ok === false) throw erroEstruturado(String(body?.motivo || body?.erro || `http_${response.status}`), response.status);
+      if (!response.ok || body?.ok === false) throw erroEstruturado(
+        String(body?.motivo || body?.erro || `http_${response.status}`),
+        response.status, body);
       return body;
     } finally {
       if (timer) clearTimeout(timer);

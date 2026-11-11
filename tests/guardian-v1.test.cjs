@@ -105,10 +105,10 @@ test("script inesperado e raiz desconhecida permanecem bloqueados", () => {
   }
 });
 
-test("somente os três arquivos Magalu da extensão ficam fora do overlay backend", () => {
+test("somente os quatro arquivos exatos da extensão ficam fora do overlay backend", () => {
   const repo = createRepo();
   try {
-    const permitidos = ["optimus-capture/adapters/magalu.js", "optimus-capture/local-worker/magalu-identity.js", "optimus-capture/local-worker/task-runner.js"];
+    const permitidos = ["optimus-capture/adapters/magalu.js", "optimus-capture/local-worker/magalu-identity.js", "optimus-capture/local-worker/task-runner.js", "optimus-capture/local-worker/worker-client.js"];
     for (const relativo of permitidos) {
       const destino = path.join(repo.dir, ...relativo.split("/"));
       fs.mkdirSync(path.dirname(destino), { recursive: true });
@@ -119,12 +119,14 @@ test("somente os três arquivos Magalu da extensão ficam fora do overlay backen
     assert.equal(result.body.validation, "PASS");
     assert.deepEqual(result.body.runtimeFiles, []);
     assert.deepEqual(result.body.ignoredFiles, permitidos);
-    const inesperado = path.join(repo.dir, "optimus-capture", "local-worker", "unexpected.js");
-    fs.writeFileSync(inesperado, "module.exports = true;\n");
-    source = commit(repo, "extension-unexpected-path");
-    result = prepare(repo, source);
-    assert.equal(result.body.validation, "BLOCKED");
-    assert.equal(result.body.blocked[0].file, "optimus-capture/local-worker/unexpected.js");
+    for (const unexpectedPath of ["optimus-capture/local-worker/worker-client.js.bak", "optimus-capture/local-worker/unexpected.js"]) {
+      const inesperado = path.join(repo.dir, ...unexpectedPath.split("/"));
+      fs.writeFileSync(inesperado, "module.exports = true;\n");
+      source = commit(repo, `extension-unexpected-${path.basename(unexpectedPath)}`);
+      result = prepare(repo, source);
+      assert.equal(result.body.validation, "BLOCKED");
+      assert.equal(result.body.blocked[0].file, unexpectedPath);
+    }
   } finally { cleanup(repo); }
 });
 

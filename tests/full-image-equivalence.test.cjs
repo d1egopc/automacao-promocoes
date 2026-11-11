@@ -48,6 +48,7 @@ test("manifesto inclui código runtime e hash de dependências, omitindo conteú
   fs.writeFileSync(path.join(root, "docs", "note.md"), "doc");
   fs.writeFileSync(path.join(root, "scripts", "guardian-v1.cjs"), "build control");
   fs.writeFileSync(path.join(root, "optimus-capture", "local-worker", "task-runner.js"), "extension only");
+  fs.writeFileSync(path.join(root, "optimus-capture", "local-worker", "worker-client.js"), "extension client only");
   const facts = `${root}-host-facts`;
   fixtures.push(facts);
   fs.mkdirSync(facts, { recursive: true });
