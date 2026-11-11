@@ -100,10 +100,11 @@ async function verifyRadarNoSendWithSibling(admin, pool) {
   assert.equal(blocked.send_started_at, null);
   assert.equal(blocked.confirmed_at, null);
   assert.equal(blocked.provider_message_id, null);
-  assert.equal(blocked.credit_debited, false);
+  assert.equal(blocked.credit_debited, null);
   assert.equal(Number(blocked.preflight_denial_count), 0);
   const balanceAfterSkip = await readBalance({ pool, workspaceId });
   assert.equal(balanceAfterSkip.balance, balanceBefore.balance);
+  assert.equal(balanceAfterSkip.reserved, balanceBefore.reserved);
   assert.equal(balanceAfterSkip.available, balanceBefore.available);
   assert.equal(dispatched.length, 0);
   assert.deepEqual(await queue.completeWithoutSend({ pool, destinationId: blocked.id,
