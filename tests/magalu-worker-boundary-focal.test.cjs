@@ -111,8 +111,7 @@ test("unrelated receiver errors are not retried", async () => {
 
 for (const caso of [
   { name: "final URL without product", options: { pageUrl: "https://www.magazineluiza.com.br/" }, reason: "magalu_identity_url_final_nao_produto" },
-  { name: "product ID mismatch", options: { productOverride: { produtoId: "999999999" } }, reason: "magalu_identity_produto_id_divergente" },
-  { name: "unofficial image", options: { productOverride: { imagem: "https://example.test/image.jpg" } }, reason: "magalu_identity_imagem_nao_oficial" }
+  { name: "product ID mismatch", options: { productOverride: { produtoId: "999999999" } }, reason: "magalu_identity_produto_id_divergente" }
 ]) {
   test(`identity failure has a fixed sanitized reason: ${caso.name}`, async () => {
     const fixture = setup(caso.options);
@@ -122,3 +121,16 @@ for (const caso of [
     } finally { fixture.restore(); }
   });
 }
+
+test("URL + productId identity survives missing/unofficial page image for separate image gate", async () => {
+  const fixture = setup({ productOverride: { imagem: "https://example.test/image.jpg" } });
+  try {
+    const result = await resolverAtual();
+    assert.equal(result.observedProductId, product.produtoId);
+    assert.equal(validarResultadoMagaluIdentity(result, {
+      sourceUrl,
+      identityKey: chaveIdentidadeMagalu(sourceUrl)
+    }).identidadeValidada, true);
+    assert.deepEqual(fixture.removed, [71]);
+  } finally { fixture.restore(); }
+});

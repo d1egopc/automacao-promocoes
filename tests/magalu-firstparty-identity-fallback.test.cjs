@@ -127,13 +127,23 @@ async function testarNavegacao(caso, alterarProduto = produto => produto) {
     for (const { alterar, motivo } of [
       { alterar: produto => ({ ...produto, produtoId: "produto-alheio" }), motivo: /magalu_identity_produto_id_divergente/ },
       { alterar: produto => ({ ...produto, urlOriginal: "https://www.magazineluiza.com.br/outro-produto/p/produto-alheio/cat/var/" }), motivo: /magalu_identity_url_trocada/ },
-      { alterar: produto => ({ ...produto, imagem: "https://evil.example/imagem.jpg" }), motivo: /magalu_identity_imagem_nao_oficial/ },
       { alterar: produto => ({ ...produto, urlOriginal: "https://evil.example/p/" + produto.produtoId }), motivo: /magalu_identity_captura_url_nao_produto/ }
     ]) {
       const teste = await testarNavegacao(casos[0], alterar);
       await assert.rejects(teste.resultado(), motivo);
       assert.deepEqual(teste.removidas, [731], "aba técnica deve fechar também na falha");
     }
+    const identidadeSemImagemPublicavel = await testarNavegacao(casos[0], produto => ({
+      ...produto, imagem: "https://evil.example/imagem.jpg"
+    }));
+    const semImagem = await identidadeSemImagemPublicavel.resultado();
+    assert.equal(semImagem.observedProductId, casos[0].productId,
+      "imagem é enriquecimento; identidade continua ancorada no URL + productId");
+    assert.equal(validarResultadoMagaluIdentity(semImagem, {
+      sourceUrl: casos[0].sourceUrl,
+      identityKey: identidadeSemImagemPublicavel.identityKey
+    }).identidadeValidada, true);
+    assert.deepEqual(identidadeSemImagemPublicavel.removidas, [731]);
     const identidadeSemTitulo = await testarNavegacao(casos[0], produto => ({ ...produto, titulo: "" }));
     const resultadoSemTitulo = await identidadeSemTitulo.resultado();
     assert.equal(resultadoSemTitulo.observedProductId, casos[0].productId);

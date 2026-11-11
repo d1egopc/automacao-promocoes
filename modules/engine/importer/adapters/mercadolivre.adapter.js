@@ -1990,11 +1990,40 @@ function motivoIdentidadeMeliClonadorNaoComprovada({ evento = {}, job = {}, urlO
   return "identidade_ml_nao_comprovada";
 }
 
+function normalizarProdutoIdMercadoLivre(valor = "") {
+  const texto = textoMercadoLivre(valor);
+  const comPrefixo = normalizarMlbItemApiMercadoLivre(texto);
+  if (comPrefixo) return comPrefixo;
+  return /^\d{6,}$/.test(texto) ? `MLB${texto}` : "";
+}
+
+function produtoMercadoLivreCompativelComMlb(produto = {}, mlbEsperado = "") {
+  const ids = [produto.produtoId, produto.produtoIdDetectado, produto.productId, produto.mlb]
+    .map(normalizarProdutoIdMercadoLivre)
+    .filter(Boolean);
+  const unicos = [...new Set(ids)];
+  return unicos.length <= 1 && (!unicos.length || unicos[0] === mlbEsperado);
+}
+
+function tituloProdutoMercadoLivreJaTemProvaOficial(produto = {}) {
+  const titulo = textoMercadoLivre(produto.titulo || produto.nome || produto.title || "");
+  const fonte = textoMercadoLivre(produto.tituloFonteOficial || "");
+  const fontesPagina = new Set(["jsonld.name", "og:title", "twitter:title", "html.title"]);
+  if (!titulo || tituloTecnicoBloqueadoMercadoLivre(titulo) || produto.fallbackTituloMercadoLivre === true) return false;
+  if (fontesPagina.has(fonte)) return true;
+  if (fonte !== "api_mercadolibre.items.title") return false;
+  const proof = produto.provaTituloOficial || {};
+  const mlb = normalizarProdutoIdMercadoLivre(produto.produtoId || produto.produtoIdDetectado || produto.productId || produto.mlb);
+  return Boolean(mlb && proof.fonte === fonte && proof.produtoIdCanonico === mlb &&
+    proof.urlApi === `https://api.mercadolibre.com/items/${mlb}`);
+}
+
 async function recuperarProdutoOficialShowProduct({ resolucaoProduto, clienteId, integracao,
-  deps, evento, job, urlOriginalEngine }) {
+  deps, evento, job, urlOriginalEngine, linkAfiliadoExistente = "" }) {
   const transporte = provaTransporteShowProductMercadoLivre(resolucaoProduto);
   const mlb = transporte?.mlbItem;
-  if (!mlb || typeof deps.gerarLinkAfiliadoMercadoLivre !== "function") return null;
+  const afiliadoExistente = textoMercadoLivre(linkAfiliadoExistente);
+  if (!mlb || (!afiliadoExistente && typeof deps.gerarLinkAfiliadoMercadoLivre !== "function")) return null;
   try {
     const buscar = deps.buscarImagemOficialMercadoLivrePorMlb || buscarImagemOficialMercadoLivrePorMlb;
     const oficial = await buscar(mlb, { clienteId, integracao,
@@ -2004,7 +2033,7 @@ async function recuperarProdutoOficialShowProduct({ resolucaoProduto, clienteId,
         proof?.produtoIdCanonico !== mlb || proof?.fonte !== "api_mercadolibre.items.title" ||
         proof?.urlApi !== `https://api.mercadolibre.com/items/${mlb}` ||
         !oficial.tituloOficial || tituloTecnicoBloqueadoMercadoLivre(oficial.tituloOficial)) return null;
-    const afiliado = textoMercadoLivre(await deps.gerarLinkAfiliadoMercadoLivre(
+    const afiliado = afiliadoExistente || textoMercadoLivre(await deps.gerarLinkAfiliadoMercadoLivre(
       transporte.linkResolvidoTecnico, integracao, { clienteId }));
     if (!afiliado) return null;
     // Technical recovery never imports API prices/coupons or the source affiliate.
@@ -2197,6 +2226,33 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
   if (!produto) {
     produto = await recuperarProdutoOficialShowProduct({ resolucaoProduto, clienteId,
       integracao, deps, evento, job, urlOriginalEngine });
+  } else if (!tituloProdutoMercadoLivreJaTemProvaOficial(produto)) {
+    const mlbAncora = provaTransporteShowProductMercadoLivre(resolucaoProduto)?.mlbItem || "";
+    // Keep the already-resolved anchor and do not bless a parser object that names another item.
+    if (mlbAncora && produtoMercadoLivreCompativelComMlb(produto, mlbAncora)) {
+      const produtoOficial = await recuperarProdutoOficialShowProduct({ resolucaoProduto, clienteId,
+        integracao, deps, evento, job, urlOriginalEngine,
+        linkAfiliadoExistente: produto.linkAfiliado || "" });
+      if (produtoOficial && normalizarProdutoIdMercadoLivre(produtoOficial.produtoId) === mlbAncora) {
+        produto = {
+          ...produto,
+          titulo: produtoOficial.titulo,
+          nome: produtoOficial.nome,
+          tituloFonteOficial: produtoOficial.tituloFonteOficial,
+          provaTituloOficial: produtoOficial.provaTituloOficial,
+          produtoId: mlbAncora,
+          produtoIdDetectado: mlbAncora,
+          urlFinal: produtoOficial.urlFinal,
+          ...(produtoOficial.imagem ? {
+            imagem: produtoOficial.imagem,
+            imagemOrigem: produtoOficial.imagemOrigem
+          } : {}),
+          // The fallback enriches technical identity only. Keep this workspace's affiliate and all
+          // Radar/importer commercial fields from the original result.
+          linkAfiliado: textoMercadoLivre(produto.linkAfiliado || produtoOficial.linkAfiliado)
+        };
+      }
+    }
   }
   if (!produto) {
     if (falhaImportadorMercadoLivre?.motivo === "ml_wall_captcha") {

@@ -295,14 +295,14 @@ test("outro arquivo inesperado sob scripts continua bloqueado", () => {
   assert.notEqual(result.status, 0, processDiagnostic(scenario, result));
 });
 
-test("somente os três artefatos Magalu exatos são ignorados; runtime backend continua obrigatório", () => {
-  for (const pathValue of ["optimus-capture/adapters/magalu.js", "optimus-capture/local-worker/magalu-identity.js", "optimus-capture/local-worker/task-runner.js"]) {
+test("somente os quatro artefatos exatos da extensão são ignorados; runtime backend continua obrigatório", () => {
+  for (const pathValue of ["optimus-capture/adapters/magalu.js", "optimus-capture/local-worker/magalu-identity.js", "optimus-capture/local-worker/task-runner.js", "optimus-capture/local-worker/worker-client.js"]) {
     const result = runCase({ scenario: pathValue, mode: "record", changeType: "M", pathValue });
     assert.equal(result.status, 0, processDiagnostic(pathValue, result));
     const deleted = runCase({ scenario: pathValue + "-deleted", mode: "deletions", changeType: "D", pathValue });
     assert.notEqual(deleted.status, 0, processDiagnostic(pathValue, deleted));
   }
-  for (const pathValue of ["optimus-capture/adapters/other.js", "optimus-capture/local-worker/magalu-identity.js.bak", "optimus-capture/local-worker/task-runner.js.bak"]) {
+  for (const pathValue of ["optimus-capture/adapters/other.js", "optimus-capture/local-worker/magalu-identity.js.bak", "optimus-capture/local-worker/task-runner.js.bak", "optimus-capture/local-worker/worker-client.js.bak", "optimus-capture/local-worker/other-worker.js"]) {
     const result = runCase({ scenario: pathValue, mode: "record", changeType: "M", pathValue });
     assert.notEqual(result.status, 0, processDiagnostic(pathValue, result));
   }

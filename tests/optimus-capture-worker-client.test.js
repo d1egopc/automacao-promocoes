@@ -57,6 +57,19 @@ const client = require("../optimus-capture/local-worker/worker-client.js");
     erro => erro.codigo === "lease_invalido" && erro.status === 409 && !String(erro.stack).includes("lease-nao-logado")
   );
 
+  global.fetch = async () => ({ ok: false, status: 422,
+    body: { cancel: () => undefined },
+    json: async () => ({ ok: false, erro: "magalu_identity_resultado_stale",
+      motivo: "magalu_identity_resultado_stale", submotivo: "timestamp_futuro",
+      payload: "must_not_be_copied" }) });
+  await assert.rejects(
+    () => client.result({ id: "2" }, { marketplace: "magalu" }),
+    erro => erro.codigo === "magalu_identity_resultado_stale" &&
+      erro.body?.submotivo === "timestamp_futuro" &&
+      Object.keys(erro.body).length === 1 &&
+      !JSON.stringify(erro.body).includes("must_not_be_copied")
+  );
+
   const localSetOriginal = global.chrome.storage.local.set;
   const sessionSetOriginal = global.chrome.storage.session.set;
   const sessionGetOriginal = global.chrome.storage.session.get;
