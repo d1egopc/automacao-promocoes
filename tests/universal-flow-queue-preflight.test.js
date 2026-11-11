@@ -68,6 +68,17 @@ test("destination A clock does not consume free destination B", async () => {
   assert.equal(b.ready, true);
 });
 
+test("thrown preflight checks carry a fixed stage without changing the error", async () => {
+  const preflight = build({ overrides: {
+    checkSession: async () => { throw new Error("private provider detail"); }
+  } });
+  await assert.rejects(preflight(fixture()), error => {
+    assert.equal(error.message, "private provider detail");
+    assert.equal(error.preflightStage, "check_session");
+    return true;
+  });
+});
+
 test("mandatory destination contracts fail closed before render", async () => {
   assert.throws(() => criarPreflightFilaUniversal({ pool }),
     /dependencies_required/);

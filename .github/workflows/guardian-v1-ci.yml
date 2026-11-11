@@ -5,6 +5,7 @@ on:
     branches:
       - validation/guardian-v1-*
       - validation/commercial-recovery-p0-20261110
+      - validation/universal-commercial-recovery-p0-20261110
       - validation/ml-title-identity-reconciled-20261108
       - validation/magalu-identity-subreason-20261108
       - validation/magalu-anchor-identity-20261109
@@ -755,7 +756,7 @@ jobs:
           node --test tests/mensageiro-v4-credit-scope.postgres.test.cjs
 
   commercial-recovery-p0:
-    if: github.ref == 'refs/heads/validation/commercial-recovery-p0-20261110'
+    if: github.ref == 'refs/heads/validation/commercial-recovery-p0-20261110' || github.ref == 'refs/heads/validation/universal-commercial-recovery-p0-20261110'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -768,6 +769,10 @@ jobs:
           node-version: 24
           cache: npm
       - name: Clean declared dependencies
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: ssh://git@github.com/
         run: npm ci
       - name: Candidate scope and isolated environment
         run: |
