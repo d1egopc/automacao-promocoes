@@ -16,9 +16,9 @@ function fixture({ t0 = "2026-10-10T12:10:00.000Z", cupom = "",
     item_payload: { clienteId: workspaceId, engineOfertaId: 2,
       marketplace: "mercadolivre", titulo: "Oferta", cupom } };
 }
-function build({ lastConfirmed = null, overrides = {} } = {}) {
+function build({ lastConfirmed = null, overrides = {}, initialPool = pool } = {}) {
   const passed = async () => ({ ok: true });
-  return criarPreflightFilaUniversal({ pool, now: () => NOW,
+  return criarPreflightFilaUniversal({ pool: initialPool, now: () => NOW,
     readClock: async () => lastConfirmed,
     resolveDestination: async ({ destinationId }) => ({ ok: true,
       destination: { id: destinationId, tipo: "whatsapp",
@@ -29,6 +29,47 @@ function build({ lastConfirmed = null, overrides = {} } = {}) {
     renderMessage: async () => ({ ok: true, message: "fixture" }),
     ...overrides });
 }
+
+test("preflight readClock switches to the recreated pool after the old pool ends", async () => {
+  const oldPool = { ended: false, connect() {
+    if (this.ended) throw new Error("Cannot use a pool after calling end on the pool");
+  } };
+  const recreatedPool = { ended: false, connect() {} };
+  let activePool = oldPool;
+  const seenPools = [];
+  const preflight = build({ initialPool: oldPool, overrides: {
+    getPool: () => activePool,
+    readClock: async ({ pool: selectedPool }) => {
+      seenPools.push(selectedPool);
+      return null;
+    }
+  } });
+
+  const initial = await preflight(fixture());
+  oldPool.ended = true;
+  activePool = recreatedPool;
+  const recovered = await preflight(fixture());
+
+  assert.equal(initial.ready, true);
+  assert.equal(recovered.ready, true);
+  assert.deepEqual(seenPools, [oldPool, recreatedPool]);
+  assert.notEqual(seenPools[1], oldPool);
+});
+
+test("preflight fails closed and tags cadence when no current pool is available", async () => {
+  let readClockCalled = false;
+  const preflight = build({ overrides: {
+    getPool: () => null,
+    readClock: async () => { readClockCalled = true; return null; }
+  } });
+
+  await assert.rejects(preflight(fixture()), error => {
+    assert.equal(error.message, "queue_pool_required");
+    assert.equal(error.preflightStage, "destination_cadence");
+    return true;
+  });
+  assert.equal(readClockCalled, false);
+});
 
 test("original T0 is revalidated before any destination/provider call", async () => {
   const preflight = build({ overrides: {
