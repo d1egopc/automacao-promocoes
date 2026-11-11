@@ -8,6 +8,7 @@ on:
       - validation/ml-identity-propagation-p0-20261110
       - validation/universal-commercial-recovery-p0-20261110
       - validation/commercial-recovery-p0-composition-20261110
+      - validation/getpool-image-reconcile-20261111
       - validation/ml-title-identity-reconciled-20261108
       - validation/magalu-identity-subreason-20261108
       - validation/magalu-anchor-identity-20261109
@@ -779,7 +780,7 @@ jobs:
           node --test tests/mensageiro-v4-credit-scope.postgres.test.cjs
 
   commercial-recovery-p0:
-    if: github.ref == 'refs/heads/validation/commercial-recovery-p0-20261110' || github.ref == 'refs/heads/validation/universal-commercial-recovery-p0-20261110' || github.ref == 'refs/heads/validation/commercial-recovery-p0-composition-20261110'
+    if: github.ref == 'refs/heads/validation/commercial-recovery-p0-20261110' || github.ref == 'refs/heads/validation/universal-commercial-recovery-p0-20261110' || github.ref == 'refs/heads/validation/commercial-recovery-p0-composition-20261110' || github.ref == 'refs/heads/validation/getpool-image-reconcile-20261111'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
