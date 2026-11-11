@@ -7,11 +7,14 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { Client, Pool } = require("pg");
 const queue = require("../modules/engine/universal-queue.repository");
+const { criarPreflightFilaUniversal } = require("../modules/engine/universal-queue-preflight");
+const { criarExecutorFilaUniversal } = require("../modules/engine/universal-queue-executor.adapter");
+const { montarMensagemOferta } = require("../utils/mensagens-ofertas");
 const { prepararModoOperacionalReal } =
   require("../modules/engine/universal-runtime-bootstrap");
 const { SQL_SCHEMA_FINANCEIRO_V1 } =
   require("../modules/financeiro/financeiro.schema");
-const { openBalance } =
+const { openBalance, readBalance } =
   require("../modules/engine/universal-credits.repository");
 const { consultarHistoricoUniversal, consultarFilaPublicaUniversal,
   consultarDetalheUniversal } =
@@ -50,6 +53,72 @@ async function createOffer(client, { workspace, capturedAt, origin = "radar" }) 
     VALUES ($1,$2,$3,'oferta_criada','{}'::jsonb) RETURNING id`,
   [eventId, offerId, workspace])).rows[0].id;
   return { eventId, offerId, jobId };
+}
+
+async function verifyRadarNoSendWithSibling(admin, pool) {
+  const workspaceId = "ws_A";
+  const capturedAt = "2026-10-09T12:12:00.000Z";
+  const { offerId, jobId } = await createOffer(admin, { workspace: workspaceId, capturedAt });
+  const blockedDestination = "radar_no_send";
+  const validDestination = "radar_sibling";
+  await queue.enqueue({ pool, workspaceId, jobId, ofertaId: offerId,
+    itemPayload: { clienteId: workspaceId, engineOfertaId: offerId,
+      marketplace: "mercadolivre", titulo: "Produto sintético" },
+    destinations: [blockedDestination, validDestination].map(destinationId => ({
+      destinationId, targetKey: destinationId, channel: "whatsapp"
+    })) });
+  const pass = () => ({ ok: true });
+  const prepare = criarPreflightFilaUniversal({ pool,
+    now: () => Date.parse("2026-10-09T12:20:00.000Z"),
+    resolveDestination: ({ destinationId }) => ({ ok: true,
+      destination: { id: destinationId, tipo: "whatsapp", intervaloMinutos: 2 } }),
+    checkWindow: pass, checkDailyLimit: pass, checkSession: pass,
+    checkCredits: pass, checkMedia: pass, checkLinks: pass, checkDedup: pass,
+    renderMessage: ({ oferta, destinationId }) => ({ ok: true,
+      message: destinationId === blockedDestination
+        ? montarMensagemOferta({ ...oferta, origemFluxo: "radar" }) : "fixture" })
+  });
+  const balanceBefore = await readBalance({ pool, workspaceId });
+  const dispatched = [];
+  const run = criarExecutorFilaUniversal({ pool, prepare,
+    dispatch: async (claim, _prepared, { startAttempt }) => {
+      assert.equal(claim.destination_id, validDestination);
+      dispatched.push(claim.id);
+      await startAttempt();
+      return { confirmed: true, ...await durableAck(admin, claim, "fixture-sibling-ack") };
+    } });
+
+  assert.equal((await run(workspaceId)).terminal, false);
+  const blocked = (await admin.query(`SELECT d.id,d.lease_token,d.status,d.terminal_reason,
+      d.send_started_at,d.confirmed_at,d.provider_message_id,d.credit_debited,
+      d.preflight_denial_count
+    FROM engine_universal_queue_destinations d JOIN engine_universal_queue_items i
+      ON i.id=d.queue_item_id WHERE i.job_id=$1 AND d.destination_id=$2`,
+  [jobId, blockedDestination])).rows[0];
+  assert.equal(blocked.status, "skipped");
+  assert.equal(blocked.terminal_reason, "radar_contrato_original_ausente");
+  assert.equal(blocked.send_started_at, null);
+  assert.equal(blocked.confirmed_at, null);
+  assert.equal(blocked.provider_message_id, null);
+  assert.equal(blocked.credit_debited, false);
+  assert.equal(Number(blocked.preflight_denial_count), 0);
+  const balanceAfterSkip = await readBalance({ pool, workspaceId });
+  assert.equal(balanceAfterSkip.balance, balanceBefore.balance);
+  assert.equal(balanceAfterSkip.available, balanceBefore.available);
+  assert.equal(dispatched.length, 0);
+  assert.deepEqual(await queue.completeWithoutSend({ pool, destinationId: blocked.id,
+    leaseToken: blocked.lease_token, reason: blocked.terminal_reason }),
+  { ok: true, duplicate: true });
+
+  assert.equal((await run(workspaceId)).terminal, true);
+  assert.equal((await run(workspaceId)).empty, true);
+  assert.equal(dispatched.length, 1);
+  const sent = (await admin.query(`SELECT status,confirmed_at,credit_debited
+    FROM engine_universal_queue_destinations WHERE id=$1`, [dispatched[0]])).rows[0];
+  assert.equal(sent.status, "sent");
+  assert.ok(sent.confirmed_at);
+  assert.equal(sent.credit_debited, true);
+  assert.equal((await readBalance({ pool, workspaceId })).balance, balanceBefore.balance - 1);
 }
 
 async function main() {
@@ -359,6 +428,7 @@ async function main() {
       workspaceId: "ws_NEW", filtros: { periodo: "7dias",
         visao: "fila" } });
     assert.equal(routeHot.metricas.emDistribuicao, 2);
+    await verifyRadarNoSendWithSibling(admin, pool);
     console.log(JSON.stringify({ test: "universal_queue_epoch_local",
       workspaces: 3, oldCaptureRejected: true, duplicateEnqueueSafe: true,
       fanoutA: 3, destinationClockIsolated: true,
@@ -369,6 +439,7 @@ async function main() {
       checkpointMismatchClosed: true,
       historyFromEpoch: true, noOpportunityFoundation: true,
       technicalFailureFactual: true, noSendTerminalFactual: true,
+      radarNoSendAndSiblingAck: true,
       deferredTargetNotReclaimedEarly: true }));
   } finally {
     if (pool) await pool.end().catch(() => {});

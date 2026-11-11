@@ -6,6 +6,7 @@ const { criarExecutorFilaUniversal, sanitizarMotivoPreflight } =
   require("../modules/engine/universal-queue-executor.adapter");
 const { criarPreflightFilaUniversal } =
   require("../modules/engine/universal-queue-preflight");
+const { montarMensagemOferta } = require("../utils/mensagens-ofertas");
 
 const pool = { connect() {} };
 const claim = { ok: true, empty: false, id: 9, leaseToken: "lease_1",
@@ -86,6 +87,49 @@ test("factual non-technical terminal does not become provider failure", async ()
     dispatch: async () => { throw new Error("must_not_send"); } });
   assert.equal((await run("ws_A")).itemStatus, "not_sent");
   assert.equal(calls[0].reason, "commercially_expired");
+});
+
+test("Radar fidelity rejection completes without send instead of retrying the target", async () => {
+  const calls = [];
+  const claimWithOffer = { ...claim, workspace_id: "ws_A",
+    destination_id: "dest_A", oferta_id: 2, evento_id: 1,
+    origem_fluxo: "radar", capturado_em: "2026-10-10T12:10:00.000Z",
+    operationEpochStartedAt: "2026-10-10T11:00:00.000Z",
+    item_payload: { clienteId: "ws_A", engineOfertaId: 2,
+      marketplace: "mercadolivre", titulo: "Sanitized fixture" } };
+  const prepare = criarPreflightFilaUniversal({ pool,
+    now: () => Date.parse("2026-10-10T12:30:00.000Z"),
+    readClock: async () => null,
+    resolveDestination: async ({ destinationId }) => ({ ok: true,
+      destination: { id: destinationId, tipo: "whatsapp", intervaloMinutos: 2 } }),
+    checkWindow: async () => ({ ok: true }),
+    checkDailyLimit: async () => ({ ok: true }),
+    checkSession: async () => ({ ok: true }),
+    checkCredits: async () => ({ ok: true }),
+    checkMedia: async () => ({ ok: true }),
+    checkLinks: async () => ({ ok: true }),
+    checkDedup: async () => ({ ok: true }),
+    renderMessage: async ({ oferta }) => ({ ok: true,
+      message: montarMensagemOferta(oferta) })
+  });
+  const repository = {
+    preflightWorkspace: async () => ({ ok: true }),
+    claimDestination: async () => claimWithOffer,
+    completeWithoutSend: async args => { calls.push(["complete", args]);
+      return { ok: true, itemStatus: "not_sent" }; },
+    releaseUnstarted: async args => { calls.push(["release", args]);
+      return { ok: true }; },
+    markSendStarted: async () => { calls.push(["send_started"]);
+      throw new Error("must_not_start"); }
+  };
+  const run = criarExecutorFilaUniversal({ pool, repository, prepare,
+    dispatch: async () => { calls.push(["dispatch"]);
+      throw new Error("must_not_dispatch"); } });
+
+  const result = await run("ws_A");
+  assert.deepEqual(result, { ok: true, itemStatus: "not_sent" });
+  assert.deepEqual(calls.map(([type]) => type), ["complete"]);
+  assert.equal(calls[0][1].reason, "radar_contrato_original_ausente");
 });
 
 test("only a factual ACK may terminalize a target", async () => {

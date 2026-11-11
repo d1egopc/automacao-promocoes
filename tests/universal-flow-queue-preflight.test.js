@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const { criarPreflightFilaUniversal } =
   require("../modules/engine/universal-queue-preflight");
+const { montarMensagemOferta } = require("../utils/mensagens-ofertas");
 
 const NOW = Date.parse("2026-10-10T12:30:00.000Z");
 const EPOCH = "2026-10-10T11:00:00.000Z";
@@ -118,6 +119,61 @@ test("thrown preflight checks carry a fixed stage without changing the error", a
     assert.equal(error.preflightStage, "check_session");
     return true;
   });
+});
+
+test("Radar commercial fidelity rejection is terminal no-send, not a render exception", async () => {
+  const check = build({ overrides: {
+    renderMessage: async ({ oferta }) => ({ ok: true,
+      message: montarMensagemOferta({ ...oferta, origemFluxo: "radar" }) })
+  } });
+  const result = await check(fixture());
+  assert.deepEqual(result, { ready: false,
+    reason: "radar_contrato_original_ausente", terminalNoSend: true });
+});
+
+test("observed Radar title and coupon fidelity reasons remain distinct terminal decisions", async () => {
+  for (const reason of [
+    "radar_titulo_operacional_ou_ausente",
+    "radar_identidade_titulo_nao_confirmada",
+    "radar_titulo_divergente_sem_identidade",
+    "radar_instrucao_cupom_divergente"
+  ]) {
+    const check = build({ overrides: { renderMessage: async () => {
+      const error = new Error(reason);
+      error.code = "RADAR_FIDELIDADE_COMERCIAL_INVALIDA";
+      throw error;
+    } } });
+    assert.deepEqual(await check(fixture()), { ready: false,
+      reason, terminalNoSend: true });
+  }
+});
+
+test("unknown or unsanitized renderer exceptions retain render stage and fail closed", async () => {
+  for (const error of [
+    Object.assign(new Error("radar_identidade_titulo_nao_confirmada"),
+      { code: "ENRICHMENT_UNAVAILABLE" }),
+    Object.assign(new Error("template engine unavailable"),
+      { code: "TEMPLATE_RENDER_FAILED" }),
+    Object.assign(new Error("radar_unregistered_reason"),
+      { code: "RADAR_FIDELIDADE_COMERCIAL_INVALIDA" }),
+    Object.assign(new Error("private detail +5511999999999"),
+      { code: "RADAR_FIDELIDADE_COMERCIAL_INVALIDA" })
+  ]) {
+    const check = build({ overrides: { renderMessage: async () => { throw error; } } });
+    await assert.rejects(check(fixture()), thrown => {
+      assert.equal(thrown, error);
+      assert.equal(thrown.preflightStage, "render_message");
+      return true;
+    });
+  }
+});
+
+test("transient enrichment denial can retry even with a Radar-like reason", async () => {
+  const retryAt = "2026-10-10T12:35:00.000Z";
+  const check = build({ overrides: { checkLinks: async () => ({ ok: false,
+    reason: "radar_identidade_titulo_nao_confirmada", retryAt }) } });
+  assert.deepEqual(await check(fixture()), { ready: false,
+    reason: "radar_identidade_titulo_nao_confirmada", retryAt });
 });
 
 test("mandatory destination contracts fail closed before render", async () => {

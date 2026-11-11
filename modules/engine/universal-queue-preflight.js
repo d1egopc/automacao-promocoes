@@ -16,6 +16,24 @@ const PREPARE_STAGES = new Set([
   "check_window", "check_daily_limit", "check_session", "check_credits",
   "check_media", "check_links", "render_message", "check_dedup"
 ]);
+const RADAR_FIDELITY_ERROR_CODE = "RADAR_FIDELIDADE_COMERCIAL_INVALIDA";
+const RADAR_FIDELITY_TERMINAL_REASONS = new Set([
+  "radar_contrato_original_ausente", "radar_preco_original_nao_comprovado",
+  "radar_preco_divergente", "radar_preco_publicacao_ausente",
+  "radar_preco_anterior_nao_comprovado", "radar_preco_anterior_divergente",
+  "radar_cupom_divergente", "radar_instrucao_cupom_divergente",
+  "radar_condicao_comercial_divergente", "radar_titulo_operacional_ou_ausente",
+  "radar_identidade_titulo_nao_confirmada", "radar_titulo_divergente_sem_identidade",
+  "radar_identidade_destino_nao_produto"
+]);
+
+function motivoTerminalFidelidadeRadar(error) {
+  if (error?.code !== RADAR_FIDELITY_ERROR_CODE) return null;
+  const reason = String(error?.message || "").trim();
+  // These are fixed business denials from the Radar validator. Persist them as
+  // no-send outcomes; unknown renderer errors remain exceptions and fail closed.
+  return RADAR_FIDELITY_TERMINAL_REASONS.has(reason) ? reason : null;
+}
 
 function marcarEtapaPreflight(error, stage) {
   const safeStage = PREPARE_STAGES.has(stage) ? stage : "resolve_destination";
@@ -127,8 +145,15 @@ function criarPreflightFilaUniversal({ pool, getPool = null, configGlobal = {},
         ...(result?.terminalNoSend === true ? { terminalNoSend: true } : {}),
         ...(result?.retryAt ? { retryAt: result.retryAt } : {}) };
     }
-    const rendered = await executarEtapaPreflight("render_message", () =>
-      checks.renderMessage(context));
+    let rendered;
+    try {
+      rendered = await executarEtapaPreflight("render_message", () =>
+        checks.renderMessage(context));
+    } catch (error) {
+      const reason = motivoTerminalFidelidadeRadar(error);
+      if (reason) return { ready: false, reason, terminalNoSend: true };
+      throw error;
+    }
     if (rendered?.ok !== true || !rendered.message) {
       return { ready: false,
         reason: rendered?.reason || "destination_template_unavailable",
