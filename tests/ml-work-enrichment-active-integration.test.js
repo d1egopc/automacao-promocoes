@@ -136,13 +136,15 @@ function radarMirror() {
         grupo_id: "grupo@g.us",
         texto_original: "Título Radar Comercial De R$ 2.199 por R$ 1.379 Cupom RADAR100",
         metadata: { origemFluxo: "optimus", radarMirror: radarMirror() },
-        links_extraidos: []
+        links_extraidos: ["https://meli.la/produto"]
       },
       {
         id: 9401,
         url_original: "https://meli.la/produto",
         url_expandida: "https://produto.mercadolivre.com.br/MLB123456-tenis-nike",
-        marketplace_detectado: "mercadolivre"
+        marketplace_detectado: "mercadolivre",
+        papel_link: "produto",
+        ordem_captura: 1
       },
       {
         ok: true,
@@ -157,7 +159,34 @@ function radarMirror() {
         linkAfiliado: "https://meli.la/workspace-final",
         categoria: "Diversos",
         cupom: "IMPORTADOR",
-        metadata: { produto: { produtoId: "MLB123456" } }
+        metadata: {
+          adapter: "mercadolivre",
+          clienteId: "workspace_ml",
+          jobId: "9301",
+          eventoId: "9201",
+          linkOriginalEngine: "https://meli.la/produto",
+          linkExpandidoEngine: "https://produto.mercadolivre.com.br/MLB123456-tenis-nike",
+          urlFinalImportador: "https://produto.mercadolivre.com.br/MLB123456-tenis-nike",
+          identidadeCanonicaMl: {
+            status: "consistente",
+            mlbForteConfirmado: true,
+            mlbProduto: "MLB123456",
+            mlbRevalidado: "MLB123456",
+            urlOriginal: "https://meli.la/produto",
+            urlCanonicaRevalidada: "https://produto.mercadolivre.com.br/MLB123456-tenis-nike"
+          },
+          linksComerciais: [{
+            id: 9401,
+            urlOriginal: "https://meli.la/produto",
+            url_original: "https://meli.la/produto",
+            papelLink: "produto",
+            papel: "produto",
+            tipo: "produto",
+            ordemCaptura: 1,
+            urlAfiliadaWorkspace: "https://meli.la/workspace-final"
+          }],
+          produto: { produtoId: "MLB123456", titulo: "Título promocional recebido" }
+        }
       },
       {
         mlWorkEnrichmentAtivo: true,
@@ -179,6 +208,9 @@ function radarMirror() {
   assert.strictEqual(universal.comercial.cupom, "RADAR100");
   assert.strictEqual(universal.afiliacao.urlAfiliada, "https://meli.la/workspace-final");
   assert.strictEqual(metadataPersistida.mlWorkEnrichmentActive.tituloWorkAplicado, true);
+  assert.strictEqual(metadataPersistida.provaTituloTecnicoValidada?.titulo.valor, "Tênis Nike Air Max Excee Masculino");
+  assert.strictEqual(metadataPersistida.provaTituloTecnicoValidada?.produto.produtoIdCanonico, "MLB123456");
+  assert.strictEqual(metadataPersistida.provaTituloTecnicoValidada?.workspaceId, "workspace_ml");
   assert.strictEqual(metadataPersistida.mlWorkEnrichmentActive.imagemWorkAplicada, false);
   assert.strictEqual(metadataPersistida.mlWorkEnrichmentActive.comercialAlterado, false);
   assert.strictEqual(metadataPersistida.mlWorkEnrichmentActive.linksAlterados, false);

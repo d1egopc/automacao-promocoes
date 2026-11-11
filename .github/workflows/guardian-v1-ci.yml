@@ -5,6 +5,7 @@ on:
     branches:
       - validation/guardian-v1-*
       - validation/commercial-recovery-p0-20261110
+      - validation/ml-identity-propagation-p0-20261110
       - validation/ml-title-identity-reconciled-20261108
       - validation/magalu-identity-subreason-20261108
       - validation/magalu-anchor-identity-20261109
@@ -57,7 +58,12 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - run: npm ci
+      - name: Install declared dependencies with pinned public Git source over HTTPS
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: ssh://git@github.com/
+        run: npm ci
       - name: SaaS read-only and Google login failure injection
         run: |
           test -z "${DATABASE_URL:-}"
@@ -671,6 +677,22 @@ jobs:
           node tests/deploy-backend-v2-overlay-validation.test.cjs
           node tests/deploy-backend-compose-image-validation.test.cjs
           node tests/deploy-backend-manual-diagnostics.test.cjs
+      - name: ML identity propagation P0 - official title, anchor and commercial fidelity
+        if: github.ref == 'refs/heads/validation/ml-identity-propagation-p0-20261110'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node --check modules/engine/importer/adapters/mercadolivre.adapter.js
+          node --check modules/engine/importer/importer.service.js
+          node --test tests/ml-show-product-title-recovery.test.cjs tests/ml-work-enrichment-active-integration.test.js tests/ml-work-enrichment-active.test.js tests/ml-work-enrichment-shadow.test.js tests/mercadolivre-identidade-promocional-focal.test.cjs
+          node tests/mercadolivre-identidade-canonica.test.js
+          node tests/mercadolivre-social-show-product.test.js
+          node tests/mercadolivre-imagem-oficial-fallback.test.js
+          node tests/link-conversao-ocorrencia-marketplaces.test.js
+          node tests/contrato-comercial-final-universal.test.js
+          node tests/radar-commercial-fidelity.test.cjs
       - name: Classification V3 offline replay and benchmark
         if: github.ref == 'refs/heads/validation/classificador-universal-v3-20261027'
         shell: bash

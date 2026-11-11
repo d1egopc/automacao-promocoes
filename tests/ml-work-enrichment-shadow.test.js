@@ -62,6 +62,30 @@ function identidade(overrides = {}) {
   assert.strictEqual(Object.hasOwn(validada, "cupom"), false);
   assert.strictEqual(Object.hasOwn(validada, "linkAfiliado"), false);
 
+  const somenteImagem = validarResultadoMlIdentity(identidade({
+    tituloOficial: "",
+    origemTitulo: "",
+    provaTecnica: { ...identidade().provaTecnica, origemTitulo: "" }
+  }), { expectedMlb: MLB, agoraMs: AGORA });
+  assert.strictEqual(somenteImagem.identidadeValidada, true, "official image can identify the same product without requiring a title");
+  assert.strictEqual(somenteImagem.tituloOficial, "");
+
+  const somenteTitulo = validarResultadoMlIdentity(identidade({
+    imagemOficial: "",
+    origemImagem: "",
+    provaTecnica: { ...identidade().provaTecnica, origemImagem: "" }
+  }), { expectedMlb: MLB, agoraMs: AGORA });
+  assert.strictEqual(somenteTitulo.identidadeValidada, true, "official title remains usable when the image is unavailable");
+  assert.strictEqual(somenteTitulo.imagemOficial, "");
+
+  await assert.rejects(async () => validarResultadoMlIdentity(identidade({
+    tituloOficial: "",
+    origemTitulo: "",
+    imagemOficial: "",
+    origemImagem: "",
+    provaTecnica: { ...identidade().provaTecnica, origemTitulo: "", origemImagem: "" }
+  }), { expectedMlb: MLB, agoraMs: AGORA }), /ml_identity_sem_identidade_factual/);
+
   await assert.rejects(async () => validarResultadoMlIdentity(identidade({ observedMlb: "MLB999999999" }), { expectedMlb: MLB, agoraMs: AGORA }), /ml_identity_mlb_divergente/);
   await assert.rejects(async () => validarResultadoMlIdentity(identidade({ marketplace: "shopee" }), { expectedMlb: MLB, agoraMs: AGORA }), /ml_identity_marketplace_invalido/);
   await assert.rejects(async () => validarResultadoMlIdentity(identidade({ tituloOficial: "Vendido por Loja Oficial no ML", imagemOficial: "" }), { expectedMlb: MLB, agoraMs: AGORA }), /ml_identity_titulo_nao_factual/);
