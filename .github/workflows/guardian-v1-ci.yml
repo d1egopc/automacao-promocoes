@@ -787,7 +787,7 @@ jobs:
           node --test tests/mensageiro-v4-credit-scope.postgres.test.cjs
 
   commercial-recovery-p0:
-    if: github.ref == 'refs/heads/validation/commercial-recovery-p0-20261110' || github.ref == 'refs/heads/validation/universal-commercial-recovery-p0-20261110' || github.ref == 'refs/heads/validation/commercial-recovery-p0-composition-20261110' || github.ref == 'refs/heads/validation/getpool-image-reconcile-20261111' || github.ref == 'refs/heads/validation/guardian-v1-op-geral-render-20261111'
+    if: github.ref == 'refs/heads/validation/commercial-recovery-p0-20261110' || github.ref == 'refs/heads/validation/universal-commercial-recovery-p0-20261110' || github.ref == 'refs/heads/validation/commercial-recovery-p0-composition-20261110' || github.ref == 'refs/heads/validation/getpool-image-reconcile-20261111' || github.ref == 'refs/heads/validation/guardian-v1-op-geral-render-20261111' || github.ref == 'refs/heads/validation/guardian-v1-radar-formatador-composicao-20261111'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
