@@ -23,7 +23,8 @@ const NON_RUNTIME_EXACT = new Set([
   // Artefatos da extensão: testados no CI, nunca transportados no overlay Docker.
   "optimus-capture/adapters/magalu.js",
   "optimus-capture/local-worker/magalu-identity.js",
-  "optimus-capture/local-worker/task-runner.js"
+  "optimus-capture/local-worker/task-runner.js",
+  "optimus-capture/local-worker/worker-client.js"
 ]);
 const NON_RUNTIME_PREFIXES = ["docs/", "tests/", ".github/"];
 const RUNTIME_ROOTS = new Set([
