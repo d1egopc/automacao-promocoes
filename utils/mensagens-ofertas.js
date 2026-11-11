@@ -824,7 +824,7 @@ function montarEntradaTemplateUniversalOficial(oferta = {}) {
   };
 }
 
-function montarOfertaRenderizacaoOficial(oferta = {}) {
+function montarOfertaRenderizacaoOficial(oferta = {}, fidelidadeRadarAplicavel = false) {
   const dadosUniversal = prepararDadosOficiaisTemplate(oferta, { modo: "universal" });
   const dadosPersonalizado = prepararDadosOficiaisTemplate(oferta, { modo: "personalizado" });
   const precoAtual = dadosUniversal.precoAtual ?? dadosPersonalizado.precoAtual ?? oferta.precoAtual ?? oferta.preco;
@@ -843,7 +843,10 @@ function montarOfertaRenderizacaoOficial(oferta = {}) {
     precoAntigo: precoOriginal,
     precoDe: precoOriginal,
     cupom,
-    cupomTexto: dadosUniversal.cupomTexto || dadosPersonalizado.cupomTexto || cupom,
+    // Os códigos formatados ficam em cupom/codigosCupom. O validador Radar
+    // ainda reconhece cupomTexto da captura como alias legado de instrução.
+    cupomTexto: fidelidadeRadarAplicavel ? oferta.cupomTexto
+      : dadosUniversal.cupomTexto || dadosPersonalizado.cupomTexto || cupom,
     codigoCupom: dadosUniversal.codigoCupom || dadosPersonalizado.codigoCupom || cupom,
     codigosCupom: Array.isArray(dadosUniversal.codigosCupom) ? dadosUniversal.codigosCupom : [],
     cupons: Array.isArray(dadosUniversal.cupons) ? dadosUniversal.cupons : [],
@@ -1040,9 +1043,15 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
   });
   const tituloProdutoAtivo = normalizarTituloOfertaDestino(destino?.tituloOferta) === "ia" &&
     tituloIaLiberadoRender(opcoes);
-  const tituloProdutoApresentacao = tituloProdutoAtivo
-    ? resolverTituloProdutoApresentacao(ofertaComFatosBase)
-    : { titulo: "", fonteTituloProduto: "", tituloProdutoLimpo: false, modoTituloProduto: "" };
+  let tituloProdutoApresentacao = { titulo: "", fonteTituloProduto: "",
+    tituloProdutoLimpo: false, modoTituloProduto: "" };
+  if (tituloProdutoAtivo) {
+    tituloProdutoApresentacao = fidelidadeRadar.aplicavel
+      ? { titulo: tituloApresentacaoValido(ofertaComFatosBase.titulo || ofertaComFatosBase.nome),
+          fonteTituloProduto: ofertaComFatosBase.titulo ? "titulo" : "nome",
+          tituloProdutoLimpo: false, modoTituloProduto: "preservado" }
+      : resolverTituloProdutoApresentacao(ofertaComFatosBase);
+  }
   const ganchoCopyLocal = tituloProdutoAtivo
     ? resolverGanchoCopyLocalApresentacao(tituloApresentacao, fonteTitulo)
     : {
@@ -1052,6 +1061,10 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
       familiaGancho: "",
       intencaoGancho: ""
     };
+  if (fidelidadeRadar.aplicavel && fonteTitulo === "tituloIa_explicito" &&
+      !copyInteligente.validarCopyV2({ textoGerado: ganchoCopyLocal.gancho }).valida) {
+    ganchoCopyLocal.gancho = "";
+  }
   const emojiTituloProduto = tituloProdutoAtivo
     ? resolverEmojiSemanticoTitulo(ofertaComFatosBase, {
       tituloProduto: tituloProdutoApresentacao.titulo,
@@ -1059,10 +1072,16 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
       subcontextoGancho: tituloApresentacao.subcontexto
     })
     : { emoji: "", origem: "" };
+  const instrucaoRadar = fidelidadeRadar.aplicavel
+    ? oferta.instrucaoCupom || oferta.avisoCupom || oferta.cupomTexto
+    : "";
   const ofertaApresentacao = {
     ...ofertaComFatosBase,
     clienteId,
-    titulo: tituloApresentacao.titulo,
+    // No Radar o título já validado ancora a prova até a validação final.
+    // A copy entra pelo bloco de apresentação dos templates.
+    ...(!fidelidadeRadar.aplicavel ? { titulo: tituloApresentacao.titulo } : {}),
+    ...(instrucaoRadar ? { instrucaoCupom: instrucaoRadar } : {}),
     tituloProdutoApresentacaoAtivo: tituloProdutoAtivo,
     tituloProdutoApresentacao: tituloProdutoAtivo ? tituloProdutoApresentacao.titulo : "",
     fonteTituloProduto: tituloProdutoAtivo ? tituloProdutoApresentacao.fonteTituloProduto : "",
@@ -1078,7 +1097,7 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
     emojiGanchoCopyLocal: tituloProdutoAtivo && ganchoCopyLocal.gancho ? "✨" : ""
   };
   const ofertaEntradaComFatosOfc = aplicarFatosOfcV24ComoEntrada(ofertaApresentacao);
-  const ofertaOficial = montarOfertaRenderizacaoOficial(ofertaEntradaComFatosOfc);
+  const ofertaOficial = montarOfertaRenderizacaoOficial(ofertaEntradaComFatosOfc, fidelidadeRadar.aplicavel);
   const fidelidadeTraceIdPrincipal = fidelidadeObs.flagAtiva()
     ? fidelidadeObs.resolverFidelidadeTraceId(oferta, oferta.metadata, ofertaOficial, ofertaOficial.metadata)
     : "";

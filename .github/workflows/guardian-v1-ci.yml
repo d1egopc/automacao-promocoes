@@ -627,6 +627,13 @@ jobs:
             guardian_args+=(--release-mode full_image)
           fi
           node scripts/guardian-v1.cjs "${guardian_args[@]}"
+      - name: Radar formatter and presentation regressions
+        if: github.ref == 'refs/heads/validation/guardian-v1-radar-formatador-20261111' || github.ref == 'refs/heads/validation/guardian-v1-radar-formatador-composicao-20261111'
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node --test tests/radar-formatter-presentation.test.cjs tests/radar-commercial-fidelity.test.cjs tests/contrato-comercial-final-universal.test.js tests/imagem-link-contrato-universal.test.js tests/copy-c3-contrato-publico.test.js tests/copy-inteligente-v1.test.js tests/copy-inteligente-local-v2.test.js
       - name: Magalu identity-to-image recovery - isolated fixtures only
         if: github.ref == 'refs/heads/validation/magalu-recovery-20261027'
         shell: bash
