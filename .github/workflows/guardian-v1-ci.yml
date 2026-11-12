@@ -812,6 +812,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
@@ -865,6 +866,10 @@ jobs:
           candidate="local/optimus-anchor-overlay:ci-$GITHUB_RUN_ID"
           fixture="$(mktemp -d)"
           mkdir -p "$fixture/base"
+          if ! git cat-file -e "${base}^{commit}"; then
+            echo "::error::Required base commit $base is unavailable in the checkout; refusing to build a synthetic baseline." >&2
+            exit 1
+          fi
           git archive "$base" | tar -x -C "$fixture/base"
           test -f "$fixture/base/Dockerfile"
           if [[ -f "$fixture/base/$parser" ]]; then
