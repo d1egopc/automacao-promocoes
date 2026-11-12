@@ -1,3 +1,4 @@
+const { mlWorkEnrichmentAtivo } = require("./ml-work-enrichment-shadow");
 const {
   buscarJobsProntos,
   tentarMarcarImportando,
@@ -218,7 +219,10 @@ async function tratarFalhaRetriavelMagalu(job = {}, resultadoAdapter = {}, marke
 }
 
 async function tratarFalhaRetriavelMercadoLivre(job = {}, resultado = {}, marketplace, resumo, contexto = {}) {
-  if (marketplace !== "mercadolivre" || resultado?.retriavel !== true || resultado?.motivo !== "sem_imagem" || resultado?.motivoDetalhe !== "aguardando_enriquecimento_local") return null;
+  const identidadePendente = resultado?.motivo === "mercadolivre_titulo_tecnico_nao_confirmado" && resultado?.localWorker?.vinculo;
+  if (marketplace !== "mercadolivre" || resultado?.retriavel !== true ||
+      (resultado?.motivo !== "sem_imagem" && !identidadePendente) ||
+      resultado?.motivoDetalhe !== "aguardando_enriquecimento_local") return null;
   const agendar = typeof contexto?.deps?.agendarRetryImagemMercadoLivreLocal === "function"
     ? contexto.deps.agendarRetryImagemMercadoLivreLocal
     : agendarRetryImagemMercadoLivreLocal;
@@ -230,8 +234,9 @@ async function tratarFalhaRetriavelMercadoLivre(job = {}, resultado = {}, market
     }
     return { ok: false, retriavel: true, reagendado: true, motivo: "aguardando_enriquecimento_local", tentativa: agendamento.tentativa };
   }
-  if (agendamento?.esgotado) return finalizarErro(job, "sem_imagem", { marketplace, tentativasRetry: agendamento.tentativa }, resumo, contexto);
-  return finalizarErro(job, "falha_agendar_retry_imagem_mercadolivre", { marketplace, erro: agendamento?.erro || "" }, resumo, contexto);
+  if (identidadePendente && agendamento?.ignorado) return { ok: false, ignorado: true, motivo: agendamento.motivo };
+  if (agendamento?.esgotado) return finalizarErro(job, resultado.motivo, { marketplace, tentativasRetry: agendamento.tentativa }, resumo, contexto);
+  return finalizarErro(job, identidadePendente ? "falha_agendar_retry_identidade_mercadolivre" : "falha_agendar_retry_imagem_mercadolivre", { marketplace, erro: agendamento?.erro || "" }, resumo, contexto);
 }
 
 async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
@@ -388,8 +393,12 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
     temLinkAfiliado: Boolean(resultadoAdapter.linkAfiliado)
   });
 
-  const linkPrincipal = escolherLinkPrincipalOferta(linksResultado.links, eventoResultado.evento, marketplace);
-  const gravacao = await gravarOfertaEngine(job, eventoResultado.evento, linkPrincipal, resultadoAdapter, contexto.deps || {});
+  const ancoraAdapter = marketplace === "mercadolivre" && mlWorkEnrichmentAtivo({ deps: contexto.deps })
+    ? resultadoAdapter.metadata?.linkOriginalEngine : "";
+  const linksAncora = ancoraAdapter ? linksResultado.links.filter(item => item.url_original === ancoraAdapter) : [];
+  const linkPrincipal = marketplace === "mercadolivre" && linksAncora.length === 1
+    ? linksAncora[0] : escolherLinkPrincipalOferta(linksResultado.links, eventoResultado.evento, marketplace);
+  const gravacao = await gravarOfertaEngine(job, eventoResultado.evento, linkPrincipal, resultadoAdapter, { ...contexto.deps, linksEventoPersistidos: linksResultado.links });
   await registrarEtapaImportacao(job.id, "oferta_gravada", gravacao.ok ? "ok" : "erro", gravacao.ok ? "oferta_gravada" : (gravacao.motivo || "oferta_gravacao_falhou"), {
     ofertaId: gravacao.ofertaId || null,
     erro: gravacao.erro || ""

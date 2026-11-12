@@ -47,4 +47,14 @@ function montarProvaTituloTecnico({
   };
 }
 
-module.exports = { montarProvaTituloTecnico };
+function vincularOcorrenciaProduto({ job = {}, evento = {}, link = {}, marketplace, urlOriginal } = {}) {
+  const workspaceId = texto(job.cliente_id || job.clienteId);
+  const eventoId = texto(job.evento_id);
+  const jobId = texto(job.id);
+  const ocorrenciaId = texto(link.id || link.ocorrenciaId);
+  if (!workspaceId || !jobId || !eventoId || eventoId !== texto(evento.id) || !ocorrenciaId ||
+      !marketplace || !urlOriginal || urlOriginal !== texto(link.url_original || link.urlOriginal)) return null;
+  return { workspaceId, eventoId, jobId, ocorrenciaId, marketplace, urlOriginal };
+}
+
+module.exports = { montarProvaTituloTecnico, vincularOcorrenciaProduto };

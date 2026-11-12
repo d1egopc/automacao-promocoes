@@ -34,6 +34,29 @@
       return url;
     } catch (_) { return null; }
   }
+  function urlCatalogo(valor, base) {
+    let url, caminhoDecodificado;
+    try {
+      url = new URL(decode(valor), base);
+      caminhoDecodificado = decodeURIComponent(url.pathname);
+    } catch (_) { return null; }
+    if (!/\/p(?:[\/\\]|$)/i.test(caminhoDecodificado)) return null;
+    const catalogo = url.pathname.match(/^\/(?:[a-z0-9-]+\/)?p\/(MLB-?\d{6,})\/?$/i)?.[1];
+    const seletor = url.searchParams.get("pdp_filters")?.match(/^item_id:(MLB-?\d{6,})$/i)?.[1];
+    if (!catalogo || !seletor || url.protocol !== "https:" ||
+        !["www.mercadolivre.com.br", "mercadolivre.com.br"].includes(url.hostname) ||
+        url.username || url.password || url.port || url.hash ||
+        !/^\?pdp_filters=[^&]+$/.test(url.search)) {
+      throw new Error("ml_identity_catalogo_url_invalida");
+    }
+    const catalogId = normalizarMlb(catalogo);
+    const listingId = normalizarMlb(seletor);
+    if (catalogId === listingId) throw new Error("ml_identity_catalogo_url_invalida");
+    return { url: url.toString(), catalogId, listingId };
+  }
+  function mesmaSelecaoCatalogo(a, b) {
+    return a && b && a.catalogId === b.catalogId && a.listingId === b.listingId;
+  }
   function imagemOficial(valor = "", base = "") {
     try {
       const url = new URL(decode(valor), base || undefined);
@@ -206,7 +229,59 @@
     }
     return { pageMlbu: page, mlb, source: "nordic_current_product", bookmarkItem: mlb, bookmarkPage: page, trackItem: mlb, trackPage: page };
   }
+  function extrairCatalogo(html, selecao, variacaoEsperada) {
+    const canonicas = [...html.matchAll(/<link\b([^>]+)>/gi)]
+      .map(link => atributos(link[1]))
+      .filter(attrs => texto(attrs.rel).toLowerCase().split(/\s+/).includes("canonical"));
+    if (canonicas.length !== 1) throw new Error("ml_identity_canonical_divergente");
+    const canonical = urlCatalogo(canonicas[0].href, selecao.url);
+    if (!mesmaSelecaoCatalogo(canonical, selecao)) throw new Error("ml_identity_canonical_divergente");
+
+    const candidatos = jsonLdProdutos(html).filter(produto =>
+      [produto.itemId, produto.item_id].some(id => normalizarMlb(id) === selecao.listingId));
+    if (candidatos.length !== 1) throw new Error("ml_identity_catalogo_sem_prova_anuncio");
+    const [produto] = candidatos;
+    const anuncios = [produto.itemId, produto.item_id].filter(id => id != null);
+    const catalogos = [produto.catalogProductId, produto.catalog_product_id].filter(id => id != null);
+    const idIgual = (id, esperado) => /^MLB-?\d{6,}$/i.test(texto(id)) && normalizarMlb(id) === esperado;
+    if (!anuncios.every(id => idIgual(id, selecao.listingId)) || !catalogos.length ||
+        !catalogos.every(id => idIgual(id, selecao.catalogId)) ||
+        [produto.productID, produto.productId].some(id =>
+          id != null && !idIgual(id, selecao.listingId) && !idIgual(id, selecao.catalogId)) ||
+        [produto.url, produto["@id"], produto.offers?.url].some(url =>
+          url != null && !mesmaSelecaoCatalogo(urlCatalogo(url, selecao.url), selecao))) {
+      throw new Error("ml_identity_catalogo_vinculo_divergente");
+    }
+    const variacoes = [...new Set([produto.variationId, produto.variantId, produto.variation_id]
+      .filter(id => id != null).map(texto))];
+    if (variacoes.length > 1 || variacoes.some(id => !/^\d{1,30}$/.test(id)) ||
+        (variacaoEsperada && variacoes[0] !== variacaoEsperada)) {
+      throw new Error("ml_identity_variacao_conflitante");
+    }
+    const titulo = tituloFactual(produto.name);
+    if (!titulo) throw new Error("ml_identity_catalogo_sem_titulo_oficial");
+    const imagem = imagensProduto(produto).sort((a, b) => pontuarImagem(b) - pontuarImagem(a))[0] || "";
+    return {
+      expectedMlb: selecao.listingId,
+      observedMlb: selecao.listingId,
+      catalogId: selecao.catalogId,
+      listingId: selecao.listingId,
+      identidadeValidada: true,
+      tituloOficial: titulo,
+      imagemOficial: imagem,
+      origemTitulo: "jsonld.name",
+      origemImagem: imagem ? "jsonld.image" : "",
+      finalUrl: selecao.url,
+      canonicalUrl: canonical.url,
+      variationId: variacoes[0] || ""
+    };
+  }
   function extrair(html, expectedMlb, finalUrl) {
+    const catalogo = urlCatalogo(finalUrl);
+    if (catalogo) {
+      if (normalizarMlb(expectedMlb) !== catalogo.listingId) throw new Error("ml_identity_final_url_invalida");
+      return extrairCatalogo(html, catalogo, "");
+    }
     const associacaoPagina = pageMlbu(finalUrl) ? associacaoMlbu(html, finalUrl) : null;
     const esperado = normalizarMlb(expectedMlb || associacaoPagina?.mlb);
     const final = urlMercadoLivre(finalUrl);
@@ -250,12 +325,12 @@
       ...(associacaoPagina ? { associacaoPagina } : {})
     };
   }
-  async function fetchTexto(url, timeoutMs = TIMEOUT_MS) {
+  async function fetchTexto(url, timeoutMs = TIMEOUT_MS, redirect = "follow") {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     let response = null;
     try {
-      response = await fetch(url, { redirect: "follow", signal: controller.signal, headers: { Accept: "text/html,application/xhtml+xml" } });
+      response = await fetch(url, { redirect, signal: controller.signal, headers: { Accept: "text/html,application/xhtml+xml" } });
       return { response, html: await response.text() };
     } finally {
       clearTimeout(timer);
@@ -278,15 +353,33 @@
       try { await response?.body?.cancel?.(); } catch (_) {}
     }
   }
-  async function resolver({ productId, sourceUrl }) {
+  async function resolver({ productId, sourceUrl, variationId }) {
     const esperado = normalizarMlb(productId);
+    const catalogo = urlCatalogo(sourceUrl);
     const origem = urlMercadoLivre(sourceUrl);
-    if (!origem || (!pageMlbu(origem.toString()) && (!esperado || normalizarMlb(origem.pathname) !== esperado))) throw new Error("ml_identity_entrada_invalida");
-    const leitura = await fetchTexto(origem.toString());
-    const finalUrl = urlMercadoLivre(leitura.response?.url || origem.toString());
-    if (!leitura.response?.ok || !finalUrl) throw new Error(`ml_identity_http_${leitura.response?.status || 0}`);
-    if (pageMlbu(origem.toString()) && pageMlbu(origem.toString()) !== pageMlbu(finalUrl.toString())) throw new Error("ml_identity_redirect_produto_divergente");
-    const resultado = extrair(leitura.html, esperado, finalUrl.toString());
+    const variacaoEsperada = texto(variationId);
+    if (!origem || (catalogo
+      ? !/^MLB-?\d{6,}$/i.test(texto(productId)) || esperado !== catalogo.listingId ||
+        (variacaoEsperada && !/^\d{1,30}$/.test(variacaoEsperada))
+      : !pageMlbu(origem.toString()) && (!esperado || normalizarMlb(origem.pathname) !== esperado))) {
+      throw new Error("ml_identity_entrada_invalida");
+    }
+    const urlConsulta = catalogo?.url || origem.toString();
+    const leitura = await fetchTexto(urlConsulta, TIMEOUT_MS, catalogo ? "error" : "follow");
+    const finalUrl = leitura.response?.url || (catalogo ? "" : urlConsulta);
+    if (!leitura.response?.ok) throw new Error(`ml_identity_http_${leitura.response?.status || 0}`);
+    const catalogoFinal = catalogo ? urlCatalogo(finalUrl) : null;
+    if (catalogo && (leitura.response.redirected || !mesmaSelecaoCatalogo(catalogo, catalogoFinal))) {
+      throw new Error("ml_identity_redirect_produto_divergente");
+    }
+    const finalLegado = catalogo ? null : urlMercadoLivre(finalUrl);
+    if (!catalogo && !finalLegado) throw new Error(`ml_identity_http_${leitura.response?.status || 0}`);
+    if (!catalogo && pageMlbu(origem.toString()) && pageMlbu(origem.toString()) !== pageMlbu(finalLegado.toString())) {
+      throw new Error("ml_identity_redirect_produto_divergente");
+    }
+    const resultado = catalogo
+      ? extrairCatalogo(leitura.html, catalogoFinal, variacaoEsperada)
+      : extrair(leitura.html, esperado, finalLegado.toString());
     if (resultado.imagemOficial) resultado.imagemOficial = await validarImagem(resultado.imagemOficial);
     const collectedAt = new Date().toISOString();
     return {
@@ -302,6 +395,7 @@
         provenance: "local_worker.ml_identity_v1",
         expectedMlb: resultado.expectedMlb,
         observedMlb: resultado.observedMlb,
+        ...(catalogo ? { listingId: resultado.listingId, catalogId: resultado.catalogId } : {}),
         sameProductObject: true,
         identidadeTipo: "mlb",
         origemTitulo: resultado.origemTitulo,
@@ -319,6 +413,8 @@
     resolver,
     extrair,
     associacaoMlbu,
+    urlCatalogo,
+    mesmaSelecaoCatalogo,
     pageMlbu,
     tituloFactual,
     normalizarMlb,

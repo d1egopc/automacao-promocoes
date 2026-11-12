@@ -1,3 +1,4 @@
+const { identidadeMlAncorada } = require("../inteligencia-universal/memoria.service");
 const SCHEMA_VERSION = "engine-v2-oferta-universal-3a";
 const { normalizarOrigemFluxo } = require("../../utils/origem-fluxo");
 
@@ -101,6 +102,7 @@ function montarOfertaUniversalEngine({
   const linkOriginal = texto(oferta.linkOriginal || link.url_original || ofertaEntrada.linkOriginal);
   const linkCanonico = texto(oferta.linkExpandido || link.url_expandida || link.url_normalizada || ofertaEntrada.linkExpandido || ofertaEntrada.urlFinal);
   const linkAfiliado = texto(oferta.linkAfiliado);
+  const identidadeMl = identidadeMlAncorada({ ...oferta, metadata, linkOriginal, clienteId: job.cliente_id || job.clienteId || job.workspaceId });
   const origemFluxo = normalizarOrigemFluxo(oferta.origemFluxo || metadata.origemFluxo);
 
   return {
@@ -113,7 +115,9 @@ function montarOfertaUniversalEngine({
     ...(origemFluxo ? { origemFluxo } : {}),
     marketplace: texto(oferta.marketplace || job.marketplace || job.marketplace_detectado) || null,
     produto: {
-      idExterno: resolverProdutoId(oferta, { ...metadata, produto: produtoMetadata }),
+      idExterno: identidadeMl?.listingId || resolverProdutoId(oferta, { ...metadata, produto: produtoMetadata }),
+      ...(identidadeMl ? { catalogId: identidadeMl.catalogId, listingId: identidadeMl.listingId,
+        variationId: identidadeMl.variationId || null } : {}),
       titulo: texto(oferta.titulo) || null,
       marca: texto(ofertaEntrada.marca || produtoMetadata.marca) || null,
       categoriaOrigem: texto(ofertaEntrada.categoria || ofertaEntrada.categoriaProduto || produtoMetadata.categoria) || null,

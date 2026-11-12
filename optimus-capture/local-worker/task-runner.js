@@ -138,6 +138,8 @@
     if (prova.origemTitulo !== undefined) resultado.origemTitulo = texto(prova.origemTitulo);
     if (prova.origemImagem !== undefined) resultado.origemImagem = texto(prova.origemImagem);
     if (prova.canonicalUrl !== undefined) resultado.canonicalUrl = texto(prova.canonicalUrl);
+    if (prova.listingId !== undefined) resultado.listingId = texto(prova.listingId);
+    if (prova.catalogId !== undefined) resultado.catalogId = texto(prova.catalogId);
     if (prova.variationId !== undefined) resultado.variationId = texto(prova.variationId);
     if (prova.collectedAt !== undefined) resultado.collectedAt = texto(prova.collectedAt);
     if (prova.identityKey !== undefined) resultado.identityKey = texto(prova.identityKey);

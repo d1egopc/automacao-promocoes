@@ -474,18 +474,18 @@ async function testarKabumAwinIsolaPublisherPorWorkspace() {
   assert.strictEqual(new URL(wolf.metadata.linksComerciais[0].urlAfiliadaWorkspace).searchParams.get("awinaffid"), "222");
 }
 
-async function testarAliExpressAppPcProduto() {
+async function testarAliExpressAppPcProduto(workspace) {
   const app = "https://a.aliexpress.com/_appD1";
   const pc = "https://www.aliexpress.com/item/1005001234567890.html?via=pc";
   const produto = "https://www.aliexpress.com/item/1005001234567890.html?via=produto";
-  const afiliadoApp = "https://s.click.aliexpress.com/e/_APPD1";
-  const afiliadoPc = "https://s.click.aliexpress.com/e/_PCD1";
-  const afiliadoProduto = "https://s.click.aliexpress.com/e/_PRODUTOD1";
-  const credenciais = { appKey: "app", secret: "secret", trackingId: "d1" };
+  const afiliadoApp = "https://s.click.aliexpress.com/e/_APP" + workspace;
+  const afiliadoPc = "https://s.click.aliexpress.com/e/_PC" + workspace;
+  const afiliadoProduto = "https://s.click.aliexpress.com/e/_PRODUTO" + workspace;
+  const credenciais = { appKey: "app", secret: "secret", trackingId: workspace };
   const chamadas = [];
 
   const resultado = await importarAliExpressEngine({
-    job: { id: 36, evento_id: 37, cliente_id: "D1" },
+    job: { id: 36, evento_id: 37, cliente_id: workspace },
     evento: {
       texto_original: [
         "AliExpress APP PC Produto",
@@ -502,7 +502,10 @@ async function testarAliExpressAppPcProduto() {
       { url_original: produto, metadata: { papelLink: "produto", papelLinkMotivo: "produto_explicito" } }
     ],
     deps: {
-      getIntegracaoCliente: () => ({ credenciais }),
+      getIntegracaoCliente: clienteId => {
+        assert.strictEqual(clienteId, workspace);
+        return { credenciais };
+      },
       importarAliExpress: async (url, config = {}) => {
         chamadas.push(url);
         const urlAfiliada = url === app ? afiliadoApp : url === pc ? afiliadoPc : afiliadoProduto;
@@ -517,7 +520,7 @@ async function testarAliExpressAppPcProduto() {
           metadata: {
             papelLink: papel,
             afiliacaoWorkspace: criarProvaAfiliacaoWorkspaceAliExpress({
-              clienteId: "D1", credenciais, urlOriginal: url,
+              clienteId: workspace, credenciais, urlOriginal: url,
               urlAfiliadaWorkspace: urlAfiliada, papel,
               conversaoStatus: "convertida", motivoConversao: "fixture"
             })
@@ -532,6 +535,7 @@ async function testarAliExpressAppPcProduto() {
   const links = resultado.metadata.linksClassificados;
   assert.deepStrictEqual(links.map(item => item.papelLink), ["link_app", "link_pc", "produto"]);
   assert.deepStrictEqual(links.map(item => item.urlAfiliada), [afiliadoApp, afiliadoPc, afiliadoProduto]);
+  assert.deepStrictEqual(links.map(item => item.urlOriginal), [app, pc, produto]);
   assert(links.every(item => item.renderizavel === true));
 }
 
@@ -697,7 +701,8 @@ async function main() {
   await testarKabumDiretoNaoReusaPrincipalComUedDivergente();
   await testarKabumFalhaOcorrenciaNaoVazaPrincipalNemOriginal();
   await testarKabumAwinIsolaPublisherPorWorkspace();
-  await testarAliExpressAppPcProduto();
+  await testarAliExpressAppPcProduto("D1");
+  await testarAliExpressAppPcProduto("D2");
   await testarAliExpressQuatroOcorrenciasPreservamUrlOriginal();
   await testarDuplicadoReusaConversaoMasPreservaOcorrencia();
   await testarFalhaNaoVazaOriginal();

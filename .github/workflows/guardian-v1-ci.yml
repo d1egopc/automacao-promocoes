@@ -608,6 +608,7 @@ jobs:
             refs/heads/validation/guardian-v1-ml-identity-images-20261028) base=b8f5746e4d562deaa5c4081738de89e0bf5fc508 ;;
             refs/heads/validation/guardian-v1-classifier-copy-focal-20261027) base=f800da32e987c740854a9de02d5bcc93d7f149e9 ;;
             refs/heads/validation/guardian-v1-radar-ingress-continuous-20261031) base=7708855e014d54a48825b0d3ae1f77da43294ad0 ;;
+            refs/heads/validation/guardian-v1-universal-offer-anchor) base=dadd878fd2cd81fec01b0317903462f8b734f8db ;;
             refs/heads/validation/guardian-v1-universal-link-anchor-identity-20261110) base=1b2e098827adc8e8bdba4cc20b9167ce10dcd9fe ;;
             refs/heads/validation/classificador-universal-v3-20261027) base=3ab4f29d7812cf0f9e996f210762fd94c1296322 ;;
             refs/heads/validation/telemetria-operacional-20261027) base=227c860e43d1d31904bd5a1332fa29b629a5b3de ;;
@@ -625,6 +626,9 @@ jobs:
           guardian_args=(validate --base "$base" --source "$source" --report "$RUNNER_TEMP/guardian-v1-report.json")
           if [[ "$GITHUB_REF" == refs/heads/validation/guardian-v1-radar-ingress-continuous-20261031 ]]; then
             guardian_args+=(--release-mode full_image)
+          fi
+          if [[ "$GITHUB_REF" == refs/heads/validation/guardian-v1-universal-offer-anchor ]]; then
+            guardian_args+=(--ci-universal-anchor)
           fi
           node scripts/guardian-v1.cjs "${guardian_args[@]}"
       - name: Radar formatter and presentation regressions
@@ -785,6 +789,56 @@ jobs:
           export V4_FIXTURE_SERVER_HOST="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' '${{ job.services.postgres.id }}')"
           test -n "$V4_FIXTURE_SERVER_HOST"
           node --test tests/mensageiro-v4-credit-scope.postgres.test.cjs
+
+  universal-offer-anchor-postgres:
+    if: github.ref == 'refs/heads/validation/guardian-v1-universal-offer-anchor'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: optimus_universal_fixture
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 127.0.0.1:55433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d optimus_universal_fixture"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Clean declared dependencies
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: ssh://git@github.com/
+        run: npm ci
+      - name: Anchor, worker, commercial links, memory and concurrent PostgreSQL claims
+        env:
+          OPTIMUS_TEST_PG17: '1'
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node --test --test-reporter=tap \
+            tests/universal-offer-anchor-local.test.cjs \
+            tests/ofertas-v2-dedup-ancora-historica.test.cjs \
+            tests/optimus-capture-ml-catalog-selection.test.cjs \
+            tests/optimus-capture-local-worker-ml-identity.test.js \
+            tests/local-worker-idempotency.test.js \
+            tests/link-anchor-identity-proof-focal.test.cjs \
+            tests/link-conversao-ocorrencia-marketplaces.test.js \
+            tests/mercadolivre-identidade-canonica.test.js \
+            tests/engine-importer-origem-fairness.test.js \
+            tests/universal-flow-turbo-commercial.test.js \
+            tests/universal-flow-queue-executor.test.js
+          node --test --test-name-pattern='CI da âncora' tests/guardian-v1.test.cjs
 
   commercial-recovery-p0:
     if: github.ref == 'refs/heads/validation/commercial-recovery-p0-20261110' || github.ref == 'refs/heads/validation/universal-commercial-recovery-p0-20261110' || github.ref == 'refs/heads/validation/commercial-recovery-p0-composition-20261110' || github.ref == 'refs/heads/validation/getpool-image-reconcile-20261111' || github.ref == 'refs/heads/validation/guardian-v1-op-geral-render-20261111'

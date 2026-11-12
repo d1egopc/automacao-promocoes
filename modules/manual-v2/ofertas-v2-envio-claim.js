@@ -2,16 +2,53 @@
 
 const crypto = require("crypto");
 const { getEnginePool } = require("../engine/database");
-const { identidadeCanonica, identidadeIsoladaObservacao } = require("./ofertas-v2-identidade");
+const { componentesIdentidadeCanonica, identidadeCanonica, identidadeIsoladaObservacao } = require("./ofertas-v2-identidade");
+
+const { identidadeMlAncorada, selecaoMlReservaHistorica, compararSelecaoMl } = require("../inteligencia-universal/memoria.service");
 
 const JANELA_MS = 2 * 60 * 60 * 1000;
+const LIMITE_RESERVAS_CATALOGO = 16;
 
 function texto(valor) { return String(valor ?? "").trim(); }
 
 function chaveClaimProdutoDestino({ clienteId = "", oferta = {}, destinoId = "" } = {}) {
   const workspace = texto(clienteId || oferta.clienteId || oferta.workspaceId);
-  const produto = identidadeCanonica(oferta) || identidadeIsoladaObservacao({ ...oferta, clienteId: workspace });
   const destino = texto(destinoId);
+  const ancora = identidadeMlAncorada(oferta);
+  if (ancora && workspace && destino && workspace === texto(oferta.clienteId || oferta.workspaceId)) {
+    const escopo = chavePar(workspace, chaveProdutoMl(ancora.catalogId), destino);
+    // Reservas ancoradas novas conservam o formato de 64 hex do coordenador.
+    // A metade inicial identifica somente o escopo legado, a outra o anúncio/variante.
+    return escopo.slice(0, -32) + chavePar(workspace, chaveProdutoMl(ancora.listingId, ancora.variationId), destino).slice(-32);
+  }
+  const produto = identidadeCanonica(oferta) || identidadeIsoladaObservacao({ ...oferta, clienteId: workspace });
+  return chavePar(workspace, produto, destino);
+}
+
+function catalogoMlCandidato(oferta) {
+  const identidade = componentesIdentidadeCanonica(oferta);
+  if (identidade?.marketplace !== "mercadolivre") return "";
+  const urls = [oferta.linkOriginal, oferta.urlOriginal, oferta.urlCanonica, oferta.url,
+    oferta.metadata?.ofertaUniversal?.produto?.urlCanonica];
+  return urls.some(valor => {
+    try {
+      const url = new URL(valor);
+      const catalogo = url.pathname.match(/^\/(?:[a-z0-9-]+\/)?p\/(MLB-?\d{6,})\/?$/i)?.[1];
+      return url.protocol === "https:" && !url.username && !url.password && !url.port &&
+        ["www.mercadolivre.com.br", "mercadolivre.com.br"].includes(url.hostname) &&
+        catalogo?.replace("-", "").toLowerCase() === identidade.identidadeProduto;
+    } catch (_) { return false; }
+  }) ? identidade.identidadeProduto : "";
+}
+
+function chaveDuravel(chave) { return chave.replace("ofertas-v2-par:", "ofertas-v2-duravel:"); }
+
+function chaveProdutoMl(id, variante = "") {
+  return crypto.createHash("sha256").update(JSON.stringify(variante
+    ? ["mercadolivre", id.toLowerCase(), variante] : ["mercadolivre", id.toLowerCase()])).digest("hex");
+}
+
+function chavePar(workspace, produto, destino) {
   if (!workspace || !produto || !destino) return "";
   const hash = crypto.createHash("sha256")
     .update(JSON.stringify([workspace, produto, destino]))
@@ -35,6 +72,42 @@ function reservaPostgres() {
         [clienteId, filaItemId]
       );
       return r.rows?.[0] || null;
+    },
+    async consultarAncoradasAtivas(client, { clienteId, destinoId, escopo, chaveAtual, chaveLegada }) {
+      const r = await client.query(`WITH ativas AS MATERIALIZED (
+          SELECT fila_item_id, claim_token FROM fila_claims_ativos
+          WHERE cliente_id=$1 AND left(fila_item_id, 51)=$3 AND lease_expires_at>NOW()
+            AND length(fila_item_id)=83 AND left(fila_item_id, 19)='ofertas-v2-duravel:'
+            AND fila_item_id<>$4 AND fila_item_id<>$6
+          ORDER BY lease_expires_at, fila_item_id LIMIT $5
+        )
+        SELECT CASE WHEN COUNT(vinculo.item_payload) = 1 THEN jsonb_agg(vinculo.item_payload)->0 END AS item_payload
+        FROM ativas a
+        LEFT JOIN LATERAL (
+          SELECT jsonb_build_object(
+            'clienteId', COALESCE(q.item_payload->'clienteId', q.item_payload->'workspaceId'),
+            'marketplace', q.item_payload->'marketplace', 'linkOriginal', q.item_payload->'linkOriginal',
+            'titulo', q.item_payload->'titulo', 'metadata', jsonb_build_object(
+              'jobId', q.item_payload #> '{metadata,jobId}', 'eventoId', q.item_payload #> '{metadata,eventoId}',
+              'provaTituloTecnicoValidada', q.item_payload #> '{metadata,provaTituloTecnicoValidada}',
+              'identidadeCanonicaMl', q.item_payload #> '{metadata,identidadeCanonicaMl}')) AS item_payload
+          FROM engine_universal_fanout_owners o
+          JOIN engine_universal_queue_items q ON q.id=o.queue_item_id
+            AND q.workspace_id=o.workspace_id AND q.operation_epoch_started_at=o.operation_epoch_started_at
+          WHERE o.workspace_id=$1 AND o.destination_id=$2 AND o.commercial_reservation_key=a.fila_item_id
+            AND o.reservation_token=a.claim_token LIMIT 2
+        ) vinculo ON TRUE GROUP BY a.fila_item_id`,
+      [clienteId, destinoId, escopo, chaveAtual, LIMITE_RESERVAS_CATALOGO + 1, chaveLegada]);
+      return r.rows;
+    },
+    async consultarVinculoHistorico(client, { clienteId, destinoId, chave, token }) {
+      const r = await client.query(`SELECT q.item_payload
+        FROM engine_universal_fanout_owners o
+        JOIN engine_universal_queue_items q ON q.id=o.queue_item_id
+          AND q.workspace_id=o.workspace_id AND q.operation_epoch_started_at=o.operation_epoch_started_at
+        WHERE o.workspace_id=$1 AND o.destination_id=$2 AND o.commercial_reservation_key=$3
+          AND o.reservation_token=$4 LIMIT 2`, [clienteId, destinoId, chave, token]);
+      return r.rows.length === 1 ? r.rows[0].item_payload : null;
     },
     async carregarOwnerTarget(client, { ownerId, clienteId, destinoId,
       targetId, leaseToken, smokeGateId = null }) {
@@ -139,6 +212,25 @@ function criarCoordenadorEnvioProdutoDestino({ advisory, reserva = reservaPostgr
     throw new Error("ofertas_v2_advisory_invalido");
   }
 
+  async function liberar(estado, dados) {
+    const catalogo = estado?.claimCatalogo;
+    if (!catalogo) return advisory.finalizar(estado, dados);
+    estado.claimCatalogo = null;
+    const liberacao = await advisory.finalizar(catalogo, dados);
+    if (liberacao?.liberacao !== "liberado" && liberacao?.liberado !== true) {
+      // Descartar a sessao impede devolver ao pool um lock de catalogo residual.
+      const client = estado.handle?.client;
+      if (estado.handle?.clientProprio && typeof client?.release === "function") {
+        client.release(new Error("historical_catalog_lock_release_failed"));
+        estado.handle = null;
+        return { liberacao: "erro" };
+      }
+      await advisory.finalizar(estado, dados);
+      return { liberacao: "erro" };
+    }
+    return advisory.finalizar(estado, dados);
+  }
+
   async function adquirir({ clienteId = "", oferta = {}, destinoId = "",
     fanoutOwnerId = "", targetId = null, targetLeaseToken = "",
     smokeGateId = null } = {}) {
@@ -150,19 +242,19 @@ function criarCoordenadorEnvioProdutoDestino({ advisory, reserva = reservaPostgr
     });
     if (estado?.resultado !== "adquirido") return estado;
     try {
-      const chaveReserva = filaItemId.replace("ofertas-v2-par:", "ofertas-v2-duravel:");
+      const chaveReserva = chaveDuravel(filaItemId);
       const ownerRequested = Boolean(fanoutOwnerId || targetId || targetLeaseToken);
       if (ownerRequested && (!fanoutOwnerId || !targetId || !targetLeaseToken ||
           typeof reserva.carregarOwnerTarget !== "function" ||
           typeof reserva.consultarDetalhe !== "function")) {
-        await advisory.finalizar(estado, { statusFinal: "owner_incompleto" });
+        await liberar(estado, { statusFinal: "owner_incompleto" });
         return { resultado: "owner_incompleto", filaItemId };
       }
       const owner = ownerRequested ? await reserva.carregarOwnerTarget(
         estado.handle?.client, { ownerId: fanoutOwnerId, clienteId, destinoId,
           targetId, leaseToken: targetLeaseToken, smokeGateId }) : null;
       if (ownerRequested && !owner) {
-        await advisory.finalizar(estado, { statusFinal: "owner_target_invalido" });
+        await liberar(estado, { statusFinal: "owner_target_invalido" });
         return { resultado: "owner_target_invalido", filaItemId };
       }
       const active = ownerRequested
@@ -172,7 +264,7 @@ function criarCoordenadorEnvioProdutoDestino({ advisory, reserva = reservaPostgr
       if (active && ownerRequested &&
           owner.commercial_reservation_key === chaveReserva &&
           String(owner.reservation_token) === String(active.claim_token)) {
-        await advisory.finalizar(estado, { statusFinal: "mesmo_fanout_owner" });
+        await liberar(estado, { statusFinal: "mesmo_fanout_owner" });
         return { resultado: "adquirido", filaItemId, chaveReserva, clienteId,
           destinoId,
           fanoutOwnerId, ownerContinuation: true,
@@ -180,20 +272,57 @@ function criarCoordenadorEnvioProdutoDestino({ advisory, reserva = reservaPostgr
           handle: null };
       }
       if (active) {
-        await advisory.finalizar(estado, { statusFinal: "envio_recente_ou_indeterminado" });
+        await liberar(estado, { statusFinal: "envio_recente_ou_indeterminado" });
         return { resultado: "ocupado_recente", filaItemId };
+      }
+      const ancora = identidadeMlAncorada(oferta);
+      const catalogo = ancora?.catalogId || catalogoMlCandidato(oferta);
+      if (catalogo) {
+        const catalogoId = chavePar(clienteId, chaveProdutoMl(catalogo), destinoId);
+        const client = estado.handle?.client;
+        if (catalogoId !== filaItemId) {
+          const claimCatalogo = await advisory.adquirir({ clienteId, client,
+            oferta: { id: catalogoId, clienteId, origemFluxo: "optimus" } });
+          if (claimCatalogo?.resultado !== "adquirido") {
+            await liberar(estado, { statusFinal: "reserva_historica_em_verificacao" });
+            return { resultado: claimCatalogo?.resultado === "ocupado" ? "ocupado" : "reserva_indisponivel", filaItemId };
+          }
+          estado.claimCatalogo = claimCatalogo;
+        }
+        const chave = chaveDuravel(catalogoId);
+        const atual = ancora || selecaoMlReservaHistorica(oferta);
+        const historica = ancora && await reserva.consultarDetalhe(client, clienteId, chave);
+        if (historica) {
+          const original = await reserva.consultarVinculoHistorico(client, { clienteId, destinoId,
+            chave, token: historica.claim_token });
+          const anterior = texto(original?.clienteId || original?.workspaceId) === clienteId
+            ? selecaoMlReservaHistorica(original) : null;
+          if (compararSelecaoMl(atual, anterior) !== false) {
+            await liberar(estado, { statusFinal: "envio_recente_ou_indeterminado" });
+            return { resultado: "ocupado_recente", filaItemId };
+          }
+        }
+        const ancoradas = await reserva.consultarAncoradasAtivas(client, { clienteId, destinoId,
+          escopo: chave.slice(0, -32), chaveAtual: chaveReserva, chaveLegada: chave });
+        if (ancoradas.length > LIMITE_RESERVAS_CATALOGO || ancoradas.some(({ item_payload: item }) => {
+          const anterior = texto(item?.clienteId || item?.workspaceId) === clienteId ? identidadeMlAncorada(item) : null;
+          return compararSelecaoMl(atual, anterior) !== false;
+        })) {
+          await liberar(estado, { statusFinal: "envio_recente_ou_indeterminado" });
+          return { resultado: "ocupado_recente", filaItemId };
+        }
       }
       // A previously bound owner without its matching live reservation must
       // not silently create another commercial dispatch.
       if (ownerRequested && owner.reservation_token) {
-        await advisory.finalizar(estado, { statusFinal: "owner_reservation_missing" });
+        await liberar(estado, { statusFinal: "owner_reservation_missing" });
         return { resultado: "owner_reservation_missing", filaItemId };
       }
       return { ...estado, filaItemId, chaveReserva, clienteId, destinoId,
         fanoutOwnerId: ownerRequested ? fanoutOwnerId : "",
         ownerContinuation: false, reservaToken: "", advisoryLiberado: false };
     } catch {
-      await advisory.finalizar(estado, { statusFinal: "reserva_indisponivel" });
+      await liberar(estado, { statusFinal: "reserva_indisponivel" });
       return { resultado: "reserva_indisponivel", filaItemId };
     }
   }
@@ -223,7 +352,7 @@ function criarCoordenadorEnvioProdutoDestino({ advisory, reserva = reservaPostgr
       estado.reservaToken = token;
     } finally {
       // A reserva duravel, nao o lock de sessao, protege o par durante rede.
-      const liberacao = await advisory.finalizar(estado, { statusFinal: token ? "reservado" : "reserva_indisponivel" });
+      const liberacao = await liberar(estado, { statusFinal: token ? "reservado" : "reserva_indisponivel" });
       estado.advisoryLiberado = liberacao?.liberacao === "liberado" || liberacao?.liberado === true;
       estado.handle = null;
     }
@@ -276,7 +405,7 @@ function criarCoordenadorEnvioProdutoDestino({ advisory, reserva = reservaPostgr
 
   async function finalizar(estado, dados = {}) {
     if (estado?.advisoryLiberado) return { liberacao: "liberado" };
-    return advisory.finalizar(estado, dados);
+    return liberar(estado, dados);
   }
 
   return { adquirir, prepararTransporte, descartarSemTransporte,

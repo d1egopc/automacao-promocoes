@@ -130,6 +130,22 @@ test("somente os quatro arquivos exatos da extensão ficam fora do overlay backe
   } finally { cleanup(repo); }
 });
 
+test("CI da âncora reconhece o parser ML sem autorizar overlay", () => {
+  const repo = createRepo();
+  try {
+    const file = "optimus-capture/local-worker/mercadolivre-identity.js";
+    const destino = path.join(repo.dir, file);
+    fs.mkdirSync(path.dirname(destino), { recursive: true });
+    fs.writeFileSync(destino, "module.exports = true;\n");
+    const source = commit(repo, "anchor-parser-ci");
+    assert.equal(prepare(repo, source).body.validation, "BLOCKED");
+    const plan = require(guardian).buildPlan(repo.dir, repo.base, source, { ciUniversalAnchor: true });
+    assert.equal(plan.validation, "PASS");
+    assert.equal(plan.deployMode, "none");
+    assert.deepEqual(plan.runtimeFiles, [file]);
+  } finally { cleanup(repo); }
+});
+
 test("dependência e Dockerfile exigem fluxo futuro de imagem completa", () => {
   for (const relative of ["package.json", "package-lock.json", "Dockerfile"]) {
     const repo = createRepo();

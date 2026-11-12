@@ -314,7 +314,7 @@ function parseDiff(repo, base, source) {
   });
 }
 
-function buildPlan(repo, base, source, { releaseMode = "", fullImageProfile = RADAR_INGRESS_FULL_IMAGE_PROFILE } = {}) {
+function buildPlan(repo, base, source, { releaseMode = "", ciUniversalAnchor = false, fullImageProfile = RADAR_INGRESS_FULL_IMAGE_PROFILE } = {}) {
   const head = git(repo, ["rev-parse", "HEAD"]).stdout.trim();
   if (head !== source) throw new Error(`source_checkout_mismatch:${head}`);
   const dirt = git(repo, ["status", "--porcelain=v1"]).stdout.trim();
@@ -348,7 +348,9 @@ function buildPlan(repo, base, source, { releaseMode = "", fullImageProfile = RA
       blocked.push({ file, stage: "classify", cause: "full_image_build_not_supported_by_guardian_v1" });
       continue;
     }
-    if (!isOverlayRuntime(file) && ((!(balancedProfile || bootstrapObservationProfile)) || file !== "scripts/apply-baileys-retry-hotfix.cjs")) {
+    // Validate the backend dependency in CI without approving it for a deploy plan.
+    const ciAnchorParser = ciUniversalAnchor && file === "optimus-capture/local-worker/mercadolivre-identity.js";
+    if (!ciAnchorParser && !isOverlayRuntime(file) && ((!(balancedProfile || bootstrapObservationProfile)) || file !== "scripts/apply-baileys-retry-hotfix.cjs")) {
       blocked.push({ file, stage: "classify", cause: "unknown_or_disallowed_runtime_path" });
       continue;
     }
@@ -385,7 +387,7 @@ function buildPlan(repo, base, source, { releaseMode = "", fullImageProfile = RA
     sourceSha: source,
     baseSha: base,
     validation: blocked.length ? "BLOCKED" : "PASS",
-    deployMode: releaseMode === "full_image" ? "full_image" : bootstrapObservationProfile ? "baileys_bootstrap_observation" : balancedProfile ? "baileys_balanced_buffer_patch" : bufferProfile ? "baileys_buffer_patch" : runtimeFiles.length ? "overlay" : "none",
+    deployMode: ciUniversalAnchor ? "none" : releaseMode === "full_image" ? "full_image" : bootstrapObservationProfile ? "baileys_bootstrap_observation" : balancedProfile ? "baileys_balanced_buffer_patch" : bufferProfile ? "baileys_buffer_patch" : runtimeFiles.length ? "overlay" : "none",
     runtimeFiles,
     ignoredFiles,
     blocked
@@ -624,8 +626,8 @@ function executeSpec(spec, cwd, repoNodeModules) {
   return run(spec.command, spec.args, { cwd, env });
 }
 
-function validate(repo, base, source, { releaseMode = "" } = {}) {
-  const plan = buildPlan(repo, base, source, { releaseMode });
+function validate(repo, base, source, { releaseMode = "", ciUniversalAnchor = false } = {}) {
+  const plan = buildPlan(repo, base, source, { releaseMode, ciUniversalAnchor });
   if (plan.blocked.length) return { ...plan, result: "BLOCKED", tests: [] };
   const specs = testMatrix(plan);
   const results = [];
@@ -760,7 +762,7 @@ function main() {
     return;
   }
   if (command === "validate") {
-    const report = validate(repo, base, source, { releaseMode: args["release-mode"] || "" });
+    const report = validate(repo, base, source, { releaseMode: args["release-mode"] || "", ciUniversalAnchor: args["ci-universal-anchor"] === true });
     if (args.report) fs.writeFileSync(args.report, `${JSON.stringify(report, null, 2)}\n`);
     console.log(JSON.stringify(report, null, 2));
     if (report.result === "FAIL" || report.result === "BLOCKED") process.exitCode = 1;
