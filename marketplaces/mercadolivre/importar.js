@@ -9,6 +9,8 @@ const {
   htmlDecode,
   extrairMeta,
   extrairJsonLd,
+  urlCatalogoTecnicoMercadoLivre,
+  extrairCatalogoTecnicoMercadoLivre,
   limparPreco,
   corrigirImagemUrl
 } = require("./utils");
@@ -687,21 +689,28 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
       }));
     }
 
-    const jsonLd = extrairJsonLd(html);
-    const tituloJsonLd = jsonLd?.name || "";
+    const exigirProvaCatalogo = deps.exigirProvaCatalogoTecnico === true && Boolean(urlCatalogoTecnicoMercadoLivre(url));
+    const catalogoTecnico = exigirProvaCatalogo && response.ok === true
+      ? extrairCatalogoTecnicoMercadoLivre({ html, entrada: url, final: response.url })
+      : null;
+    const jsonLd = exigirProvaCatalogo ? null : extrairJsonLd(html);
+    const htmlComercial = exigirProvaCatalogo ? "" : html;
+    const tituloJsonLd = catalogoTecnico?.titulo || jsonLd?.name || "";
     const tituloOg = extrairMeta(html, "og:title");
     const tituloTwitter = extrairMeta(html, "twitter:title");
     const tituloHtml = extrairValorMlHtml(html, ["poly_component_title", "name", "title"]);
     const precoAuditoriaBruto =
       jsonLd?.offers?.price ||
-      extrairMeta(html, "product:price:amount") ||
-      extrairMeta(html, "og:price:amount") ||
-      extrairPrecoMlHtml(html) ||
+      extrairMeta(htmlComercial, "product:price:amount") ||
+      extrairMeta(htmlComercial, "og:price:amount") ||
+      extrairPrecoMlHtml(htmlComercial) ||
       "";
-    const imagemJsonLd = Array.isArray(jsonLd?.image) ? jsonLd.image[0] : jsonLd?.image;
-    const imagemOg = extrairMeta(html, "og:image");
-    const imagemTwitter = extrairMeta(html, "twitter:image");
-    const imagensMercadoLivre = extrairCandidatosImagemMercadoLivre({ html, jsonLd, imagemOg, imagemTwitter });
+    const imagemJsonLd = exigirProvaCatalogo ? catalogoTecnico?.imagem : (Array.isArray(jsonLd?.image) ? jsonLd.image[0] : jsonLd?.image);
+    const imagemOg = exigirProvaCatalogo ? "" : extrairMeta(html, "og:image");
+    const imagemTwitter = exigirProvaCatalogo ? "" : extrairMeta(html, "twitter:image");
+    const imagensMercadoLivre = extrairCandidatosImagemMercadoLivre(exigirProvaCatalogo
+      ? { jsonLd: imagemJsonLd ? { image: imagemJsonLd } : null }
+      : { html, jsonLd, imagemOg, imagemTwitter });
     const imagemCandidataPrincipalSegura = candidatoImagemPrincipalSeguroMercadoLivre(
       imagensMercadoLivre.imagemCandidatos
     );
@@ -780,6 +789,11 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
       return null;
     }
 
+    if (exigirProvaCatalogo && (!catalogoTecnico || temBloqueioAuditoria)) {
+      perf.fim("catalogo_identidade_tecnica_nao_confirmada");
+      return null;
+    }
+
     perf.etapa("download_html", {
       tamanhoHtml: html.length
     });
@@ -825,14 +839,14 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
     let precoAntigo = "";
 
     const descontoMatch =
-      html.match(/(\d{1,2})\s*%\s*OFF/i) ||
-      html.match(/"discount_rate"\s*:\s*(\d{1,2})/i) ||
-      html.match(/"discountPercentage"\s*:\s*(\d{1,2})/i) ||
-      html.match(/(\d{1,2})\s*%\s*de desconto/i);
+      htmlComercial.match(/(\d{1,2})\s*%\s*OFF/i) ||
+      htmlComercial.match(/"discount_rate"\s*:\s*(\d{1,2})/i) ||
+      htmlComercial.match(/"discountPercentage"\s*:\s*(\d{1,2})/i) ||
+      htmlComercial.match(/(\d{1,2})\s*%\s*de desconto/i);
     const descontoReal = descontoMatch ? Number(descontoMatch[1]) : 0;
-    const cupomHtml = extrairCupomMlHtml(html);
-    const beneficiosHtml = extrairBeneficiosMlHtml(html);
-    const parcelamento = extrairParcelamentoMlHtml(html);
+    const cupomHtml = extrairCupomMlHtml(htmlComercial);
+    const beneficiosHtml = extrairBeneficiosMlHtml(htmlComercial);
+    const parcelamento = extrairParcelamentoMlHtml(htmlComercial);
 
     if (
       Number.isFinite(precoNumero) &&
@@ -1001,6 +1015,11 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
       marketplace: "mercadolivre",
       titulo: produtoComFallbackRadar.titulo,
       tituloFonteOficial: produtoComFallbackRadar.tituloFonteOficial || "",
+      ...(catalogoTecnico ? { provaCatalogoTecnicoMl: {
+        catalogId: urlCatalogoTecnicoMercadoLivre(url),
+        urlFinal: response.url,
+        titulo: catalogoTecnico.titulo
+      } } : {}),
       nome: produtoComFallbackRadar.nome || produtoComFallbackRadar.titulo,
       precoAntigo: produtoComFallbackRadar.precoAntigo || precoAntigo,
       precoOriginal: produtoComFallbackRadar.precoOriginal || produtoComFallbackRadar.precoAntigo || precoAntigo,

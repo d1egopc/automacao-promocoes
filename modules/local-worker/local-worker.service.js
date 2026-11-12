@@ -508,8 +508,14 @@ function criarLocalWorkerService(opcoes = {}) {
     const pid = texto(productId).toUpperCase();
     const { urlCatalogo } = require("../../optimus-capture/local-worker/mercadolivre-identity");
     let catalogo;
-    try { if (vinculo) catalogo = urlCatalogo(sourceUrl); } catch (_) { return { ok: false, motivo: "task_ml_identity_invalida" }; }
+    // A sanitized catalog URL would lose the selected listing. Only the
+    // occurrence-bound path can enqueue identity tasks for catalogs.
+    const { mlWorkEnrichmentAtivo } = require("../engine/importer/ml-work-enrichment-shadow");
+    try {
+      if (vinculo || mlWorkEnrichmentAtivo({ deps: opcoes })) catalogo = urlCatalogo(sourceUrl);
+    } catch (_) { return { ok: false, motivo: "task_ml_identity_invalida" }; }
     if (catalogo) {
+      if (!vinculo) return { ok: false, motivo: "task_ml_identity_invalida" };
       const agoraMs = agora().getTime();
       const ttlMs = Math.min(15 * 60_000, Number(vinculo?.deadline) - agoraMs);
       const chave = texto(vinculo?.chave);

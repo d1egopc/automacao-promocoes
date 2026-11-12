@@ -14,6 +14,8 @@ const {
   buscarImagemOficialMercadoLivrePorMlb
 } = require("../importer.service");
 const { montarProvaTituloTecnico } = require("./prova-identidade-tecnica");
+const { mlWorkEnrichmentAtivo } = require("../ml-work-enrichment-shadow");
+const { urlCatalogoTecnicoMercadoLivre, urlRedirectDiretoCatalogoMl } = require("../../../../marketplaces/mercadolivre/utils");
 const { resolverPrecoSemantico } = require("../../../radar/preco-semantico");
 
 function resumoTemplateInputAuditoria(templateInput = {}) {
@@ -1484,7 +1486,7 @@ function validarParametroProdutoEstruturadoMercadoLivre(resolucaoRadar = {}, res
   };
 }
 
-function validarMlbForteConfirmadoMercadoLivre({ urlOriginalEngine = "", resolucaoProduto = {}, mlbProduto = "", mlbRevalidado = "" } = {}) {
+function validarMlbForteConfirmadoMercadoLivre({ urlOriginalEngine = "", resolucaoProduto = {}, mlbProduto = "", mlbRevalidado = "", provaCatalogo } = {}) {
   if (!mlbProduto || !mlbRevalidado || mlbProduto !== mlbRevalidado) return false;
 
   if (isUrlProdutoMercadoLivre(urlOriginalEngine) && extrairMlbMercadoLivre(urlOriginalEngine) === mlbRevalidado) {
@@ -1492,6 +1494,9 @@ function validarMlbForteConfirmadoMercadoLivre({ urlOriginalEngine = "", resoluc
   }
 
   const resolucaoRadar = resolucaoProduto.resolucaoRadar || {};
+  if (provaCatalogo?.catalogId === mlbRevalidado &&
+      [urlRedirectDiretoCatalogoMl(resolucaoRadar, urlOriginalEngine), resolucaoProduto.urlProduto, provaCatalogo.urlFinal]
+        .every(url => urlCatalogoTecnicoMercadoLivre(url) === mlbRevalidado)) return true;
   const provaTransporte = provaTransporteShowProductMercadoLivre(resolucaoProduto);
   if (provaTransporte?.mlbItem === mlbRevalidado) return true;
   const provaValida = validarProvaSocialMercadoLivre(resolucaoRadar);
@@ -1772,8 +1777,10 @@ function avaliarIdentidadeCanonicaMercadoLivre({ urlOriginalEngine = "", linkEsc
     produto.linkOriginal,
     produto.permalink
   ].filter(Boolean).join(" "));
-  const tituloRadar = extrairTituloRadarMercadoLivre(evento);
   const tituloImportador = textoMercadoLivre(produto.titulo || produto.nome || "");
+  const provaCatalogo = produto.provaCatalogoTecnicoMl;
+  const tituloRadar = provaCatalogo?.catalogId === mlbRevalidado &&
+    provaCatalogo?.titulo === tituloImportador ? "" : extrairTituloRadarMercadoLivre(evento);
   const precoRadar = extrairPrecoRadarMercadoLivre(evento);
   const precoImportador = numeroMercadoLivre(produto.precoAtual || produto.preco);
   const similaridade = similaridadeTituloMercadoLivre(tituloRadar, tituloImportador);
@@ -1784,7 +1791,8 @@ function avaliarIdentidadeCanonicaMercadoLivre({ urlOriginalEngine = "", linkEsc
     urlOriginalEngine,
     resolucaoProduto,
     mlbProduto,
-    mlbRevalidado
+    mlbRevalidado,
+    provaCatalogo
   });
   const transporteShowProductConfirmado = Boolean(
     provaTransporteShowProductMercadoLivre(resolucaoProduto)?.linkResolvidoTecnico &&
@@ -2178,6 +2186,7 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
   const textoOriginalRadar = String(evento.texto_original || evento.textoOriginal || "").trim();
   let falhaImportadorMercadoLivre = null;
   let produto = await deps.importarMercadoLivre(urlImportador, clienteId, {
+    exigirProvaCatalogoTecnico: mlWorkEnrichmentAtivo({ deps }),
     getIntegracaoCliente: deps.getIntegracaoCliente,
     gerarLinkAfiliadoMercadoLivre: deps.gerarLinkAfiliadoMercadoLivre,
     textoOriginal: textoOriginalRadar,
@@ -2420,7 +2429,8 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
     thumbnailUrl: imagensMercadoLivre.thumbnailUrl,
     picture_url: imagensMercadoLivre.picture_url,
     statusHttp: produtoComImagemSocialResolvida.statusHttp ?? null,
-    linkOriginal: produtoComImagemSocialResolvida.linkOriginal || urlOriginalEngine,
+    linkOriginal: produtoComImagemSocialResolvida.provaCatalogoTecnicoMl
+      ? urlOriginalEngine : (produtoComImagemSocialResolvida.linkOriginal || urlOriginalEngine),
     linkExpandido: produtoComImagemSocialResolvida.urlFinal || linkExpandidoEngine || urlImportador,
     linkAfiliado,
     categoria: resolverCategoriaMercadoLivre(produtoComImagemSocialResolvida),

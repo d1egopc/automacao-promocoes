@@ -101,6 +101,7 @@ const {
 } = require("./ml-work-enrichment-shadow");
 const { createHash } = require("node:crypto");
 const { urlCatalogo, mesmaSelecaoCatalogo } = require("../../../optimus-capture/local-worker/mercadolivre-identity");
+const { urlCatalogoTecnicoMercadoLivre } = require("../../../marketplaces/mercadolivre/utils");
 const { validarResultadoMlIdentity, ML_IDENTITY_RESULT_TTL_MS } = require("../../local-worker/ml-identity.contract");
 const { montarProvaTituloTecnico, vincularOcorrenciaProduto } = require("./adapters/prova-identidade-tecnica");
 const {
@@ -1188,9 +1189,16 @@ function validarProvaTituloTecnico(resultado = {}, produto = {}, job = {}, ancor
   if (adapter === "mercadolivre") {
     const identidade = metadata.identidadeCanonicaMl || metadata.revalidacaoMeliLa || {};
     const produtoIdCanonico = `MLB${productId.match(/(?:^|\b)MLB-?(\d{6,})\b/i)?.[1] || ""}`.toUpperCase();
-    const canonicalMlb = extrairIdMercadoLivreDaUrl(canonicalUrl, ancoraAtiva);
-    const outputMlb = extrairIdMercadoLivreDaUrl(adapterCanonicalUrl, ancoraAtiva);
-    const anchorMlb = extrairIdMercadoLivreDaUrl(anchorUrl, ancoraAtiva);
+    const catalogoTecnico = produto.provaCatalogoTecnicoMl;
+    const catalogoConfirmado = ancoraAtiva && source === "jsonld.name" &&
+      catalogoTecnico?.catalogId === produtoIdCanonico && catalogoTecnico.titulo === title &&
+      [catalogoTecnico.urlFinal, canonicalUrl, adapterCanonicalUrl].every(url =>
+        urlCatalogoTecnicoMercadoLivre(url) === produtoIdCanonico);
+    const extrairIdDaProva = url => (catalogoConfirmado && urlCatalogoTecnicoMercadoLivre(url)) ||
+      extrairIdMercadoLivreDaUrl(url, ancoraAtiva);
+    const canonicalMlb = extrairIdDaProva(canonicalUrl);
+    const outputMlb = extrairIdDaProva(adapterCanonicalUrl);
+    const anchorMlb = extrairIdDaProva(anchorUrl);
     const fontesOficiais = new Set(["jsonld.name", "og:title", "twitter:title", "html.title"]);
     const apiProof = produto.provaTituloOficial || {};
     if (source === "api_mercadolibre.items.title" && apiProof.fonte === source &&
@@ -1201,7 +1209,7 @@ function validarProvaTituloTecnico(resultado = {}, produto = {}, job = {}, ancor
     if (identidade.status !== "consistente" || identidade.mlbForteConfirmado !== true ||
         identidade.mlbProduto !== identidade.mlbRevalidado || identidade.mlbRevalidado !== produtoIdCanonico ||
         normalizarTexto(identidade.urlOriginal || "") !== anchorUrl ||
-        ([anchorMlb, extrairIdMercadoLivreDaUrl(metadataOriginal, ancoraAtiva), extrairIdMercadoLivreDaUrl(resultOriginal, ancoraAtiva)]
+        ([anchorMlb, extrairIdDaProva(metadataOriginal), extrairIdDaProva(resultOriginal)]
           .some(id => id && id !== produtoIdCanonico)) ||
         normalizarTexto(identidade.urlCanonicaRevalidada || "") !== canonicalUrl ||
         canonicalMlb !== produtoIdCanonico || outputMlb !== produtoIdCanonico || identityFallbackMercadoLivre(metadata, produto) ||
