@@ -864,18 +864,39 @@ jobs:
           base_tag="local/optimus-deploy-base:ci-$GITHUB_RUN_ID"
           candidate="local/optimus-anchor-overlay:ci-$GITHUB_RUN_ID"
           fixture="$(mktemp -d)"
-          mkdir -p "$fixture/base/$(dirname "$parser")"
-          git show "$base:$parser" > "$fixture/base/$parser"
-          git show "$GITHUB_SHA:$parser" | sha256sum | cut -d" " -f1 > "$fixture/expected.sha"
-          git show "$base:$parser" | sha256sum | cut -d" " -f1 > "$fixture/base.sha"
-          if cmp -s "$fixture/expected.sha" "$fixture/base.sha"; then
-            echo "Parser candidate must differ from baseline" >&2
+          mkdir -p "$fixture/base"
+          git archive "$base" | tar -x -C "$fixture/base"
+          test -f "$fixture/base/Dockerfile"
+          if [[ -f "$fixture/base/$parser" ]]; then
+            echo "BASE_PARSER_ORIGIN=clean_git_archive:$base:$parser"
+            sha256sum "$fixture/base/$parser" | cut -d" " -f1 > "$fixture/base.sha"
+          else
+            echo "BASE_PARSER_ORIGIN=absent_from_clean_git_archive:$base"
+            : > "$fixture/base.sha"
+          fi
+          if [[ ! -s "$fixture/base.sha" ]]; then
+            echo "Baseline parser is absent from the clean Git base; refusing to synthesize a prior parser" >&2
             exit 1
           fi
-          printf '%s\n' "FROM node:24-bookworm-slim" "WORKDIR /app" "COPY --chown=node:node $parser /app/$parser" "USER node" > "$fixture/base/Dockerfile"
+          git show "$GITHUB_SHA:$parser" > "$fixture/candidate-parser.js"
+          sha256sum "$fixture/candidate-parser.js" | cut -d" " -f1 > "$fixture/expected.sha"
+          test "$(sha256sum "$parser" | cut -d" " -f1)" = "$(cat "$fixture/expected.sha")"
           node scripts/guardian-v1.cjs prepare --base "$base" --source "$GITHUB_SHA" --release-mode overlay > "$fixture/plan.json"
+          node -e '
+            const fs = require("node:fs");
+            const plan = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+            const parser = process.argv[2];
+            if (plan.validation !== "PASS" || !plan.runtimeFiles.includes(parser)) process.exit(1);
+            if (plan.runtimeFiles.some(file => file.startsWith("optimus-capture/") && file !== parser)) process.exit(2);
+            if (plan.runtimeFiles.includes("optimus-capture/local-worker/task-runner.js")) process.exit(3);
+            console.log("OVERLAY_CAPTURE_ALLOWLIST=" + parser);
+          ' "$fixture/plan.json" "$parser"
           node scripts/guardian-v1.cjs build-dockerfile --base "$base" --source "$GITHUB_SHA" --base-tag "$base_tag" > "$fixture/Dockerfile"
           grep -Fx "COPY --chown=node:node $parser /app/$parser" "$fixture/Dockerfile"
+          if awk -v expected="/app/$parser" '$1 == "COPY" && $4 ~ /^\/app\/optimus-capture\// && $4 != expected { found=1 } END { exit !found }' "$fixture/Dockerfile"; then
+            echo "Unexpected Optimus Capture path in overlay" >&2
+            exit 1
+          fi
           if grep -F "COPY --chown=node:node optimus-capture/local-worker/task-runner.js" "$fixture/Dockerfile"; then
             echo "Chrome task runner must stay outside the overlay" >&2
             exit 1
@@ -884,6 +905,7 @@ jobs:
           docker build --pull=false --network=none -f "$fixture/Dockerfile" -t "$candidate" .
           test "$(docker run --rm --network=none "$base_tag" sha256sum "/app/$parser" | cut -d" " -f1)" = "$(cat "$fixture/base.sha")"
           test "$(docker run --rm --network=none "$candidate" sha256sum "/app/$parser" | cut -d" " -f1)" = "$(cat "$fixture/expected.sha")"
+          echo "DOCKER_IMAGE_ID=$(docker image inspect "$candidate" --format '{{.Id}}')"
           docker run --rm --network=none "$candidate" node -e '
             const assert = require("node:assert/strict");
             const parser = require("/app/optimus-capture/local-worker/mercadolivre-identity.js");
