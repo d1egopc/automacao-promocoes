@@ -102,7 +102,7 @@ function validarResultadoMlIdentity(payload = {}, opcoes = {}) {
   if (!Number.isFinite(collectedAt.getTime()) || collectedAt.getTime() > agoraMs + 30_000 || agoraMs - collectedAt.getTime() >= ttlMs) throw erroContrato("ml_identity_resultado_stale");
 
   let selecao, finalCatalogo, canonicoCatalogo;
-  try {
+  if (opcoes.sourceUrl || prova.catalogId || prova.listingId) try {
     selecao = urlCatalogo(opcoes.sourceUrl);
     finalCatalogo = urlCatalogo(payload.finalUrl || prova.finalUrl);
     canonicoCatalogo = urlCatalogo(payload.canonicalUrl || prova.canonicalUrl);

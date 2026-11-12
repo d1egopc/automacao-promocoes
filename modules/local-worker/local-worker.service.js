@@ -244,8 +244,9 @@ function criarLocalWorkerService(opcoes = {}) {
         provaTecnica
       }, {
         expectedMlb: task.productId,
-        sourceUrl: task.sourceUrl,
-        variationId: task.technicalSlug?.split(":")[1] || "",
+        ...(/^[a-f0-9]{64}:\d{0,30}$/.test(task.technicalSlug || "") ? {
+          sourceUrl: task.sourceUrl, variationId: task.technicalSlug?.split(":")[1] || ""
+        } : {}),
         agoraMs: agora().getTime(),
         ttlMs: ML_IDENTITY_RESULT_TTL_MS
       });
@@ -506,16 +507,18 @@ function criarLocalWorkerService(opcoes = {}) {
 
   async function garantirIdentidadeMercadoLivre({ productId, sourceUrl = "", vinculo, taskId } = {}) {
     const pid = texto(productId).toUpperCase();
-    const { urlCatalogo } = require("../../optimus-capture/local-worker/mercadolivre-identity");
     let catalogo;
-    // A sanitized catalog URL would lose the selected listing. Only the
-    // occurrence-bound path can enqueue identity tasks for catalogs.
-    const { mlWorkEnrichmentAtivo } = require("../engine/importer/ml-work-enrichment-shadow");
-    try {
-      if (vinculo || mlWorkEnrichmentAtivo({ deps: opcoes })) catalogo = urlCatalogo(sourceUrl);
-    } catch (_) { return { ok: false, motivo: "task_ml_identity_invalida" }; }
+    // Only the occurrence-bound path is new. Unbound calls retain legacy URL handling.
+    if (vinculo) {
+      const { urlCatalogo } = require("../../optimus-capture/local-worker/mercadolivre-identity");
+      const { ancoraMlAtiva } = require("../engine/importer/ml-work-enrichment-shadow");
+      if (!ancoraMlAtiva({ clienteId: vinculo.workspaceId, deps: opcoes })) {
+        return { ok: false, motivo: "task_ml_identity_workspace_fora_canario" };
+      }
+      try { catalogo = urlCatalogo(sourceUrl); } catch (_) { /* reject below */ }
+      if (!catalogo) return { ok: false, motivo: "task_ml_identity_invalida" };
+    }
     if (catalogo) {
-      if (!vinculo) return { ok: false, motivo: "task_ml_identity_invalida" };
       const agoraMs = agora().getTime();
       const ttlMs = Math.min(15 * 60_000, Number(vinculo?.deadline) - agoraMs);
       const chave = texto(vinculo?.chave);

@@ -1,5 +1,6 @@
 "use strict";
 const test = require("node:test");
+process.env.ML_WORK_ENRICHMENT_CANARY_CLIENTES = "fixture-a";
 const assert = require("node:assert/strict");
 const { extrairCatalogoTecnicoMercadoLivre } = require("../marketplaces/mercadolivre/utils");
 const alertas = require("../utils/alertas-integracoes");
@@ -77,6 +78,41 @@ test("importador reusa resposta já carregada e conserva o afiliado da workspace
   assert.equal(result.descontoPercentual, "");
 });
 
+test("flag global e allowlist são decisões separadas no adapter ML", async t => {
+  t.mock.method(globalThis, "fetch", async target => {
+    assert.equal(target, url);
+    return { ok: true, status: 200, url, text: async () => html(produto) };
+  });
+  const evento = { id: 202, origem: "radar", origem_tipo: "whatsapp",
+    texto_original: "O melhor achado do dia!\nDe R$ 129,90 por R$ 89,90\n" + url,
+    links_extraidos: [url], metadata: { radarMirror: { preco: { atualCapturado: 89.9, anteriorCapturado: 129.9 } } } };
+  const link = { id: 303, evento_id: evento.id, url_original: url, url_normalizada: url, marketplace_detectado: "mercadolivre" };
+  const rodar = async (clienteId, global) => {
+    const job = { id: 101, evento_id: evento.id, cliente_id: clienteId, marketplace: "mercadolivre" };
+    let pediuProva;
+    const entrada = await importarMercadoLivreEngine({ job, evento, links: [link], deps: {
+      mlWorkEnrichmentAtivo: global,
+      importarMercadoLivre: async (url, workspace, opcoes) => {
+        assert.equal(workspace, clienteId);
+        pediuProva = opcoes.exigirProvaCatalogoTecnico;
+        return importarMercadoLivre(url, workspace, opcoes);
+      },
+      getIntegracaoCliente: () => ({ credenciais: {} }),
+      gerarLinkAfiliadoMercadoLivre: async () => "https://meli.la/fixture-afiliado"
+    } });
+    return { pediuProva, prova: entrada.metadata?.produto?.provaCatalogoTecnicoMl, titulo: entrada.titulo };
+  };
+  const controle = await rodar("fixture-controle", true);
+  assert.deepEqual(controle, await rodar("fixture-controle", false));
+  assert.equal(controle.pediuProva, false);
+  assert.equal(controle.prova, undefined);
+  assert.equal((await rodar("fixture-a", false)).pediuProva, false);
+  const canario = await rodar("fixture-a", true);
+  assert.equal(canario.pediuProva, true);
+  assert.equal(canario.prova?.catalogId, catalogId);
+  assert.equal(canario.prova?.titulo, title);
+});
+
 test("worker de anúncio só recebe catálogo com seletor validado e vínculo existente", async () => {
   const calls = [];
   const worker = criarLocalWorkerService({
@@ -85,8 +121,13 @@ test("worker de anúncio só recebe catálogo com seletor validado e vínculo ex
     agora: () => new Date(100_000)
   });
   const selected = url + "?pdp_filters=item_id%3A" + listingId;
-  const vinculo = { chave: "a".repeat(64), deadline: 160_000 };
-  assert.equal((await worker.garantirIdentidadeMercadoLivre({ productId: catalogId, sourceUrl: url })).ok, false);
+  const vinculo = { workspaceId: "fixture-a", chave: "a".repeat(64), deadline: 160_000 };
+  // The unbound request keeps the legacy path, even when the global flag is on.
+  assert.equal((await worker.garantirIdentidadeMercadoLivre({ productId: catalogId, sourceUrl: url })).ok, true);
+  assert.equal(calls[0].idempotencyKey, "mercadolivre:" + catalogId + ":ml_identity_v1");
+  calls.length = 0;
+  assert.equal((await worker.garantirIdentidadeMercadoLivre({ productId: listingId, sourceUrl: selected,
+    vinculo: { ...vinculo, workspaceId: "fixture-controle" } })).motivo, "task_ml_identity_workspace_fora_canario");
   assert.equal((await worker.garantirIdentidadeMercadoLivre({ productId: listingId, sourceUrl: selected })).ok, false);
   assert.equal((await worker.garantirIdentidadeMercadoLivre({ productId: catalogId, sourceUrl: selected, vinculo })).ok, false);
   assert.equal(calls.length, 0);

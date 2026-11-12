@@ -7,6 +7,7 @@ const { spawnSync } = require("node:child_process");
 const crypto = require("node:crypto");
 
 const SHA_RE = /^[0-9a-f]{40}$/;
+const ML_SHARED_RUNTIME_PARSER = "optimus-capture/local-worker/mercadolivre-identity.js";
 const SAFE_PATH_RE = /^[A-Za-z0-9._/-]+$/;
 const WINDOWS_BACKEND = "C:\\Users\\Liva D1EGOPC\\Documents\\BACKEND-OFICIAL-2026";
 
@@ -294,7 +295,8 @@ function isNonRuntime(file) {
 }
 
 function isOverlayRuntime(file) {
-  if (file === "index.js") return true;
+  // This exact file is already required by the backend as well as by the extension.
+  if (file === "index.js" || file === ML_SHARED_RUNTIME_PARSER) return true;
   const root = file.split("/", 1)[0];
   return RUNTIME_ROOTS.has(root) && file.includes("/");
 }
@@ -348,9 +350,7 @@ function buildPlan(repo, base, source, { releaseMode = "", ciUniversalAnchor = f
       blocked.push({ file, stage: "classify", cause: "full_image_build_not_supported_by_guardian_v1" });
       continue;
     }
-    // Validate the backend dependency in CI without approving it for a deploy plan.
-    const ciAnchorParser = ciUniversalAnchor && file === "optimus-capture/local-worker/mercadolivre-identity.js";
-    if (!ciAnchorParser && !isOverlayRuntime(file) && ((!(balancedProfile || bootstrapObservationProfile)) || file !== "scripts/apply-baileys-retry-hotfix.cjs")) {
+    if (!isOverlayRuntime(file) && ((!(balancedProfile || bootstrapObservationProfile)) || file !== "scripts/apply-baileys-retry-hotfix.cjs")) {
       blocked.push({ file, stage: "classify", cause: "unknown_or_disallowed_runtime_path" });
       continue;
     }

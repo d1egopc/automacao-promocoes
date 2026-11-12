@@ -1,4 +1,4 @@
-const { mlWorkEnrichmentAtivo } = require("./ml-work-enrichment-shadow");
+const { ancoraMlAtiva } = require("./ml-work-enrichment-shadow");
 const {
   buscarJobsProntos,
   tentarMarcarImportando,
@@ -393,7 +393,7 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
     temLinkAfiliado: Boolean(resultadoAdapter.linkAfiliado)
   });
 
-  const ancoraAdapter = marketplace === "mercadolivre" && mlWorkEnrichmentAtivo({ deps: contexto.deps })
+  const ancoraAdapter = marketplace === "mercadolivre" && ancoraMlAtiva({ clienteId: job.cliente_id, deps: contexto.deps })
     ? resultadoAdapter.metadata?.linkOriginalEngine : "";
   const linksAncora = ancoraAdapter ? linksResultado.links.filter(item => item.url_original === ancoraAdapter) : [];
   const linkPrincipal = marketplace === "mercadolivre" && linksAncora.length === 1

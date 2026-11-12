@@ -10,7 +10,8 @@ const root = path.resolve(__dirname, "..");
 const guardian = path.join(root, "scripts", "guardian-v1.cjs");
 const fixtureRoot = path.join(root, "tmp", "guardian-v1-test-fixtures");
 
-test.after(() => fs.rmSync(fixtureRoot, { recursive: true, force: true }));
+// Git and file scanners may briefly retain handles to these Windows fixtures.
+test.after(() => fs.rmSync(fixtureRoot, { recursive: true, force: true, maxRetries: 5 }));
 
 function run(command, args, cwd, env = process.env) {
   return spawnSync(command, args, { cwd, env, encoding: "utf8", windowsHide: true });
@@ -47,7 +48,7 @@ function prepare(repo, source) {
 }
 
 function cleanup(repo) {
-  fs.rmSync(repo.dir, { recursive: true, force: true });
+  fs.rmSync(repo.dir, { recursive: true, force: true, maxRetries: 5 });
 }
 
 test("bootstrap localiza o repositório atual sem alterar a árvore", () => {
@@ -130,15 +131,24 @@ test("somente os quatro arquivos exatos da extensão ficam fora do overlay backe
   } finally { cleanup(repo); }
 });
 
-test("CI da âncora reconhece o parser ML sem autorizar overlay", () => {
+test("CI da âncora e overlay incluem somente o parser ML compartilhado", () => {
   const repo = createRepo();
   try {
     const file = "optimus-capture/local-worker/mercadolivre-identity.js";
     const destino = path.join(repo.dir, file);
     fs.mkdirSync(path.dirname(destino), { recursive: true });
     fs.writeFileSync(destino, "module.exports = true;\n");
+    repo.base = commit(repo, "parser-na-base");
+    fs.appendFileSync(destino, "module.exports = false;\n");
+    fs.writeFileSync(path.join(path.dirname(destino), "task-runner.js"), "// somente Chrome\n");
     const source = commit(repo, "anchor-parser-ci");
-    assert.equal(prepare(repo, source).body.validation, "BLOCKED");
+    const release = require(guardian).buildPlan(repo.dir, repo.base, source, { releaseMode: "overlay" });
+    assert.equal(release.validation, "PASS");
+    assert.deepEqual(release.runtimeFiles, [file]);
+    assert.deepEqual(release.ignoredFiles, ["optimus-capture/local-worker/task-runner.js"]);
+    const dockerfile = require(guardian).renderDockerfile(release, "local/optimus-deploy-base:ci");
+    assert.ok(dockerfile.includes("COPY --chown=node:node " + file + " /app/" + file));
+    assert.ok(!dockerfile.includes("task-runner"));
     const plan = require(guardian).buildPlan(repo.dir, repo.base, source, { ciUniversalAnchor: true });
     assert.equal(plan.validation, "PASS");
     assert.equal(plan.deployMode, "none");

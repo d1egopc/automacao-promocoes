@@ -1,6 +1,7 @@
 "use strict";
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
+process.env.ML_WORK_ENRICHMENT_CANARY_CLIENTES = "workspace-a,workspace-b";
 const { randomUUID } = require("node:crypto");
 const { avaliarFrescorPreImporter } = require("../modules/engine/frescor-pre-importer.service");
 const { instalarEstadoIngressReal } = require("../modules/engine/universal-ingress-fence");
@@ -366,6 +367,20 @@ test("PG17, repositório real e UPDATE de retomada real, em esquema descartável
     await pool.query("UPDATE engine_operation_state SET operation_epoch_started_at=$1", [iso(Date.parse(epoch) + 60_000)]);
     assert.equal((await tentarMarcarImportando(f.job.id, pool)).ok, false);
     await pool.query("UPDATE engine_operation_state SET operation_epoch_started_at=$1", [epoch]);
+    process.env.ML_WORK_ENRICHMENT_CANARY_CLIENTES = "workspace-a";
+    try {
+      const soCanario = await buscarJobsProntos({ marketplace: "mercadolivre" });
+      assert.equal(soCanario.ok, true);
+      assert.deepEqual(soCanario.candidatePool.map(j => Number(j.id)), [101]);
+      assert.equal((await tentarMarcarImportando(competidor.job.id, pool)).ok, false);
+      assert.equal(await enriquecerTituloMlPorOcorrencia(competidor), null);
+      // Jobs comuns da workspace de controle continuam pelo claim legado.
+      await prepararEspera(competidor.job.id, {});
+      assert.equal((await tentarMarcarImportando(competidor.job.id, pool)).ok, true);
+      await prepararEspera(competidor.job.id, pendenteB);
+    } finally {
+      process.env.ML_WORK_ENRICHMENT_CANARY_CLIENTES = "workspace-a,workspace-b";
+    }
     const selecao = await buscarJobsProntos({ marketplace: "mercadolivre" });
     assert.equal(selecao.ok, true);
     assert.deepEqual(selecao.candidatePool.map(j => Number(j.id)).sort(), [101, 102]);

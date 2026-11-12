@@ -14,7 +14,7 @@ const {
   buscarImagemOficialMercadoLivrePorMlb
 } = require("../importer.service");
 const { montarProvaTituloTecnico } = require("./prova-identidade-tecnica");
-const { mlWorkEnrichmentAtivo } = require("../ml-work-enrichment-shadow");
+const { ancoraMlAtiva } = require("../ml-work-enrichment-shadow");
 const { urlCatalogoTecnicoMercadoLivre, urlRedirectDiretoCatalogoMl } = require("../../../../marketplaces/mercadolivre/utils");
 const { resolverPrecoSemantico } = require("../../../radar/preco-semantico");
 
@@ -2186,7 +2186,7 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
   const textoOriginalRadar = String(evento.texto_original || evento.textoOriginal || "").trim();
   let falhaImportadorMercadoLivre = null;
   let produto = await deps.importarMercadoLivre(urlImportador, clienteId, {
-    exigirProvaCatalogoTecnico: mlWorkEnrichmentAtivo({ deps }),
+    exigirProvaCatalogoTecnico: ancoraMlAtiva({ clienteId, deps }),
     getIntegracaoCliente: deps.getIntegracaoCliente,
     gerarLinkAfiliadoMercadoLivre: deps.gerarLinkAfiliadoMercadoLivre,
     textoOriginal: textoOriginalRadar,

@@ -94,6 +94,8 @@ const {
   executarOperacaoLocalComTimeout,
   montarMlWorkEnrichmentShadow,
   mlWorkEnrichmentAtivo,
+  clientesCanarioAncoraMl,
+  ancoraMlAtiva,
   prepararMlWorkEnrichmentAtivo,
   aplicarImagemMlWorkCanonica,
   aplicarTituloMlWork,
@@ -660,9 +662,13 @@ async function buscarJobsProntos({ limite = 10, marketplace = "" } = {}) {
   const frescor = sqlFrescorComercialPreImporter("j", "e");
   const params = [];
   const retry = sqlRetryPreImporter("j");
+  const canario = clientesCanarioAncoraMl();
+  const parametroCanario = canario.length ? "$" + params.push(canario) : null;
   const filtros = [
     "j.status = 'pronto_para_importar'",
-    mlWorkEnrichmentAtivo() ? `(${retry.vencido} OR ${sqlConclusaoIdentidadeMl("j")})` : retry.vencido,
+    parametroCanario
+      ? `(${retry.vencido} OR (j.cliente_id = ANY(${parametroCanario}::text[]) AND ${sqlConclusaoIdentidadeMl("j")}))`
+      : retry.vencido,
     sqlFiltroEpochReal("e")
   ];
   const marketplaceExpr = "LOWER(COALESCE(NULLIF(TRIM(marketplace), ''), NULLIF(TRIM(marketplace_detectado), ''), ''))";
@@ -1075,7 +1081,11 @@ function separarResultadoJobsProntos(linhas = []) {
 }
 
 async function tentarMarcarImportando(jobId, client = null) {
-  const conclusao = mlWorkEnrichmentAtivo() ? sqlConclusaoIdentidadeMl("engine_jobs_cliente") : "FALSE";
+  const canario = clientesCanarioAncoraMl();
+  const params = canario.length ? [jobId, canario] : [jobId];
+  const conclusao = canario.length
+    ? `(engine_jobs_cliente.cliente_id = ANY($2::text[]) AND ${sqlConclusaoIdentidadeMl("engine_jobs_cliente")})`
+    : "FALSE";
   const sql = `UPDATE engine_jobs_cliente
         SET status = 'importando', atualizado_em = NOW(),
             metadata = CASE WHEN ${conclusao}
@@ -1094,7 +1104,7 @@ async function tentarMarcarImportando(jobId, client = null) {
       RETURNING id, status`;
   if (client && typeof client.query === "function") {
     try {
-      const resultado = await client.query(sql, [jobId]);
+      const resultado = await client.query(sql, params);
       return {
         ok: resultado.rowCount > 0,
         ignorado: resultado.rowCount === 0,
@@ -1105,7 +1115,7 @@ async function tentarMarcarImportando(jobId, client = null) {
     }
   }
 
-  const resultado = await queryEngine(sql, [jobId]);
+  const resultado = await queryEngine(sql, params);
 
   if (!resultado.ok) return { ok: false, motivo: resultado.motivo, erro: resultado.erro };
   return { ok: resultado.resultado.rowCount > 0, ignorado: resultado.resultado.rowCount === 0 };
@@ -4623,7 +4633,7 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
 
 async function enriquecerTituloMlPorOcorrencia({ job, evento, link, oferta, deps, agoraMs = Date.now() }) {
   const metadata = oferta.metadata || {};
-  if (metadata.adapter !== "mercadolivre" || !mlWorkEnrichmentAtivo({ deps }) ||
+  if (metadata.adapter !== "mercadolivre" || !ancoraMlAtiva({ clienteId: job.cliente_id, deps }) ||
       typeof deps.garantirIdentidadeMercadoLivreLocalWorker !== "function" ||
       validarProvaTituloTecnico(oferta, metadata.produto, job, true)) return null;
   const ancora = vincularOcorrenciaProduto({ job, evento, link, marketplace: "mercadolivre", urlOriginal: metadata.linkOriginalEngine });
@@ -4661,7 +4671,7 @@ async function enriquecerTituloMlPorOcorrencia({ job, evento, link, oferta, deps
   let retorno;
   try {
     retorno = await executarOperacaoLocalComTimeout(() => deps.garantirIdentidadeMercadoLivreLocalWorker({
-      productId: selecao.listingId, sourceUrl: selecao.url, vinculo: { chave, variationId, deadline, epoch }, taskId: anterior?.taskId
+      productId: selecao.listingId, sourceUrl: selecao.url, vinculo: { workspaceId: ancora.workspaceId, chave, variationId, deadline, epoch }, taskId: anterior?.taskId
     }));
   } catch (_) { return pendente(); }
   if (["task_concorrente_nao_localizada", "database_indisponivel"].includes(retorno?.motivo)) return pendente();
@@ -4742,7 +4752,8 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       : "ausente_no_importador"
   });
   const mlWorkAtivoAgora = mlWorkEnrichmentAtivo({ deps });
-  let oferta = normalizarOfertaImportada(ofertaEntrada, job, enriquecimento?.provaValidada, mlWorkAtivoAgora);
+  const ancoraAtiva = ancoraMlAtiva({ clienteId: job.cliente_id, deps });
+  let oferta = normalizarOfertaImportada(ofertaEntrada, job, enriquecimento?.provaValidada, ancoraAtiva);
   if (origemFluxo && !oferta.origemFluxo) oferta = { ...oferta, origemFluxo };
   const comercialClonador = aplicarComercialCapturadoClonador({ oferta, ofertaEntrada, evento, job });
   oferta = comercialClonador.oferta || oferta;
@@ -4944,7 +4955,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     let imagemStatusGateMlWorker = normalizarTexto(oferta.imagemStatus || metadataGateMlWorker.imagemStatus || imagemCanonicaFinal.imagemStatus || "");
     const sourceUrlMlWorker = normalizarTexto(oferta.linkExpandido || oferta.linkOriginal || imagemCanonicaFinal.linkResolvido || "");
     let catalogoMlWorker = false;
-    if (mlWorkAtivoAgora) try { catalogoMlWorker = Boolean(urlCatalogo(sourceUrlMlWorker)); } catch (_) { catalogoMlWorker = true; }
+    if (ancoraAtiva) try { catalogoMlWorker = Boolean(urlCatalogo(sourceUrlMlWorker)); } catch (_) { catalogoMlWorker = true; }
     let identidadeMlWorker = {};
     let produtoIdMlWorker = "";
     let cacheLookupExecutadoMlWorker = false;
@@ -5411,7 +5422,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   }
   const inteligenciaV2 = objetoSeguro(metadataFinal.inteligenciaUniversalV2);
   const gateQualidadeAliExpressImagem = avaliarGateQualidadeAliExpressImagem(oferta, metadataFinal);
-  const gateIdentidadeMercadoLivre = avaliarGateIdentidadeMercadoLivre(oferta, metadataFinal, mlWorkAtivoAgora);
+  const gateIdentidadeMercadoLivre = avaliarGateIdentidadeMercadoLivre(oferta, metadataFinal, ancoraAtiva);
   if (gateQualidadeAliExpressImagem.retida) {
     metadataFinal = {
       ...metadataFinal,
