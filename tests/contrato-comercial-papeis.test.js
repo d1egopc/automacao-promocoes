@@ -90,6 +90,17 @@ for (const titulo of ["Vendido por Loja Oficial no ML", "Vendido por Loja Oficia
     { marketplace: "amazon", titulo: "Echo Dot 5a Geracao" }, { produto: { titulo } }
   ), { titulo: "Echo Dot 5a Geracao", origem: "oferta.titulo" }, "deve usar o próximo título factual");
 }
+for (const titulo of [
+  "Sujeito a alteração de preço/estoque.",
+  "Conheça nossos canais de Ofertas:",
+  "Loja Oficial Maruri no Mercado Livre",
+  "Loja Verificada no Mercado Livre"
+]) {
+  assert.strictEqual(tituloComercialUniversalValido(titulo, { marketplace: "mercadolivre" }), false, titulo);
+}
+for (const titulo of ["Carretilha Maruri Black Tamba BG", "Vibrador de concreto portátil 1500 W"]) {
+  assert.strictEqual(tituloComercialUniversalValido(titulo, { marketplace: "mercadolivre" }), true, titulo);
+}
 assert.strictEqual(tituloComercialUniversalValido("Produto Amazon Echo Dot 5a Geracao"), true,
   "rótulo genérico exato não deve rejeitar título factual com identidade de produto");
 const tituloRecuperadoDoSlug = resolverTituloFactualEngine(

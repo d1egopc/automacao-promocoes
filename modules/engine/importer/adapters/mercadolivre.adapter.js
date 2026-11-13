@@ -17,6 +17,8 @@ const { montarProvaTituloTecnico } = require("./prova-identidade-tecnica");
 const { ancoraMlAtiva } = require("../ml-work-enrichment-shadow");
 const { urlCatalogoTecnicoMercadoLivre, urlRedirectDiretoCatalogoMl } = require("../../../../marketplaces/mercadolivre/utils");
 const { resolverPrecoSemantico } = require("../../../radar/preco-semantico");
+const { tituloComercialUniversalValido } = require("../../../radar/comercial-precedencia");
+const { urlCatalogo } = require("../../../../optimus-capture/local-worker/mercadolivre-identity");
 
 function resumoTemplateInputAuditoria(templateInput = {}) {
   return {
@@ -371,6 +373,38 @@ function tituloTecnicoBloqueadoMercadoLivre(titulo = "") {
     "checking your browser"
   ];
   return termosBloqueados.some(termo => normalizado.includes(termo));
+}
+
+function transporteSelecionadoMercadoLivre({ urlOriginalEngine = "", urlImportador = "", resolucaoProduto = {} } = {}) {
+  let selecao, direta;
+  try { selecao = urlCatalogo(urlImportador); direta = urlCatalogo(urlOriginalEngine); }
+  catch { return null; }
+  if (!selecao) return null;
+  if (direta && direta.url === selecao.url) return { selecao, tipo: "url_direta" };
+  const radar = resolucaoProduto.resolucaoRadar || {};
+  const showProduct = provaTransporteShowProductMercadoLivre(resolucaoProduto);
+  if (showProduct?.linkResolvidoTecnico === selecao.url && radar.linkOriginalRadar === urlOriginalEngine) {
+    return { selecao, tipo: "show_product" };
+  }
+  if (isMeliLa(urlOriginalEngine) && radar.ok === true &&
+      radar.urlCapturada === urlOriginalEngine && radar.linkOriginalRadar === urlOriginalEngine &&
+      radar.urlResolvida === selecao.url && radar.tipoLinkRadar === "shortlink_meli" &&
+      !radar.metodoResolucaoMeli && Number(radar.statusHttp) === 200) {
+    return { selecao, tipo: "redirect_direto" };
+  }
+  return null;
+}
+
+function metadataTransporteTituloPendente(transporte, urlOriginalEngine, resolucaoProduto) {
+  if (!transporte) return {};
+  return { aguardaTituloMl: true,
+    identidadeCanonicaMl: { status: "transporte_confirmado", urlOriginal: urlOriginalEngine,
+      urlCanonicaRevalidada: transporte.selecao.url,
+      mlbProduto: transporte.selecao.catalogId, mlbRevalidado: transporte.selecao.catalogId,
+      transporteShowProductConfirmado: transporte.tipo === "show_product",
+      transporteRedirectConfirmado: transporte.tipo === "redirect_direto" },
+    transporteTecnicoMl: { linkOriginalRadar: urlOriginalEngine },
+    resolucaoRadar: resolucaoProduto.resolucaoRadar || null };
 }
 
 function resolverImagemRadarFallbackMercadoLivre(evento = {}, job = {}) {
@@ -929,7 +963,10 @@ async function montarFallbackClonadorMercadoLivre({
   const precoOriginal = extrairPrecoAnteriorClonadorMercadoLivre(evento, job);
   const cupom = extrairCupomClonadorMercadoLivre(evento, job);
   const beneficioTexto = extrairBeneficioClonadorMercadoLivre(evento, job);
-  const temTitulo = Boolean(titulo && !tituloTecnicoBloqueadoMercadoLivre(titulo));
+  const temTitulo = Boolean(titulo && !tituloTecnicoBloqueadoMercadoLivre(titulo) &&
+    tituloComercialUniversalValido(titulo, { marketplace: "mercadolivre" }));
+  const transportePendente = !temTitulo && ancoraMlAtiva({ clienteId, deps })
+    ? transporteSelecionadoMercadoLivre({ urlOriginalEngine, urlImportador, resolucaoProduto }) : null;
   const temPreco = Number.isFinite(preco) && preco > 0;
   const temUrl = Boolean(urlImportador || linkExpandidoEngine || urlOriginalEngine);
   const urlProduto = urlImportador || linkExpandidoEngine || urlOriginalEngine;
@@ -944,7 +981,7 @@ async function montarFallbackClonadorMercadoLivre({
     } catch {}
   }
 
-  const suficiente = Boolean(contrato) && temTitulo && temPreco && temUrl && Boolean(linkAfiliado);
+  const suficiente = Boolean(contrato) && (temTitulo || transportePendente) && temPreco && temUrl && Boolean(linkAfiliado);
   const logBase = {
     jobId: job.id || null,
     eventoId: job.evento_id || evento.id || null,
@@ -984,6 +1021,7 @@ async function montarFallbackClonadorMercadoLivre({
     };
   }
 
+  const tituloPublicavel = temTitulo ? titulo : "";
   const linksConvertidosMercadoLivre = await converterOcorrenciasMercadoLivre({
     links,
     evento,
@@ -995,7 +1033,7 @@ async function montarFallbackClonadorMercadoLivre({
     linkExpandidoEngine,
     linkAfiliadoPrincipal: linkAfiliado
   });
-  const categoria = classificarCategoriaOferta({ titulo, nome: titulo }, titulo);
+  const categoria = tituloPublicavel ? classificarCategoriaOferta({ titulo: tituloPublicavel }, tituloPublicavel) : "Diversos";
   const precoOriginalValido = Number.isFinite(precoOriginal) && precoOriginal > 0 ? precoOriginal : "";
   const imagemFinal = await resolverImagemOficialFallbackMercadoLivre(imagemClonador, {
     deps,
@@ -1010,8 +1048,8 @@ async function montarFallbackClonadorMercadoLivre({
     mlbProdutoProvadoParaImagem
   });
   const produtoFallback = {
-    titulo,
-    nome: titulo,
+    titulo: tituloPublicavel,
+    nome: tituloPublicavel,
     precoAtual: preco,
     preco,
     precoOriginal: precoOriginalValido,
@@ -1035,7 +1073,7 @@ async function montarFallbackClonadorMercadoLivre({
   const ofertaAdapter = {
     ok: true,
     marketplace: "mercadolivre",
-    titulo,
+    titulo: tituloPublicavel,
     preco,
     precoOriginal: precoOriginalValido,
     descontoPercentual: "",
@@ -1076,6 +1114,7 @@ async function montarFallbackClonadorMercadoLivre({
       linkExpandidoEngine: linkExpandidoEngine || urlImportador,
       expandiuMeliLa,
       resolucaoProduto: resolucaoProduto.resolucaoRadar || null,
+      ...metadataTransporteTituloPendente(transportePendente, urlOriginalEngine, resolucaoProduto),
       linksClassificados: resumoLinksClassificados(linksConvertidosMercadoLivre, evento, "mercadolivre"),
       linksComerciais: linksConvertidosMercadoLivre,
       comercialCapturado: contrato,
@@ -1122,7 +1161,10 @@ async function montarFallbackRadarMercadoLivre({
   const precoOriginal = extrairPrecoAnteriorRadarMercadoLivre(evento);
   const cupom = extrairCupomRadarMercadoLivre(evento);
   const beneficioTexto = extrairBeneficioRadarMercadoLivre(evento);
-  const temTitulo = Boolean(titulo && !tituloTecnicoBloqueadoMercadoLivre(titulo));
+  const temTitulo = Boolean(titulo && !tituloTecnicoBloqueadoMercadoLivre(titulo) &&
+    tituloComercialUniversalValido(titulo, { marketplace: "mercadolivre" }));
+  const transportePendente = !temTitulo && ancoraMlAtiva({ clienteId, deps })
+    ? transporteSelecionadoMercadoLivre({ urlOriginalEngine, urlImportador, resolucaoProduto }) : null;
   const temPreco = Number.isFinite(preco) && preco > 0;
   const temUrl = Boolean(urlImportador || linkExpandidoEngine || urlOriginalEngine);
   const urlProduto = urlImportador || linkExpandidoEngine || urlOriginalEngine;
@@ -1136,7 +1178,7 @@ async function montarFallbackRadarMercadoLivre({
   }
 
   const imagemRadar = resolverImagemRadarFallbackMercadoLivre(evento, job);
-  const suficiente = temTitulo && temPreco && temUrl && Boolean(linkAfiliado);
+  const suficiente = (temTitulo || transportePendente) && temPreco && temUrl && Boolean(linkAfiliado);
   const logBase = {
     jobId: job.id || null,
     eventoId: job.evento_id || evento.id || null,
@@ -1174,6 +1216,7 @@ async function montarFallbackRadarMercadoLivre({
     };
   }
 
+  const tituloPublicavel = temTitulo ? titulo : "";
   const linksConvertidosMercadoLivre = await converterOcorrenciasMercadoLivre({
     links,
     evento,
@@ -1198,8 +1241,8 @@ async function montarFallbackRadarMercadoLivre({
     mlbProdutoProvadoParaImagem
   });
   const produtoFallback = {
-    titulo,
-    nome: titulo,
+    titulo: tituloPublicavel,
+    nome: tituloPublicavel,
     precoAtual: preco,
     preco,
     precoOriginal: Number.isFinite(precoOriginal) && precoOriginal > 0 ? precoOriginal : "",
@@ -1209,7 +1252,7 @@ async function montarFallbackRadarMercadoLivre({
     linkExpandido: linkExpandidoEngine || urlImportador,
     urlFinal: linkExpandidoEngine || urlImportador,
     linkAfiliado,
-    categoria: classificarCategoriaOferta({ titulo, nome: titulo }, titulo),
+    categoria: tituloPublicavel ? classificarCategoriaOferta({ titulo: tituloPublicavel }, tituloPublicavel) : "Diversos",
     cupom,
     cupomTipo: cupom ? "texto_radar" : "",
     avisoCupom: beneficioTexto,
@@ -1220,7 +1263,7 @@ async function montarFallbackRadarMercadoLivre({
   const ofertaAdapter = {
     ok: true,
     marketplace: "mercadolivre",
-    titulo,
+    titulo: tituloPublicavel,
     preco,
     precoOriginal: produtoFallback.precoOriginal,
     descontoPercentual: "",
@@ -1259,6 +1302,7 @@ async function montarFallbackRadarMercadoLivre({
       linkExpandidoEngine: linkExpandidoEngine || urlImportador,
       expandiuMeliLa,
       resolucaoRadar: resolucaoProduto.resolucaoRadar || null,
+      ...metadataTransporteTituloPendente(transportePendente, urlOriginalEngine, resolucaoProduto),
       linksClassificados: resumoLinksClassificados(linksConvertidosMercadoLivre, evento, "mercadolivre"),
       linksComerciais: linksConvertidosMercadoLivre,
       radarMirror: objetoSeguro(objetoSeguro(evento.metadata).radarMirror),
@@ -1748,7 +1792,7 @@ async function atualizarLinkExpandidoEngine(link = null, urlExpandida = "", cont
   }
 }
 
-function escolherProdutoResolvido(resolucao = {}, urlOriginal = "") {
+function escolherProdutoResolvido(resolucao = {}, urlOriginal = "", { priorizarSelecaoCatalogo = false } = {}) {
   const candidatos = [
     resolucao.linkOriginalLimpo,
     resolucao.linkResolvido,
@@ -1756,10 +1800,27 @@ function escolherProdutoResolvido(resolucao = {}, urlOriginal = "") {
     urlOriginal
   ];
 
-  return candidatos
+  const validos = candidatos
     .map(url => String(url || "").trim())
     .filter(isUrlProdutoMercadoLivre)
-    .sort((a, b) => pesoUrlProdutoMercadoLivre(a) - pesoUrlProdutoMercadoLivre(b))[0] || "";
+    .sort((a, b) => pesoUrlProdutoMercadoLivre(a) - pesoUrlProdutoMercadoLivre(b));
+  if (priorizarSelecaoCatalogo && validos.length) {
+    // O redirect da própria ocorrência pode trazer o anúncio selecionado depois
+    // de uma URL de catálogo sem seletor. Só preferimos a seleção do mesmo produto.
+    const referencia = validos[0];
+    const referenciaCatalogo = urlCatalogoTecnicoMercadoLivre(referencia);
+    const referenciaMlb = extrairMlbMercadoLivre(referencia);
+    const selecionados = validos.flatMap(url => {
+      try { const selecao = urlCatalogo(url); return selecao ? [{ url, selecao }] : []; }
+      catch { return []; }
+    });
+    if (new Set(selecionados.map(({ selecao }) => `${selecao.catalogId}:${selecao.listingId}`)).size > 1) return "";
+    const compativeis = selecionados.filter(({ selecao }) =>
+      (referenciaCatalogo && selecao.catalogId === referenciaCatalogo) ||
+      (!referenciaCatalogo && referenciaMlb && selecao.listingId === referenciaMlb));
+    if (compativeis.length) return compativeis[0].url;
+  }
+  return validos[0] || "";
 }
 
 function avaliarIdentidadeCanonicaMercadoLivre({ urlOriginalEngine = "", linkEscolhido = {}, resolucaoProduto = {}, produto = {}, evento = {} } = {}) {
@@ -1939,7 +2000,9 @@ async function resolverUrlProdutoMercadoLivreEngine(urlOriginalEngine = "", deps
     });
   }
 
-  const urlProduto = escolherProdutoResolvido(resolucao || {}, urlOriginalEngine);
+  const urlProduto = escolherProdutoResolvido(resolucao || {}, urlOriginalEngine, {
+    priorizarSelecaoCatalogo: ancoraMlAtiva({ clienteId: contexto.clienteId, deps })
+  });
   if (!urlProduto) {
     console.log("[ENGINE-ML-URL-PRODUTO-RESOLVIDA]", {
       ...contexto,
@@ -2561,6 +2624,7 @@ module.exports = {
     recuperarProdutoOficialShowProduct,
     avaliarIdentidadeCanonicaMercadoLivre,
     escolherLinkMercadoLivreDetalhado,
+    escolherProdutoResolvido,
     extrairMlbMercadoLivre,
     motivoIdentidadeMeliClonadorNaoComprovada,
     resolverUrlTransporteAfiliadoFallbackPuroMercadoLivre,

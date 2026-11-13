@@ -13,6 +13,26 @@ const { resolverImagemCanonicaFinalEvento } = require("../modules/imagens/cache-
 const IMG_OFICIAL = "https://http2.mlstatic.com/D_NQ_NP_2X_123-MLB1234567890_012024-F.webp";
 const IMG_RADAR = "https://cdn.exemplo.com/radar-produto-anterior.jpg";
 
+function testarSeletorTecnicoDaMesmaOcorrencia() {
+  const catalogo = "MLB22147432";
+  const anuncio = "MLB4772233032";
+  const semSeletor = `https://www.mercadolivre.com.br/carretilha/p/${catalogo}`;
+  const selecionada = `${semSeletor}?pdp_filters=item_id%3A${anuncio}`;
+  const entrada = { linkOriginalLimpo: semSeletor, linkResolvido: semSeletor, urlResolvida: selecionada };
+  assert.strictEqual(_test.escolherProdutoResolvido(entrada, "https://meli.la/exemplo", { priorizarSelecaoCatalogo: true }), selecionada);
+  assert.strictEqual(_test.escolherProdutoResolvido(entrada, "https://meli.la/exemplo"), semSeletor,
+    "workspace fora do canário conserva a escolha legada");
+  assert.strictEqual(_test.escolherProdutoResolvido({ ...entrada, urlResolvida: `${semSeletor}?utm_source=x&pdp_filters=item_id%3A${anuncio}` },
+    "https://meli.la/exemplo", { priorizarSelecaoCatalogo: true }), semSeletor,
+    "tracking inesperado não vira URL de prova");
+  assert.strictEqual(_test.escolherProdutoResolvido({ ...entrada, urlResolvida: selecionada.replace(catalogo, "MLB99999999") },
+    "https://meli.la/exemplo", { priorizarSelecaoCatalogo: true }), semSeletor,
+    "catálogo divergente não substitui a ocorrência");
+  assert.strictEqual(_test.escolherProdutoResolvido({ ...entrada, linkResolvido: selecionada, urlResolvida: `${semSeletor}?pdp_filters=item_id%3AMLB111111111` },
+    "https://meli.la/exemplo", { priorizarSelecaoCatalogo: true }), "",
+    "seletores conflitantes não podem selecionar anúncio arbitrário");
+}
+
 function eventoRadar({ titulo = "Mini Body Splash Tododia Acerola e Hibisco 60ml", preco = 23.8 } = {}) {
   return {
     id: 187062,
@@ -436,6 +456,7 @@ async function testarImagemOficialMlVenceRadarMirror() {
 }
 
 (async () => {
+  testarSeletorTecnicoDaMesmaOcorrencia();
   await testarMeliLaContaminadoCorrigeParaShortlinkRevalidado();
   await testarMeliLaCorretoContinuaPublicando();
   await testarLinkDiretoSemRegressao();
