@@ -3,6 +3,7 @@
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
+const { normalizarOfertaImportada } = require("../modules/engine/importer/importer.service");
 const { importarProdutoMagaluEngine } = require("../modules/engine/importer/adapters/magalu.adapter");
 const {
   PROOF_TYPE_PAGE_VALIDATED,
@@ -67,31 +68,73 @@ function fatosWorkspace(caso) {
   };
 }
 
+// Páginas sintéticas: os SKUs exercitam as rotas; os títulos não descrevem
+// produtos reais. Parser e resolver geram a prova a partir da página.
+function tituloTecnicoFixture(caso) {
+  return "Monitor Aurora Série " + caso.id + " para escritório";
+}
+
+function consultarPaginaWorkspaceFixture(caso, { semTitulo = false } = {}) {
+  return async url => {
+    const esperada = urlWorkspace(caso);
+    const requisitada = new URL(url);
+    assert.strictEqual(requisitada.hostname, "www.magazinevoce.com.br");
+    assert.ok(requisitada.pathname.startsWith("/" + loja + "/"));
+    assert.ok(requisitada.pathname.includes("/p/" + caso.id + "/"));
+    const produto = {
+      "@type": "Product",
+      sku: caso.id,
+      ...(semTitulo ? {} : { name: tituloTecnicoFixture(caso) }),
+      image: "https://a-static.mlcdn.com.br/800x560/produto-" + caso.id + ".jpg"
+    };
+    const html = '<link rel="canonical" href="' + esperada + '">' +
+      '<script type="application/ld+json">' + JSON.stringify(produto) + '</script>';
+    return parseMagaluProdutoHtml({ urlOriginal: url, urlFinal: esperada, html });
+  };
+}
+
+function jobFixture(caso) {
+  return { id: "job-" + caso.id, evento_id: "evento-" + caso.id, cliente_id: "workspace-magalu", marketplace: "magalu" };
+}
+
 async function importar(caso, extras = {}) {
   const original = extras.urlOriginal || urlOriginal(caso);
+  const tituloCapturado = extras.tituloCapturado || tituloTecnicoFixture(caso);
   return importarProdutoMagaluEngine({
-    job: { id: `job-${caso.id}`, evento_id: `evento-${caso.id}`, cliente_id: "workspace-magalu", marketplace: "magalu" },
+    job: jobFixture(caso),
     evento: {
-      titulo: `Oferta Radar ${caso.id}`,
+      titulo: tituloCapturado,
       precoAtual: "1999.90",
       precoAnterior: "2499.90",
       cupom: "RADAR10",
-      texto_original: `Oferta Radar ${caso.id}\nPor R$ 1.999,90\n${original}`,
+      texto_original: [tituloCapturado, "Por R$ 1.999,90", original].join("\n"),
       links_extraidos: [original],
       ...extras.evento
     },
-    links: extras.links || [{ url_original: original, url_normalizada: original, marketplace_detectado: "magalu" }],
+    links: extras.links || [{ id: "fixture-produto", url_original: original, url_normalizada: original, marketplace_detectado: "magalu" }],
     deps: {
       getIntegracaoCliente: () => ({ credenciais: { promoterId: "d1egopc" } }),
-      resolverFatosMagalu: async () => extras.resolucao || fatosWorkspace(caso)
+      resolverFatosMagalu: extras.resolucao
+        ? async () => extras.resolucao
+        : (entrada, opcoes) => resolverFatosMagalu(entrada, { ...opcoes, cacheFactual: false }),
+      consultarProdutoMagalu: extras.consultarProdutoMagalu || consultarPaginaWorkspaceFixture(caso),
+      resolverImagemMagazineVoce: async () => ({ ok: false, motivo: "fixture_sem_imagem_adicional" })
     }
   });
 }
 
 async function testarSkusAprovados() {
   for (const caso of casos) {
-    const resultado = await importar(caso);
-    assert.strictEqual(resultado.ok, true, caso.id);
+    const resultado = await importar(caso, { tituloCapturado: "Oferta Radar " + caso.id });
+    assert.strictEqual(resultado.ok, true, caso.id + ": " + (resultado.motivo || ""));
+    assert.strictEqual(resultado.titulo, tituloTecnicoFixture(caso));
+    assert.strictEqual(resultado.metadata.fallbackRadar.tituloRadarUsado, false);
+    const oferta = normalizarOfertaImportada(resultado, jobFixture(caso));
+    const prova = oferta.metadata.provaTituloTecnicoValidada;
+    assert.strictEqual(prova?.titulo.valor, tituloTecnicoFixture(caso));
+    assert.strictEqual(prova?.titulo.fonte, "jsonld.name");
+    assert.strictEqual(prova?.produto.produtoIdCanonico, caso.id);
+    assert.strictEqual(prova?.ocorrenciaLink.id, "fixture-produto");
     assert.strictEqual(resultado.produtoId, caso.id);
     assert.strictEqual(resultado.linkAfiliado, urlWorkspace(caso));
     assert.strictEqual(resultado.metadata.afiliacaoWorkspace.conversaoStatus, "convertida");
@@ -101,6 +144,19 @@ async function testarSkusAprovados() {
     assert.strictEqual(resultado.imagemEnviavel, true);
     assert.strictEqual(resultado.imagemOriginalOficial, `https://a-static.mlcdn.com.br/800x560/produto-${caso.id}.jpg`);
     assert.deepStrictEqual(resultado.dimensoesImagem, { largura: 800, altura: 560 });
+  }
+}
+
+async function testarTituloProvisorioSemProvaPermaneceRetido() {
+  const caso = casos[0];
+  for (const resposta of [
+    { resolucao: fatosWorkspace(caso) },
+    { consultarProdutoMagalu: consultarPaginaWorkspaceFixture(caso, { semTitulo: true }) }
+  ]) {
+    const resultado = await importar(caso, { ...resposta, tituloCapturado: "Oferta Radar " + caso.id });
+    assert.strictEqual(resultado.ok, false);
+    assert.strictEqual(resultado.motivo, "titulo_indisponivel");
+    assert.strictEqual(resultado.titulo, undefined);
   }
 }
 
@@ -336,7 +392,8 @@ async function testarProvaAdulteradaBloqueia() {
 
 async function testarRadarComercialPermaneceIntacto() {
   const resultado = await importar(casos[0]);
-  assert.strictEqual(resultado.titulo, "Oferta Radar 240466000");
+  assert.strictEqual(resultado.titulo, tituloTecnicoFixture(casos[0]));
+  assert.strictEqual(resultado.metadata.fallbackRadar.tituloRadarUsado, true);
   assert.strictEqual(resultado.precoAtual, 1999.9);
   assert.strictEqual(resultado.precoOriginal, "2499.90");
   assert.strictEqual(resultado.cupom, "RADAR10");
@@ -439,6 +496,7 @@ async function testarGateMagaluSemRefatoracaoGlobal() {
 
 (async () => {
   await testarSkusAprovados();
+  await testarTituloProvisorioSemProvaPermaneceRetido();
   await testar404BloqueiaSemPromoverOriginal();
   await testar403SemImagemTerminaSemImagem();
   await testarCaptchaPermiteProvaDeterministicaComImagemOficial();
