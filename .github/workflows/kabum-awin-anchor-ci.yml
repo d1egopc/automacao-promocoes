@@ -44,7 +44,7 @@ jobs:
           test -z "${DATABASE_URL:-}"
           git cat-file -e "${BASE_SHA}^{commit}"
           test "$(git rev-parse HEAD^)" = "$BASE_SHA"
-          test "$(git rev-list --count "$BASE_SHA..HEAD")" = 1
+          test "$(git rev-list --count "$BASE_SHA..HEAD")" = 2
           git diff --check "$BASE_SHA" HEAD
           diff -u <(printf '%s\n' \
             'A .github/workflows/kabum-awin-anchor-ci.yml' \
@@ -65,7 +65,7 @@ jobs:
             console.log("GUARDIAN_OVERLAY_RUNTIME=" + plan.runtimeFiles.join(","));
           ' "$RUNNER_TEMP/kabum-plan.json"
           node scripts/guardian-v1.cjs build-dockerfile --base "$BASE_SHA" --source "$GITHUB_SHA" \
-            --base-tag "local/optimus-kabum-base:ci-$GITHUB_RUN_ID" > "$RUNNER_TEMP/kabum-overlay.Dockerfile"
+            --base-tag "local/optimus-deploy-base:ci-$GITHUB_RUN_ID" > "$RUNNER_TEMP/kabum-overlay.Dockerfile"
       - name: Clean Node 24 dependencies
         env:
           GIT_CONFIG_COUNT: '1'
@@ -83,7 +83,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          base_image="local/optimus-kabum-base:ci-$GITHUB_RUN_ID"
+          base_image="local/optimus-deploy-base:ci-$GITHUB_RUN_ID"
           candidate="local/optimus-kabum-candidate:ci-$GITHUB_RUN_ID"
           mkdir -p "$RUNNER_TEMP/kabum-base" "$RUNNER_TEMP/kabum-context" "$RUNNER_TEMP/kabum-test"
           git archive "$BASE_SHA" | tar -x -C "$RUNNER_TEMP/kabum-base"
