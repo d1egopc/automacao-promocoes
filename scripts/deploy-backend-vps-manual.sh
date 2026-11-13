@@ -37,6 +37,7 @@ source_dir="$GITHUB_WORKSPACE/release-source"
 infra=/opt/optimus/infra
 compose="$infra/compose.yml"
 release="$infra/backend-release.yml"
+ml_canary="$infra/backend-ml-canary.yml"
 run_key="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 backup="$infra/backend-release.rollback-$run_key.yml"
 test -f "$compose"
@@ -195,6 +196,18 @@ if [[ "$guardian_mode" == baileys_buffer_patch || "$guardian_mode" == baileys_ba
   if [[ "$guardian_mode" == baileys_balanced_buffer_patch ]]; then test "$dependency_count" -eq 1; elif [[ "$guardian_mode" == baileys_bootstrap_observation ]]; then test "$dependency_count" -eq 4; else test "$dependency_count" -eq 3; fi
 fi
 
+# Preserve only the supported, ordered Compose files declared by the live backend.
+compose_files() {
+  compose_args=(-f "$compose")
+  if [[ -n "$1" ]]; then compose_args+=(-f "$1"); fi
+  compose_args+=("${canary_args[@]}")
+}
+
+compose_fingerprint() {
+  test -f "$1" && test ! -L "$1" || return 1
+  sha256sum "$1" | cut -d' ' -f1
+}
+
 deploy_stage=prepare_release_artifacts
 scratch="$(mktemp -d)"
 staging="$(mktemp -p "$infra" .backend-release.XXXXXXXX.yml)"
@@ -207,11 +220,22 @@ rollback() {
   trap - ERR
   if test "$switched" = 1; then
     if test "$had_release" = 1; then cp -p -- "$backup" "$release"; else rm -f -- "$release"; fi
-    files=(-f "$compose")
-    if test -f "$release"; then files+=(-f "$release"); fi
-    docker compose "${files[@]}" up -d --no-deps --no-build --force-recreate backend || true
-    if test "$(docker inspect -f '{{.Image}}' optimus-backend)" != "$BASE_IMAGE"; then
-      echo 'CRITICAL: rollback image mismatch'
+    compose_files "$original_release"
+    if ! test "$(compose_fingerprint "$compose")" = "$compose_hash" ||
+       ! test "$(docker image inspect -f '{{.Id}}' "$recovery_tag")" = "$BASE_IMAGE" ||
+       { [[ -n "$canary_hash" ]] && ! test "$(compose_fingerprint "$ml_canary")" = "$canary_hash"; } ||
+       ! docker compose "${compose_args[@]}" config --format json > "$scratch/rollback.json" ||
+       ! cmp -s "$scratch/before.json" "$scratch/rollback.json" ||
+       ! assert_compose_image_matches_base "$compose_image"; then
+      echo 'CRITICAL: rollback Compose or recovery image mismatch' >&2
+      exit "$rc"
+    fi
+    if ! docker compose "${compose_args[@]}" up -d --no-deps --no-build --force-recreate backend ||
+       ! test "$(docker inspect -f '{{.Image}}' optimus-backend)" = "$BASE_IMAGE" ||
+       ! test "$(env_fingerprint optimus-backend)" = "$baseline_env" ||
+       ! test "$(mount_fingerprint optimus-backend)" = "$baseline_mounts" ||
+       ! test "$(docker compose "${compose_args[@]}" ps -q postgres)" = "$postgres_id"; then
+      echo 'CRITICAL: rollback verification failed' >&2
     fi
   fi
   exit "$rc"
@@ -220,11 +244,42 @@ rollback() {
 trap cleanup EXIT
 
 deploy_stage=validate_compose_baseline
-files=(-f "$compose")
-if test -f "$release"; then files+=(-f "$release"); fi
+compose_hash="$(compose_fingerprint "$compose")"
+original_release=""
 release_fingerprint=absent
-if test -f "$release"; then release_fingerprint="$(sha256sum "$release" | cut -d' ' -f1)"; fi
-docker compose "${files[@]}" config --format json > "$scratch/before.json"
+if test -e "$release" || test -L "$release"; then
+  original_release="$release"
+  release_fingerprint="$(compose_fingerprint "$release")"
+fi
+expected_files="$compose${original_release:+,$original_release}"
+active_files="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.config_files"}}' optimus-backend)"
+canary_args=()
+canary_hash=""
+case "$active_files" in
+  "$expected_files") ;;
+  "$expected_files,$ml_canary")
+    canary_hash="$(compose_fingerprint "$ml_canary")"
+    canary_args=(-f "$ml_canary")
+    ;;
+  *) echo 'Unsupported active backend Compose file list' >&2; false ;;
+esac
+compose_files "$original_release"
+docker compose "${compose_args[@]}" config --format json > "$scratch/before.json"
+docker image inspect -f '{{json .Config.Env}}' "$BASE_IMAGE" > "$scratch/image-env.json"
+docker inspect -f '{{json .Config.Env}}' optimus-backend > "$scratch/live-env.json"
+python3 - "$scratch/before.json" "$scratch/image-env.json" "$scratch/live-env.json" <<'PY'
+import json, sys
+
+compose, image_env, live_env = (json.load(open(path)) for path in sys.argv[1:])
+expected = dict(item.split("=", 1) for item in (image_env or []))
+for key, value in compose["services"]["backend"].get("environment", {}).items():
+    if value is None:
+        expected.pop(key, None)
+    else:
+        expected[key] = str(value)
+if expected != dict(item.split("=", 1) for item in (live_env or [])):
+    raise SystemExit("Effective Compose backend environment differs from running backend")
+PY
 docker inspect -f '{{json .Mounts}}' optimus-backend > "$scratch/mounts-before.json"
 sensor_mount_before="$(python3 "$sensor_guard" mode "$scratch/before.json")"
 sensor_mount_selected=false
@@ -390,12 +445,15 @@ else
   printf 'services:\n  backend:\n    image: %s\n' "$candidate_tag" > "$staging"
 fi
 if [[ "$sensor_mount_selected" == true ]]; then
-  docker compose -f "$compose" -f "$staging" config --format json > "$scratch/staging-before-sensor.json"
+  compose_files "$staging"
+  docker compose "${compose_args[@]}" config --format json > "$scratch/staging-before-sensor.json"
   if [[ "$(python3 "$sensor_guard" mode "$scratch/staging-before-sensor.json")" == absent ]]; then
     printf '    volumes:\n      - type: bind\n        source: /opt/optimus/observability/garimpei-sensor\n        target: /var/log/optimus/garimpei-sensor\n        bind:\n          create_host_path: false\n' >> "$staging"
   fi
 fi
-docker compose -f "$compose" -f "$staging" config --format json > "$scratch/after.json"
+compose_files "$staging"
+docker compose "${compose_args[@]}" config --format json > "$scratch/after.json"
+test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["services"]["backend"]["image"])' "$scratch/after.json")" = "$candidate_tag"
 if ! python3 "$sensor_guard" compose "$scratch/before.json" "$scratch/after.json" "$sensor_mount_approved"; then
   echo 'Effective Compose changed beyond backend image or explicitly approved sensor mount'
   false
@@ -418,13 +476,25 @@ test "$(docker image inspect -f '{{.Id}}' "$BASE_IMAGE")" = "$BASE_IMAGE"
 test "$(docker image inspect -f '{{.Id}}' "$recovery_tag")" = "$BASE_IMAGE"
 test "$(docker inspect -f '{{.State.Status}}' optimus-backend)" = running
 test "$(docker inspect -f '{{.State.OOMKilled}}' optimus-backend)" = false
-test "$(docker compose -f "$compose" ps -q postgres)" = "$postgres_id"
+test "$(compose_fingerprint "$compose")" = "$compose_hash"
+if [[ -n "$canary_hash" ]]; then test "$(compose_fingerprint "$ml_canary")" = "$canary_hash"; fi
+compose_files "$original_release"
+docker compose "${compose_args[@]}" config --format json > "$scratch/live-before.json"
+cmp -s "$scratch/before.json" "$scratch/live-before.json"
+test "$(env_fingerprint optimus-backend)" = "$baseline_env"
+test "$(mount_fingerprint optimus-backend)" = "$baseline_mounts"
+compose_files "$staging"
+docker compose "${compose_args[@]}" config --format json > "$scratch/live-after.json"
+cmp -s "$scratch/after.json" "$scratch/live-after.json"
+compose_files "$original_release"
+test "$(docker compose "${compose_args[@]}" ps -q postgres)" = "$postgres_id"
 test "$(docker inspect -f '{{.State.Health.Status}}' "$postgres_id")" = healthy
 
 deploy_stage=switch_backend
 switched=1
 mv -f -- "$staging" "$release"
-docker compose -f "$compose" -f "$release" up -d --no-deps --no-build --force-recreate backend
+compose_files "$release"
+docker compose "${compose_args[@]}" up -d --no-deps --no-build --force-recreate backend
 deploy_stage=verify_backend
 test "$(docker inspect -f '{{.Image}}' optimus-backend)" = "$candidate_id"
 test "$(env_fingerprint optimus-backend)" = "$baseline_env"
@@ -435,7 +505,7 @@ else
   test "$(mount_fingerprint optimus-backend)" = "$baseline_mounts"
 fi
 docker inspect -f '{{json .HostConfig.Ulimits}}' optimus-backend | python3 -c 'import json,sys; u=json.load(sys.stdin); core=[x for x in u if x.get("Name")=="core"]; assert len(core)==1 and core[0]["Soft"]==0 and core[0]["Hard"]==0'
-test "$(docker compose -f "$compose" -f "$release" ps -q postgres)" = "$postgres_id"
+test "$(docker compose "${compose_args[@]}" ps -q postgres)" = "$postgres_id"
 test "$(docker inspect -f '{{.State.Health.Status}}' "$postgres_id")" = healthy
 deploy_stage=post_deploy_readiness
 for attempt in {1..12}; do
