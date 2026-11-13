@@ -88,6 +88,7 @@ const {
   registrarOfertaUniversalCriada
 } = require("../ofc/commercial-events.service");
 const { classificarLinkEngine } = require("../link-role.service");
+const { extrairSkuUrlOficialKabum } = require("../../../marketplaces/kabum/importador");
 const { registrarAchado } = require("../../manual-v2/ofertas-v2-achados");
 const {
   consultarMlWorkIdentityBestEffort,
@@ -1422,7 +1423,7 @@ function comprovarTituloTecnicoDoLink(resultado = {}, produto = {}, job = {}, ml
       fallbackRadar: metadata.fallbackRadar?.tituloRadarUsado === true };
   }
   if (adapter === "awin_kabum") {
-    const idLink = link.match(/kabum\.com\.br\/produto\/(\d+)/i)?.[1] || "";
+    const idLink = extrairSkuUrlOficialKabum(link);
     return { confirmada: Boolean(idLink && idLink === normalizarTexto(produto.produtoIdCanonico || produto.produtoId)) };
   }
   return { confirmada: false };
@@ -1451,8 +1452,11 @@ function normalizarOfertaImportada(resultado = {}, job = {}, provaAncorada = nul
   const categoriaOficialAncorada = ancoraAtiva && marketplaceTitulo.toLowerCase() === "mercadolivre" && provaTituloValidada
     ? categoriaMlOficialComprovada(produtoMetadata, provaTituloValidada.produto?.produtoIdCanonico) : "";
   const tituloParaCategoria = tituloTecnico || tituloFallback;
+  const categoriaPadraoKabum = tituloTecnico && resultado.metadata?.adapter === "awin_kabum" &&
+    produtoMetadata.categoriaOrigem === "padrao_importador_kabum";
   const resultadoParaCategoria = tituloParaCategoria
-    ? { ...resultado, titulo: tituloParaCategoria, nome: tituloParaCategoria }
+    ? { ...resultado, titulo: tituloParaCategoria, nome: tituloParaCategoria,
+        ...(categoriaPadraoKabum ? { categoria: "", categoriaProduto: "" } : {}) }
     : { ...resultado, titulo: "", nome: "",
         ...(resultado.metadata?.adapter ? { categoria: "", categoriaProduto: "" } : {}) };
   const tituloFactualAnterior = resolverTituloFactualEngine({
