@@ -118,6 +118,17 @@ function textoKabumSeguro(valor = "") {
   return String(valor || "").trim();
 }
 
+function extrairSkuUrlOficialKabum(link = "") {
+  try {
+    const url = new URL(link);
+    if (["https:", "http:"].includes(url.protocol) && !url.username && !url.password &&
+        ["kabum.com.br", "www.kabum.com.br"].includes(url.hostname)) {
+      return url.pathname.match(/^\/produto\/(\d+)(?:\/|$)/i)?.[1] || "";
+    }
+  } catch {}
+  return "";
+}
+
 function normalizarTituloKabum(valor = "") {
   return textoKabumSeguro(valor)
     .normalize("NFD")
@@ -297,6 +308,11 @@ async function importarProdutoKabumViaAwin(
   });
 
   const response = await baixarHtmlKabum(urlCanonicaHttp.urlHttp);
+  const skuSolicitado = extrairSkuUrlOficialKabum(urlCanonicaHttp.urlHttp);
+  const urlRespondida = response.request?.res?.responseUrl || response.request?._redirectable?._currentUrl || urlCanonicaHttp.urlHttp;
+  if (skuSolicitado && skuSolicitado !== extrairSkuUrlOficialKabum(urlRespondida)) {
+    throw erroKabumControlado("kabum_produto_nao_comprovado");
+  }
 
   const html = response.data || "";
 
@@ -548,12 +564,14 @@ avisoPagamento = avisoPagamento || "";
   link: linkAfiliado || url,
   linkAfiliado: linkAfiliado || url,
   imagem,
-  categoria: "Gamer e Hardware"
+  categoria: "Gamer e Hardware",
+  categoriaOrigem: "padrao_importador_kabum"
 };
 }
 
 module.exports = {
   importarProdutoKabumViaAwin,
+  extrairSkuUrlOficialKabum,
   diagnosticarProdutoKabum,
   limparSufixoTituloKabum,
   normalizarTituloKabum,

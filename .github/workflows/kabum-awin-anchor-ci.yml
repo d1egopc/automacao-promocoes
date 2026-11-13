@@ -1,0 +1,114 @@
+name: KaBuM AWIN anchor CI only
+
+on:
+  push:
+    branches: [codex/universal-anchor-six-local]
+
+permissions:
+  contents: read
+
+jobs:
+  kabum-awin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      BASE_SHA: 28cabd75559060224c90d902aa7dd4e600659875
+      KABUM_PG_FIXTURE_DIR: /var/lib/postgresql/data
+      ML_WORK_ENRICHMENT_ACTIVE: '0'
+      ML_WORK_ENRICHMENT_CANARY_CLIENTES: ''
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: optimus_kabum_ci_fixture
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 127.0.0.1:55433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d optimus_kabum_ci_fixture"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Exact diff and Guardian overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          git cat-file -e "${BASE_SHA}^{commit}"
+          test "$(git rev-parse HEAD^)" = "$BASE_SHA"
+          test "$(git rev-list --count "$BASE_SHA..HEAD")" = 1
+          git diff --check "$BASE_SHA" HEAD
+          diff -u <(printf '%s\n' \
+            'A .github/workflows/kabum-awin-anchor-ci.yml' \
+            'M marketplaces/kabum/importador.js' \
+            'M modules/engine/importer/importer.service.js' \
+            'A tests/kabum-anchor-queue.postgres.cjs' \
+            'A tests/kabum-categoria-ancora.test.cjs') \
+            <(git diff --name-status --no-renames "$BASE_SHA" HEAD | tr '\t' ' ')
+          node scripts/guardian-v1.cjs prepare --base "$BASE_SHA" --source "$GITHUB_SHA" --release-mode overlay > "$RUNNER_TEMP/kabum-plan.json"
+          node -e '
+            const assert = require("node:assert/strict");
+            const plan = require(process.argv[1]);
+            assert.equal(plan.validation, "PASS");
+            assert.equal(plan.deployMode, "overlay");
+            assert.deepEqual([...plan.runtimeFiles].sort(), [
+              "marketplaces/kabum/importador.js", "modules/engine/importer/importer.service.js"
+            ]);
+            console.log("GUARDIAN_OVERLAY_RUNTIME=" + plan.runtimeFiles.join(","));
+          ' "$RUNNER_TEMP/kabum-plan.json"
+          node scripts/guardian-v1.cjs build-dockerfile --base "$BASE_SHA" --source "$GITHUB_SHA" \
+            --base-tag "local/optimus-kabum-base:ci-$GITHUB_RUN_ID" > "$RUNNER_TEMP/kabum-overlay.Dockerfile"
+      - name: Clean Node 24 dependencies
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: ssh://git@github.com/
+        run: npm ci
+      - name: KaBuM SKU, category, links, destination and PostgreSQL 17
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-reporter=tap \
+            tests/kabum-categoria-ancora.test.cjs tests/kabum-anchor-queue.postgres.cjs \
+            tests/destinos-compatibilidade-kabum-awin.test.js tests/manual-v2-import-kabum.test.js
+      - name: Build disposable Linux overlay and verify runtime hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_image="local/optimus-kabum-base:ci-$GITHUB_RUN_ID"
+          candidate="local/optimus-kabum-candidate:ci-$GITHUB_RUN_ID"
+          mkdir -p "$RUNNER_TEMP/kabum-base" "$RUNNER_TEMP/kabum-context" "$RUNNER_TEMP/kabum-test"
+          git archive "$BASE_SHA" | tar -x -C "$RUNNER_TEMP/kabum-base"
+          # The disposable build uses the same HTTPS rewrite as runner npm ci.
+          # Only the transport of the locked public Git dependency changes.
+          grep -Fx 'RUN npm ci --omit=dev' "$RUNNER_TEMP/kabum-base/Dockerfile"
+          grep -F 'apt-get install -y --no-install-recommends fontconfig fonts-dejavu-core' "$RUNNER_TEMP/kabum-base/Dockerfile"
+          sed -e 's|apt-get install -y --no-install-recommends fontconfig fonts-dejavu-core|apt-get install -y --no-install-recommends fontconfig fonts-dejavu-core git ca-certificates|' \
+            -e 's|^RUN npm ci --omit=dev$|RUN GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf GIT_CONFIG_VALUE_0=ssh://git@github.com/ npm ci --omit=dev|' \
+            "$RUNNER_TEMP/kabum-base/Dockerfile" > "$RUNNER_TEMP/kabum-base.Dockerfile"
+          docker build -f "$RUNNER_TEMP/kabum-base.Dockerfile" -t "$base_image" "$RUNNER_TEMP/kabum-base"
+          for file in marketplaces/kabum/importador.js modules/engine/importer/importer.service.js; do
+            install -D "$file" "$RUNNER_TEMP/kabum-context/$file"
+          done
+          docker build --pull=false --network=none -f "$RUNNER_TEMP/kabum-overlay.Dockerfile" -t "$candidate" "$RUNNER_TEMP/kabum-context"
+          for file in marketplaces/kabum/importador.js modules/engine/importer/importer.service.js; do
+            base_hash="$(git show "$BASE_SHA:$file" | sha256sum | cut -d' ' -f1)"
+            candidate_hash="$(git show "$GITHUB_SHA:$file" | sha256sum | cut -d' ' -f1)"
+            test "$(docker run --rm --network=none "$base_image" sha256sum "/app/$file" | cut -d' ' -f1)" = "$base_hash"
+            test "$(docker run --rm --network=none "$candidate" sha256sum "/app/$file" | cut -d' ' -f1)" = "$candidate_hash"
+            printf 'OVERLAY_HASH %s %s\n' "$candidate_hash" "$file"
+          done
+          docker image inspect "$candidate" --format 'DOCKER_IMAGE_ID={{.Id}}'
+          cp tests/kabum-categoria-ancora.test.cjs "$RUNNER_TEMP/kabum-test/"
+          docker run --rm --network=none \
+            -e ML_WORK_ENRICHMENT_ACTIVE=0 -e ML_WORK_ENRICHMENT_CANARY_CLIENTES= \
+            --mount "type=bind,src=$RUNNER_TEMP/kabum-test,dst=/app/ci-kabum,readonly" \
+            "$candidate" node --test /app/ci-kabum/kabum-categoria-ancora.test.cjs
