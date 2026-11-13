@@ -598,6 +598,7 @@ jobs:
           set -euo pipefail
           base="$(git merge-base origin/main HEAD)"
           case "$GITHUB_REF" in
+            refs/heads/validation/guardian-v1-inteligencia-universal-p0) base=757d6258e4baf3a57903c20af2b8637568606c3a ;;
             refs/heads/validation/guardian-v1-saas-fix1-*) base=1eaf582b68c333773a5882bcb8962ffcac7b9bef ;;
             refs/heads/validation/guardian-v1-baileys-balanced-buffer-20261029) base=cecd2e6acdf5df274d19ee87f029389078f141dc ;;
             refs/heads/validation/guardian-v1-diversos-integracao-20261029) base=5dd99da80233ab9a49162e02e215b75982e3da28 ;;
@@ -999,3 +1000,129 @@ jobs:
       - name: Remove disposable lab only
         if: always()
         run: docker rm -f commercial-recovery-pg17 || true
+
+  inteligencia-universal-p0:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/guardian-v1-inteligencia-universal-p0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BASE_SHA: 757d6258e4baf3a57903c20af2b8637568606c3a
+      OPTIMUS_TEST_PG17: '1'
+      KABUM_PG_FIXTURE_DIR: /var/lib/postgresql/data
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: optimus_universal_fixture
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 127.0.0.1:55433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d optimus_universal_fixture"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install clean dependencies
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: ssh://git@github.com/
+        run: npm ci
+      - name: Universal identity, category, commercial fidelity and consumers
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          git merge-base --is-ancestor "$BASE_SHA" HEAD
+          node --version
+          node --test --test-reporter=tap \
+            tests/universal-identidade-titulo-categoria-p0.test.cjs \
+            tests/magalu-v2-golden-path.test.js \
+            tests/link-anchor-identity-proof-focal.test.cjs \
+            tests/classificador-universal-v3.test.cjs \
+            tests/classificador-copy-focal.test.cjs \
+            tests/magalu-identity-engine-importer.test.js \
+            tests/aliexpress-manual-importador.test.js \
+            tests/kabum-categoria-ancora.test.cjs \
+            tests/ml-work-enrichment-active-integration.test.js \
+            tests/ml-catalogo-tecnico-ancora.test.cjs \
+            tests/mercadolivre-work-backend-order.test.js \
+            tests/link-conversao-ocorrencia-marketplaces.test.js \
+            tests/radar-commercial-fidelity.test.cjs \
+            tests/contrato-comercial-final-universal.test.js \
+            tests/universal-flow-history-status.test.js \
+            tests/ofertas-v2-achados-dedupe-memoria.test.js \
+            tests/universal-flow-vitrine-projector.test.js \
+            tests/universal-flow-social-opportunities.test.js \
+            tests/universal-flow-queue-executor.test.js
+      - name: PostgreSQL 17 queue, dedup and workspace isolation
+        shell: bash
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          docker exec "$PG_CONTAINER" createdb -U postgres optimus_kabum_ci_fixture
+          node --test --test-reporter=tap \
+            tests/kabum-anchor-queue.postgres.cjs tests/ofertas-v2-dedup-ancora-historica.test.cjs | tee "$RUNNER_TEMP/pg17.log"
+          grep -Eq '^# pass 3$' "$RUNNER_TEMP/pg17.log"
+          grep -Eq '^# skipped 0$' "$RUNNER_TEMP/pg17.log"
+      - name: Compare six known failures against the exact base
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_dir="$RUNNER_TEMP/inteligencia-base"
+          git worktree add --detach "$base_dir" "$BASE_SHA"
+          test "$(git -C "$base_dir" rev-parse HEAD)" = "$BASE_SHA"
+          export NODE_PATH="$GITHUB_WORKSPACE/node_modules"
+          python3 - "$base_dir" <<'PY'
+          import re
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          suites = {
+              "diversos-integracao.test.cjs": (115, r"Command failed: git show 5dd99da"),
+              "engine-v2-marketplaces-fidelidade.test.js": (395, r"false !== true"),
+              "engine-v2-oferta-universal-ml.test.js": (549, r"Jaqueta Puffer Hering"),
+              "fila-historico-v2-leitura.test.js": (10, r"GET /fila/status"),
+              "universal-flow-job-destination-fanout.test.js": (38, r"false !== true"),
+              "template-universal-visual-contract.test.js": (63, r"Resgate:"),
+          }
+
+          def compare(root, file, line, expected):
+              proc = subprocess.run(
+                  ["node", "--test", "--test-reporter=tap", "tests/" + file],
+                  cwd=root, encoding="utf-8", stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+              )
+              log = proc.stdout.replace("\\\\", "/").replace("\\", "/").replace(root.as_posix(), "<checkout>")
+              print(log, end="")
+              if proc.returncode == 0:
+                  return None
+              failures = re.findall(r"^not ok \d+ - (.+)$", log, re.M)
+              if proc.returncode != 1 or len(failures) != 1:
+                  raise SystemExit("Unexpected exit status or number of failures: " + file)
+              diagnostic = re.search(r"(?ms)^(?:# )?[ \t]*(?:AssertionError[^\n]*|Command failed:[^\n]*|error: \|-)\n.*?^(?:# )?[ \t]+(?:at |stack:)", log)
+              frames = re.findall(r"^[^\n]*?(?:\bat |<anonymous> \()[^\n]*?" + re.escape(file) + r":(\d+):\d+", log, re.M)
+              if not diagnostic or not re.search(expected, diagnostic[0]) or frames[:1] != [str(line)]:
+                  raise SystemExit("Unexpected first diagnostic or source line: " + file)
+              return failures[0], diagnostic[0].strip(), frames[0]
+
+          for file, (line, expected) in suites.items():
+              print("=== BASE:", file, flush=True)
+              base = compare(Path(sys.argv[1]), file, line, expected)
+              print("=== CANDIDATE:", file, flush=True)
+              candidate = compare(Path.cwd(), file, line, expected)
+              if candidate is not None and candidate != base:
+                  raise SystemExit("New or changed regression: " + file)
+              print("BASELINE_MATCH" if candidate else "PASS_CANDIDATE", file, flush=True)
+          PY
