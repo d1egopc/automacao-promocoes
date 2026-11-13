@@ -720,6 +720,38 @@ jobs:
           node tests/link-conversao-ocorrencia-marketplaces.test.js
           node tests/contrato-comercial-final-universal.test.js
           node tests/radar-commercial-fidelity.test.cjs
+      - name: ML recovery P0 - canonical identity, official fallback, titles and commercial safety
+        if: github.ref == 'refs/heads/validation/guardian-v1-ml-recovery-p0-20261113'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          base=e6ffc5db7050abb7937157df44944e8076595ae6
+          git merge-base --is-ancestor "$base" HEAD
+          git diff --name-only "$base" HEAD | sort > "$RUNNER_TEMP/ml-recovery-actual-files.txt"
+          cat > "$RUNNER_TEMP/ml-recovery-expected-files.txt" <<'FILES'
+          .github/workflows/guardian-v1-ci.yml
+          modules/engine/importer/adapters/mercadolivre.adapter.js
+          modules/engine/importer/importer.service.js
+          modules/engine/universal-queue-preflight.js
+          modules/radar/comercial-precedencia.js
+          tests/contrato-comercial-papeis.test.js
+          tests/mercadolivre-identidade-canonica.test.js
+          tests/mercadolivre-radar-fallback.test.js
+          tests/universal-flow-queue-preflight.test.js
+          tests/universal-offer-anchor-local.test.cjs
+          FILES
+          diff -u "$RUNNER_TEMP/ml-recovery-expected-files.txt" "$RUNNER_TEMP/ml-recovery-actual-files.txt"
+          node --check modules/engine/importer/adapters/mercadolivre.adapter.js
+          node --check modules/engine/importer/importer.service.js
+          node --check modules/engine/universal-queue-preflight.js
+          node --check modules/radar/comercial-precedencia.js
+          node tests/mercadolivre-identidade-canonica.test.js
+          node tests/mercadolivre-radar-fallback.test.js
+          node tests/contrato-comercial-papeis.test.js
+          node tests/universal-flow-queue-preflight.test.js
+          node --test tests/ml-work-enrichment-active.test.js tests/ml-work-enrichment-active-integration.test.js tests/ml-work-enrichment-shadow.test.js tests/ml-catalogo-tecnico-ancora.test.cjs tests/mercadolivre-identidade-promocional-focal.test.cjs tests/universal-content-safety-p0.test.cjs tests/inteligencia-universal-decisao.test.js tests/radar-commercial-fidelity.test.cjs tests/contrato-comercial-final-universal.test.js tests/link-conversao-ocorrencia-marketplaces.test.js tests/magalu-v2-golden-path.test.js tests/aliexpress-app-moedas-contrato.test.js tests/shopee-rio-titulo-beneficio.test.js
       - name: Classification V3 offline replay and benchmark
         if: github.ref == 'refs/heads/validation/classificador-universal-v3-20261027'
         shell: bash
@@ -804,7 +836,7 @@ jobs:
           node --test tests/mensageiro-v4-credit-scope.postgres.test.cjs
 
   universal-offer-anchor-postgres:
-    if: github.ref == 'refs/heads/validation/guardian-v1-universal-offer-anchor' || github.ref == 'refs/heads/validation/universal-closure-p0-20261112' || github.ref == 'refs/heads/validation/guardian-v1-anchor-release-gates-20261112'
+    if: github.ref == 'refs/heads/validation/guardian-v1-universal-offer-anchor' || github.ref == 'refs/heads/validation/universal-closure-p0-20261112' || github.ref == 'refs/heads/validation/guardian-v1-anchor-release-gates-20261112' || github.ref == 'refs/heads/validation/guardian-v1-ml-recovery-p0-20261113'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
