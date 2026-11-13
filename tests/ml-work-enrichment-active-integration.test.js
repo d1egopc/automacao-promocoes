@@ -97,7 +97,7 @@ function radarMirror(workspaceId) {
   };
 }
 
-async function executarImportacao(workspaceId) {
+async function executarImportacao(workspaceId, backendComProva = false) {
   let metadataInserida = null;
   let metadataPersistida = null;
   mockModulo("../modules/engine/database", {
@@ -187,7 +187,15 @@ async function executarImportacao(workspaceId) {
             ordemCaptura: 1,
             urlAfiliadaWorkspace: "https://meli.la/workspace-final"
           }],
-          produto: { produtoId: "MLB123456", titulo: "Título promocional recebido" }
+          ...(backendComProva ? { provaTituloTecnico: {
+            versao: 1, marketplace: "mercadolivre", jobId: "9301", eventoId: "9201", workspaceId,
+            ocorrenciaLink: { id: "9401", ordem: 1, urlOriginal: "https://meli.la/produto" },
+            produto: { produtoIdCanonico: "MLB123456", urlCanonica: "https://produto.mercadolivre.com.br/MLB123456-tenis-nike" },
+            titulo: { valor: "Tênis Nike Air Max Excee Masculino", fonte: "jsonld.name" }
+          } } : {}),
+          produto: backendComProva
+            ? { produtoId: "MLB123456", titulo: "Tênis Nike Air Max Excee Masculino", tituloFonteOficial: "jsonld.name" }
+            : { produtoId: "MLB123456", titulo: "Título promocional recebido" }
         }
       },
       {
@@ -265,5 +273,10 @@ async function executarImportacao(workspaceId) {
   assert.strictEqual(String(logAtivo[1]).includes("Tênis Nike"), false);
   assert.strictEqual(String(logAtivo[1]).includes("mlstatic.com"), false);
 
+  const backend = await executarImportacao(canario, true);
+  assert.strictEqual(backend.resultado.ok, true);
+  assert.strictEqual(backend.consultasIdentidade, 0, "título provado e imagem pronta não consultam worker");
+  assert.strictEqual(backend.metadataPersistida.provaTituloTecnicoValidada?.titulo.fonte, "jsonld.name");
+  assert.strictEqual(backend.metadataPersistida.ofertaUniversal.produto.titulo, "Tênis Nike Air Max Excee Masculino");
   console.log("ml-work-enrichment-active-integration.test.js: ok");
 })().catch(erro => { console.error(erro); process.exitCode = 1; });

@@ -1004,6 +1004,8 @@ async function importarAliExpress(urlEntrada, config = {}) {
     conversaoLinkAlternativo: conversaoOcorrenciaRadar || produtoFinal.metadata?.conversaoLinkAlternativo === true,
     landingMoedasAliExpress: landingMoedasComProdutoFactual,
     productId,
+    ...(extrairProductIdAliExpressProduto(produto, "productId") === productId
+      ? { tituloFonteOficial: "aliexpress_api.produto" } : {}),
     sourceValuesUsado: sourceValuesAfiliado,
     linkAfiliadoBaseProduto: linkAfiliadoBase,
     afiliacaoWorkspace: {

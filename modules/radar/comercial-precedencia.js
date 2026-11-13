@@ -81,7 +81,9 @@ function tituloComercialUniversalValido(titulo = "", contexto = {}) {
     "aliexpress",
     "ali express",
     "kabum",
-    "awin"
+    "awin",
+    "magalu",
+    "magazine luiza"
   ]);
   const marketplaceDuplicado = n.split(/\s+/).length === 2
     && n.split(/\s+/)[0] === n.split(/\s+/)[1]
@@ -94,7 +96,10 @@ function tituloComercialUniversalValido(titulo = "", contexto = {}) {
     /^todo\s+mundo\s+vai\s+perguntar\b/.test(tituloBruto) ||
     /^cupons?\b.*\b(?:garanta|enquanto)\b/.test(tituloBruto) ||
     /\b(?:convida|convidar)\b.*\bgrupo\b.*\blink\b/.test(tituloBruto) ||
-    /\bgaranta\s+(?:o\s+seu|a\s+sua)\b.*\b(?:ativo|ativa|esgot)\b/.test(tituloBruto);
+    /\bgaranta\s+(?:o\s+seu|a\s+sua)\b.*\b(?:ativo|ativa|esgot)\b/.test(tituloBruto) ||
+    /^(?:o|a) (?:classico|favorito|queridinh[oa]) que combina com qualquer look$/.test(n) ||
+    /^(?:loja oficial|pagina oficial|loja do vendedor)$/.test(n) ||
+    /^(?:produto|item|modelo|equipamento|achadinho|novidade)(?: (?:oficial|original|selecionado|incrivel|exclusivo))?$/.test(n);
   if (sloganOuInstrucao) return false;
   const linhaPromocionalCupom = /\b(?:r\$\s*)?\d{1,5}(?:[.,]\d{1,2})?\s*(?:off|de\s+desconto)|\b\d{1,3}\s*%\s*off\b/.test(tituloBruto) &&
     (/\b(?:cupom|voucher|codigo|cod|use|aplique|resgate|a\s+partir\s+de|acima\s+de|compras)\b/.test(tituloBruto) ||
@@ -615,7 +620,8 @@ function aplicarRadarMirrorFiel(oferta = {}, resolucao = {}) {
   }
   const condicoes = resolucao.condicoesComerciais || {};
 
-  if (resolucao.tituloRadar) {
+  if (resolucao.tituloRadar && (!resolucao.tituloTecnicoComprovado ||
+      tituloCapturadoCompativel(resolucao.tituloRadar, resolucao.tituloTecnicoComprovado))) {
     proxima.titulo = resolucao.tituloRadar;
     proxima.nome = resolucao.tituloRadar;
   }
@@ -689,6 +695,17 @@ function aplicarRadarMirrorFiel(oferta = {}, resolucao = {}) {
   return proxima;
 }
 
+// Only keep a captured shortening that contains the same identifying words in
+// order. A different model, quantity, colour or size must use the proven title.
+function tituloCapturadoCompativel(capturado, oficial) {
+  const a = normalizarPapelComercial(capturado);
+  const b = normalizarPapelComercial(oficial);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  return a.split(" ").length >= 3 && b.startsWith(a + " ") &&
+    /^(?:4k(?: uhd| ultra hd)?|uhd|ultra hd)$/.test(b.slice(a.length).trim());
+}
+
 function extrairRadarMirrorFidelidade(oferta = {}, metadata = {}) {
   const metadataOferta = oferta.metadata && typeof oferta.metadata === "object" ? oferta.metadata : {};
   const fontes = [metadata, metadataOferta, oferta].filter(item => item && typeof item === "object");
@@ -708,7 +725,7 @@ function identidadeOficialRadarConfirmada(oferta = {}, metadata = {}) {
   for (const fonte of fontes) {
     const provaTitulo = fonte.provaTituloTecnicoValidada;
     if (provaTitulo?.validacao === "confirmada_pelo_importador" &&
-        texto(provaTitulo.titulo?.valor || "") === tituloOferta &&
+        tituloCapturadoCompativel(tituloOferta, provaTitulo.titulo?.valor || "") &&
         texto(provaTitulo.produto?.produtoIdCanonico || "") &&
         texto(provaTitulo.produto?.urlCanonica || "")) return true;
 
@@ -923,9 +940,17 @@ function resolverPrecedenciaComercialRadar({ ofertaImportador = {}, radarMirror 
 
   const tituloRadarBruto = textoOuNull(mirror?.produto?.tituloCapturado || "");
   const marketplaceResolucao = texto(marketplace || ofertaImportador.marketplace || mirror?.comparacaoImportador?.marketplace || "");
-  const tituloRadar = tituloComercialUniversalValido(tituloRadarBruto || "", { marketplace: marketplaceResolucao, cupons: cupom.cuponsRadar })
+  const tituloRadar = metadataBase.provaTituloTecnicoRejeitada !== true &&
+    ofertaImportador.metadata?.provaTituloTecnicoRejeitada !== true &&
+    tituloComercialUniversalValido(tituloRadarBruto || "", { marketplace: marketplaceResolucao, cupons: cupom.cuponsRadar })
     ? tituloRadarBruto
     : null;
+  const provaTitulo = metadataBase.provaTituloTecnicoValidada || ofertaImportador.metadata?.provaTituloTecnicoValidada;
+  const tituloImportado = texto(ofertaImportador.titulo || ofertaImportador.nome || "");
+  const tituloTecnicoComprovado = provaTitulo?.validacao === "confirmada_pelo_importador" &&
+    provaTitulo.produto?.produtoIdCanonico && provaTitulo.produto?.urlCanonica &&
+    tituloCapturadoCompativel(tituloImportado, provaTitulo.titulo?.valor || "")
+    ? provaTitulo.titulo.valor : "";
 
   const resolucao = {
     versao: VERSAO_PRECEDENCIA_COMERCIAL,
@@ -936,6 +961,7 @@ function resolverPrecedenciaComercialRadar({ ofertaImportador = {}, radarMirror 
     clienteId: texto(clienteId || mirror?.origem?.clienteId || ""),
     marketplace: marketplaceResolucao,
     tituloRadar,
+    tituloTecnicoComprovado,
     tituloRadarRejeitado: tituloRadar ? null : tituloRadarBruto,
     precoPublicacao: preco.precoPublicacao,
     origemPreco: preco.origemPreco,
@@ -1079,5 +1105,6 @@ module.exports = {
   resolverCupom,
   extrairRadarMirrorFidelidade,
   validarFidelidadeComercialRadar,
-  tituloComercialUniversalValido
+  tituloComercialUniversalValido,
+  tituloCapturadoCompativel
 };

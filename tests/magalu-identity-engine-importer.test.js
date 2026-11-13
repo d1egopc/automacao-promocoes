@@ -2,6 +2,7 @@
 
 const assert = require("assert");
 const { importarProdutoMagaluEngine } = require("../modules/engine/importer/adapters/magalu.adapter");
+const { normalizarOfertaImportada } = require("../modules/engine/importer/importer.service");
 
 const oneLink = "https://magazineluiza.onelink.me/589508454/c3qooxsv";
 const urlIdentificada = "https://www.magazineluiza.com.br/potes-hermeticos-com-tampa-10un-bumper/p/123456789/ud/poud/";
@@ -128,6 +129,32 @@ async function testarOneLinkAguardaEReutilizaIdentidadeLocal() {
   assert.strictEqual(recuperada.cupom, "GARIMPEI1000");
   assert.strictEqual(recuperada.metadata.campoLinkEscolhido, "local_worker_identity");
   assert.strictEqual(recuperada.metadata.identidadeLocalWorker.observedProductId, "123456789");
+}
+
+async function testarTituloOneLinkAncoraNaOcorrenciaCapturada() {
+  const titulo = "Smart TV Samsung 50 polegadas 4K UHD";
+  const job = { id: 595, evento_id: 695, cliente_id: "workspace_magalu", marketplace: "magalu" };
+  const resultado = await importarProdutoMagaluEngine({
+    job,
+    evento: { texto_original: "O clássico que combina com qualquer look\nPor R$ 85,41\n" + oneLink, links_extraidos: [oneLink] },
+    links: [linkRow(95, oneLink)],
+    deps: {
+      ...baseDeps(),
+      obterIdentidadeMagaluLocalWorker: async ({ sourceUrl }) => ({
+        sourceUrl, capability: "magalu_identity_v1", observedProductId: "123456789",
+        identidadeValidada: true, canonicalUrl: urlTituloFixture
+      }),
+      garantirIdentidadeMagaluLocalWorker: async () => assert.fail("identidade em cache"),
+      resolverFatosMagalu: async () => resolucaoOficialTitulo({ titulo })
+    }
+  });
+  assert.strictEqual(resultado.ok, true, resultado.motivo);
+  const normalizada = normalizarOfertaImportada(resultado, job);
+  const prova = normalizada.metadata.provaTituloTecnicoValidada;
+  assert.strictEqual(prova?.titulo.valor, titulo);
+  assert.strictEqual(prova?.ocorrenciaLink.urlOriginal, oneLink);
+  assert.strictEqual(prova?.ocorrenciaLink.id, "95");
+  assert.strictEqual(normalizada.linkAfiliado, urlTituloWorkspaceFixture);
 }
 
 async function testarIdentidadeSemImagemAindaBloqueiaPublicacao() {
@@ -258,6 +285,9 @@ async function testarSloganRadarUsaTituloOficialDoMesmoProduto() {
   assert.strictEqual(resultado.linkExpandido, urlTituloWorkspaceFixture);
   assert.strictEqual(resultado.linkOriginal, urlTituloFixture);
   assert.strictEqual(resultado.metadata.linksComerciais[0].urlOriginal, urlTituloFixture);
+  const normalizada = normalizarOfertaImportada(resultado, { id: 594, evento_id: 694, cliente_id: "workspace_magalu" });
+  assert.strictEqual(normalizada.metadata.provaTituloTecnicoValidada?.titulo.valor, tituloOficial);
+  assert.strictEqual(normalizada.metadata.provaTituloTecnicoValidada?.ocorrenciaLink.id, "93");
 }
 
 async function testarSemTituloRadarUsaTituloOficialDoMesmoProduto() {
@@ -308,6 +338,7 @@ async function testarTituloOficialSemProvenienciaRetemOferta() {
 }
 
 testarOneLinkAguardaEReutilizaIdentidadeLocal()
+  .then(testarTituloOneLinkAncoraNaOcorrenciaCapturada)
   .then(testarIdentidadeSemImagemAindaBloqueiaPublicacao)
   .then(testarPreservaTituloRadarSeguro)
   .then(testarSloganRadarUsaTituloOficialDoMesmoProduto)

@@ -921,6 +921,9 @@ function avaliarEvidenciaCategoria(oferta = {}, termo = "") {
         (/\b(?:relojoeiro|(?:reparo|conserto) de relogios?)\b/.test(titulo) ||
          (/\b(?:fabricacao|reparo|conserto|montagem)\b/.test(titulo) && /\b(?:joias|bijuterias)\b/.test(titulo)))))) {
     categoria = CATEGORIA.ferramentas;
+  } else if (/^paris elysees blue melody \d+\s*ml\b/.test(titulo) &&
+      !/\b(?:frasco|vazio|vazia|refil|amostra|decant|inspirado)\b/.test(titulo)) {
+    categoria = CATEGORIA.beleza;
   } else if (/\b(?:edt|edp)\b/.test(titulo) &&
       /\b(?:perfume|fragrancia|eau de toilette|eau de parfum|hugo boss|giorgio armani)\b|\b\d+(?: \d+)?\s*ml\b/.test(titulo) &&
       !/\b(?:frasco|vazio|vazia|limpador|limpeza|refil de tinta|relogio|camiseta|monitor)\b/.test(titulo)) {
@@ -936,7 +939,8 @@ function avaliarEvidenciaCategoria(oferta = {}, termo = "") {
   } else if ((finalidadePesca = finalidadePesqueiraExplicita(titulo))) {
     categoria = CATEGORIA.pesca;
     motivo = finalidadePesca;
-  } else if (/\biscas?\b.{0,60}\b(?:artificial|artificiais|camarao|camaroes|frog|sapo|jig)\b/.test(titulo) ||
+  } else if (/^(?:(?:kit|jogo) (?:de )?)?(?:anzo(?:l|is) (?:de |para )?pesca|barracas? (?:de |para )?camping)\b/.test(titulo) ||
+      /\biscas?\b.{0,60}\b(?:artificial|artificiais|camarao|camaroes|frog|sapo|jig)\b/.test(titulo) ||
       /\blinha shimano kairiki\b|\bvara lori rampage\b/.test(titulo) ||
       (/\blinha\b/.test(titulo) && /\b(?:pesca|fluorocarbono|multifilamento|monofilamento)\b/.test(titulo)) ||
       /\bvara (?:de |para )?pesca\b/.test(titulo) ||
