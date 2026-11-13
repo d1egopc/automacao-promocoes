@@ -1,3 +1,4 @@
+const { urlCatalogo, mesmaSelecaoCatalogo } = require("../../optimus-capture/local-worker/mercadolivre-identity");
 const { texto } = require("./normalizacao.service");
 const { cupomValido } = require("./beneficios.service");
 const { calcularValorEfetivo } = require("./valor-efetivo.service");
@@ -26,7 +27,66 @@ function tituloNormalizadoForte(valor = "") {
     .trim();
 }
 
+function identidadeMlAncorada(oferta = {}) {
+  const metadata = oferta.metadata || oferta.raw?.metadata;
+  const prova = metadata?.provaTituloTecnicoValidada;
+  const identidade = metadata?.identidadeCanonicaMl;
+  const ocorrencia = prova?.ocorrenciaLink;
+  const workspace = texto(oferta.clienteId || oferta.workspaceId);
+  if (oferta.marketplace !== "mercadolivre" || prova?.validacao !== "confirmada_pelo_importador" ||
+      prova.versao !== 1 || prova.marketplace !== "mercadolivre" || !texto(prova.titulo?.valor) ||
+      texto(prova.titulo.valor) !== texto(oferta.titulo) || identidade?.status !== "consistente" ||
+      identidade.mlbForteConfirmado !== true || !identidade.catalogId || !workspace ||
+      prova.workspaceId !== workspace || !ocorrencia?.id || !ocorrencia.urlOriginal ||
+      ocorrencia.urlOriginal !== oferta.linkOriginal || ocorrencia.urlOriginal !== identidade.urlOriginal ||
+      texto(prova.jobId) !== texto(metadata.jobId) || !prova.jobId ||
+      texto(prova.eventoId) !== texto(metadata.eventoId) || !prova.eventoId) return null;
+  try {
+    const selecao = urlCatalogo(prova.produto?.urlCanonica);
+    const variante = texto(identidade.variationId);
+    if (!selecao || !mesmaSelecaoCatalogo(selecao, urlCatalogo(identidade.urlCanonicaRevalidada)) ||
+        selecao.catalogId !== identidade.catalogId || selecao.listingId !== identidade.mlbRevalidado ||
+        selecao.listingId !== identidade.mlbProduto || selecao.listingId !== prova.produto?.produtoIdCanonico ||
+        (variante && !/^\d{1,30}$/.test(variante))) return null;
+    return { produtoIdDetectado: selecao.listingId, tipoIdentidade: "mlb",
+      catalogId: selecao.catalogId, listingId: selecao.listingId, variationId: variante };
+  } catch (_) { return null; }
+}
+
+function selecaoMlReservaHistorica(oferta = {}) {
+  const ancorada = identidadeMlAncorada(oferta);
+  if (ancorada) return ancorada;
+  const metadata = oferta.metadata || {};
+  const universal = metadata.ofertaUniversal;
+  const workspace = texto(oferta.clienteId || oferta.workspaceId);
+  if (oferta.marketplace !== "mercadolivre" || !workspace || universal?.workspaceId !== workspace ||
+      universal.marketplace !== "mercadolivre" || metadata.ofertaUniversalValidacao?.ok !== true ||
+      universal.produto?.urlOriginal !== oferta.linkOriginal) return null;
+  try {
+    const selecao = urlCatalogo(universal.produto.urlCanonica);
+    if (!selecao || universal.produto.idExterno !== selecao.catalogId) return null;
+    const direta = urlCatalogo(oferta.linkOriginal);
+    const identidade = metadata.identidadeCanonicaMl;
+    const transporte = metadata.resolucaoRadar?.provaTransporteShowProduct;
+    if (direta ? !mesmaSelecaoCatalogo(direta, selecao) : !(transporte?.ok === true &&
+        identidade?.status === "consistente" && identidade.transporteShowProductConfirmado === true &&
+        identidade.urlOriginal === oferta.linkOriginal && metadata.transporteTecnicoMl?.linkOriginalRadar === oferta.linkOriginal &&
+        mesmaSelecaoCatalogo(selecao, urlCatalogo(transporte.linkResolvidoTecnico)) &&
+        mesmaSelecaoCatalogo(selecao, urlCatalogo(identidade.urlCanonicaRevalidada)))) return null;
+    return { catalogId: selecao.catalogId, listingId: selecao.listingId, variationId: "" };
+  } catch (_) { return null; }
+}
+
+function compararSelecaoMl(atual, anterior) {
+  if (!atual || !anterior || atual.catalogId !== anterior.catalogId) return null;
+  if (atual.listingId !== anterior.listingId) return false;
+  if (Boolean(atual.variationId) !== Boolean(anterior.variationId)) return null;
+  return atual.variationId === anterior.variationId;
+}
+
 function detectarIdentidadeProdutoUniversal(oferta = {}) {
+  const ancorada = identidadeMlAncorada(oferta);
+  if (ancorada) return ancorada;
   const raw = oferta.raw && typeof oferta.raw === "object" ? oferta.raw : {};
   const metadata = raw.metadata && typeof raw.metadata === "object" ? raw.metadata : {};
   const campos = [
@@ -161,6 +221,17 @@ function dentroJanelaCurta(oferta = {}, contexto = {}) {
   return horas >= 0 && horas <= janelaHoras;
 }
 
+function conflitoIdentidadeAncorada(atual, anterior, identidadeAtual, identidadeAnterior) {
+  if (!identidadeAtual.catalogId && !identidadeAnterior.catalogId) return false;
+  const workspaceAtual = texto(atual.clienteId || atual.workspaceId);
+  const workspaceAnterior = texto(anterior.clienteId || anterior.workspaceId);
+  return Boolean((workspaceAtual && workspaceAnterior && workspaceAtual !== workspaceAnterior) ||
+    (identidadeAtual.tipoIdentidade === "mlb" && identidadeAnterior.tipoIdentidade === "mlb" &&
+      identidadeAtual.produtoIdDetectado !== identidadeAnterior.produtoIdDetectado) ||
+    (identidadeAtual.variationId && identidadeAnterior.variationId &&
+      identidadeAtual.variationId !== identidadeAnterior.variationId));
+}
+
 function encontrarAnteriorRelevante(ofertaUniversal = {}, anteriores = []) {
   const chave = chaveMemoriaUniversal(ofertaUniversal);
   const identidadeAtual = detectarIdentidadeProdutoUniversal(ofertaUniversal);
@@ -175,6 +246,13 @@ function encontrarAnteriorRelevante(ofertaUniversal = {}, anteriores = []) {
     const tituloItem = normalizarComparacao(item.titulo || item.tituloNormalizado);
     const marketplaceItem = normalizarComparacao(item.marketplace);
 
+    if (identidadeAtual.catalogId || identidadeItem.catalogId) {
+      const mesmo = compararSelecaoMl(identidadeAtual.catalogId ? identidadeAtual : selecaoMlReservaHistorica(ofertaUniversal),
+        identidadeItem.catalogId ? identidadeItem : selecaoMlReservaHistorica(item));
+      if (mesmo !== null) return mesmo && texto(ofertaUniversal.clienteId || ofertaUniversal.workspaceId) ===
+        texto(item.clienteId || item.workspaceId);
+    }
+    if (conflitoIdentidadeAncorada(ofertaUniversal, item, identidadeAtual, identidadeItem)) return false;
     if (chaveItem && chaveItem === chave) return true;
     if (
       identidadeAtual.produtoIdDetectado &&
@@ -194,6 +272,13 @@ function ofertaCompativelMemoriaOficial(ofertaUniversal = {}, item = {}) {
   const marketplaceItem = normalizarComparacao(item.marketplace);
   const tiposFortes = new Set(["mlb", "asin", "shopee", "link_normalizado"]);
 
+  if (identidadeAtual.catalogId || identidadeItem.catalogId) {
+    const mesmo = compararSelecaoMl(identidadeAtual.catalogId ? identidadeAtual : selecaoMlReservaHistorica(ofertaUniversal),
+      identidadeItem.catalogId ? identidadeItem : selecaoMlReservaHistorica(item));
+    if (mesmo !== null) return mesmo && texto(ofertaUniversal.clienteId || ofertaUniversal.workspaceId) ===
+      texto(item.clienteId || item.workspaceId);
+  }
+  if (conflitoIdentidadeAncorada(ofertaUniversal, item, identidadeAtual, identidadeItem)) return false;
   if (tiposFortes.has(identidadeAtual.tipoIdentidade) && tiposFortes.has(identidadeItem.tipoIdentidade)) {
     return identidadeAtual.produtoIdDetectado === identidadeItem.produtoIdDetectado && marketplaceAtual === marketplaceItem;
   }
@@ -488,6 +573,9 @@ function avaliarMemoriaUniversal(ofertaUniversal = {}, contexto = {}) {
 module.exports = {
   avaliarMemoriaUniversal,
   chaveMemoriaUniversal,
+  identidadeMlAncorada,
+  selecaoMlReservaHistorica,
+  compararSelecaoMl,
   detectarIdentidadeProdutoUniversal
 };
 

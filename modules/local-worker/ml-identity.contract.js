@@ -1,6 +1,6 @@
 "use strict";
 const crypto = require("crypto");
-const { pageMlbu } = require("../../optimus-capture/local-worker/mercadolivre-identity");
+const { pageMlbu, urlCatalogo, mesmaSelecaoCatalogo } = require("../../optimus-capture/local-worker/mercadolivre-identity");
 
 const ML_IDENTITY_CAPABILITY = "ml_identity_v1";
 const ML_IDENTITY_CONTRACT_VERSION = 1;
@@ -101,17 +101,29 @@ function validarResultadoMlIdentity(payload = {}, opcoes = {}) {
   if (normalizarMlb(prova.expectedMlb) !== expectedMlb || normalizarMlb(prova.observedMlb) !== expectedMlb || prova.sameProductObject !== true) throw erroContrato("ml_identity_prova_produto_invalida");
   if (!Number.isFinite(collectedAt.getTime()) || collectedAt.getTime() > agoraMs + 30_000 || agoraMs - collectedAt.getTime() >= ttlMs) throw erroContrato("ml_identity_resultado_stale");
 
-  const finalUrl = sanitizarUrlMercadoLivre(payload.finalUrl || prova.finalUrl);
+  let selecao, finalCatalogo, canonicoCatalogo;
+  if (opcoes.sourceUrl || prova.catalogId || prova.listingId) try {
+    selecao = urlCatalogo(opcoes.sourceUrl);
+    finalCatalogo = urlCatalogo(payload.finalUrl || prova.finalUrl);
+    canonicoCatalogo = urlCatalogo(payload.canonicalUrl || prova.canonicalUrl);
+  } catch (_) { throw erroContrato("ml_identity_catalogo_url_invalida"); }
+  const catalogoValido = mesmaSelecaoCatalogo(selecao, finalCatalogo) &&
+    mesmaSelecaoCatalogo(selecao, canonicoCatalogo) && selecao.listingId === expectedMlb &&
+    prova.listingId === expectedMlb && prova.catalogId === selecao.catalogId;
+  if ((selecao || finalCatalogo || canonicoCatalogo || prova.catalogId || prova.listingId) && !catalogoValido) {
+    throw erroContrato("ml_identity_catalogo_vinculo_divergente");
+  }
+  const finalUrl = catalogoValido ? finalCatalogo.url : sanitizarUrlMercadoLivre(payload.finalUrl || prova.finalUrl);
   const associacao = payload.associacaoPagina || prova.associacaoPagina;
   const bindingValido = associacao && associacao.source === "nordic_current_product" &&
     /^MLBU\d{6,}$/.test(associacao.pageMlbu) && associacao.mlb === expectedMlb &&
     associacao.bookmarkItem === expectedMlb && associacao.trackItem === expectedMlb &&
     associacao.bookmarkPage === associacao.pageMlbu && associacao.trackPage === associacao.pageMlbu &&
     JSON.stringify(associacao) === JSON.stringify(prova.associacaoPagina) && pageMlbu(finalUrl) === associacao.pageMlbu;
-  if (!finalUrl || (pageMlbu(finalUrl) ? !bindingValido : !urlMercadoLivreCompativel(finalUrl, expectedMlb))) throw erroContrato("ml_identity_final_url_invalida");
+  if (!catalogoValido && (!finalUrl || (pageMlbu(finalUrl) ? !bindingValido : !urlMercadoLivreCompativel(finalUrl, expectedMlb)))) throw erroContrato("ml_identity_final_url_invalida");
   const canonicalInformada = texto(payload.canonicalUrl || prova.canonicalUrl);
-  const canonicalUrl = canonicalInformada ? sanitizarUrlMercadoLivre(canonicalInformada) : "";
-  if (canonicalInformada && (!canonicalUrl || (bindingValido
+  const canonicalUrl = catalogoValido ? canonicoCatalogo.url : (canonicalInformada ? sanitizarUrlMercadoLivre(canonicalInformada) : "");
+  if (!catalogoValido && canonicalInformada && (!canonicalUrl || (bindingValido
     ? pageMlbu(canonicalUrl) !== associacao.pageMlbu
     : !urlMercadoLivreCompativel(canonicalUrl, expectedMlb, { exigirMlb: false })))) throw erroContrato("ml_identity_canonical_invalida");
 
@@ -125,11 +137,16 @@ function validarResultadoMlIdentity(payload = {}, opcoes = {}) {
   if (imagemInformada && !imagemOficial) throw erroContrato("ml_identity_imagem_host_invalido");
   if (tituloOficial && !ML_IDENTITY_TITLE_ORIGINS.has(origemTitulo)) throw erroContrato("ml_identity_origem_titulo_invalida");
   if (imagemOficial && !ML_IDENTITY_IMAGE_ORIGINS.has(origemImagem)) throw erroContrato("ml_identity_origem_imagem_invalida");
+  if (catalogoValido && !tituloOficial) throw erroContrato("ml_identity_catalogo_sem_titulo_oficial");
   if (!tituloOficial && !imagemOficial) throw erroContrato("ml_identity_sem_identidade_factual");
 
   const variationId = /^\d{1,30}$/.test(texto(payload.variationId || prova.variationId))
     ? texto(payload.variationId || prova.variationId)
     : "";
+
+  if (catalogoValido && ((texto(payload.variationId) && !variationId) ||
+      texto(payload.variationId) !== texto(prova.variationId) ||
+      (opcoes.variationId && variationId !== opcoes.variationId))) throw erroContrato("ml_identity_variacao_conflitante");
 
   return {
     capability: ML_IDENTITY_CAPABILITY,
@@ -155,6 +172,7 @@ function validarResultadoMlIdentity(payload = {}, opcoes = {}) {
       provenance: "local_worker.ml_identity_v1",
       expectedMlb,
       observedMlb,
+      ...(catalogoValido ? { catalogId: selecao.catalogId, listingId: selecao.listingId } : {}),
       sameProductObject: true,
       identidadeTipo: "mlb",
       origemTitulo: tituloOficial ? origemTitulo : "",

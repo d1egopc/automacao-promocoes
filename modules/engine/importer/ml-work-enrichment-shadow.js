@@ -8,6 +8,7 @@ const {
 
 const ML_WORK_LOCAL_OPERATION_TIMEOUT_MS = 250;
 const ML_WORK_ENRICHMENT_ACTIVE_FLAG = "ML_WORK_ENRICHMENT_ACTIVE";
+const ML_WORK_ENRICHMENT_CANARY_FLAG = "ML_WORK_ENRICHMENT_CANARY_CLIENTES";
 
 function texto(valor = "") { return String(valor ?? "").trim(); }
 
@@ -51,6 +52,15 @@ function mlWorkEnrichmentAtivo({ deps = {}, env = process.env } = {}) {
   }
   if (typeof deps.mlWorkEnrichmentAtivo === "boolean") return deps.mlWorkEnrichmentAtivo;
   return valorBooleanoAtivo(env?.[ML_WORK_ENRICHMENT_ACTIVE_FLAG]);
+}
+
+function clientesCanarioAncoraMl({ deps, env = process.env } = {}) {
+  if (!mlWorkEnrichmentAtivo({ deps, env })) return [];
+  return [...new Set(texto(env?.[ML_WORK_ENRICHMENT_CANARY_FLAG]).split(",").map(id => id.trim()).filter(Boolean))];
+}
+
+function ancoraMlAtiva({ clienteId, deps, env } = {}) {
+  return clientesCanarioAncoraMl({ deps, env }).includes(texto(clienteId));
 }
 
 function provaIdentidadeSanitizada(resultado = {}) {
@@ -377,6 +387,8 @@ module.exports = {
   consultarMlWorkIdentityBestEffort,
   montarMlWorkEnrichmentShadow,
   mlWorkEnrichmentAtivo,
+  clientesCanarioAncoraMl,
+  ancoraMlAtiva,
   prepararMlWorkEnrichmentAtivo,
   aplicarImagemMlWorkCanonica,
   aplicarTituloMlWork,

@@ -36,6 +36,10 @@ function classificarCategoriaUniversal(ofertaUniversal = {}, contexto = {}) {
   const logs = [];
   const categoriaAtual = texto(ofertaUniversal.categoria);
 
+  if (categoriaAtual === contexto.categoriaOficialComprovada && categoriaOficialAutoritativa(categoriaAtual)) {
+    logs.push({ etapa: "categoria", status: "mantida", motivo: "categoria_oficial_comprovada", categoria: categoriaAtual });
+    return { categoria: categoriaAtual, origem: "oficial", logs };
+  }
   const evidencia = avaliarEvidenciaCategoria(ofertaUniversal, contexto.termo || "");
   if (evidencia) {
     logs.push({ etapa: "categoria", status: categoriaAtual === evidencia.categoria ? "mantida" : "classificada",

@@ -86,7 +86,72 @@ function corrigirImagemUrl(url = "") {
     .replace("&amp;", "&");
 }
 
+function urlCatalogoTecnicoMercadoLivre(valor) {
+  try {
+    const url = new URL(String(valor || ""));
+    if (url.protocol !== "https:" || !["www.mercadolivre.com.br", "mercadolivre.com.br"].includes(url.hostname) ||
+        url.username || url.password || url.port || url.search || url.hash) return null;
+    const id = url.pathname.match(/^\/(?:[a-z0-9-]+\/)?p\/(MLB-?\d{6,})\/?$/i)?.[1];
+    return id ? id.replace("-", "").toUpperCase() : null;
+  } catch { return null; }
+}
+
+function urlRedirectDiretoCatalogoMl(resolucao, original) {
+  try {
+    const origem = new URL(original);
+    if (origem.protocol !== "https:" || origem.hostname !== "meli.la" || origem.username || origem.password ||
+        origem.port || resolucao?.ok !== true || resolucao.tipoLinkRadar !== "shortlink_meli" ||
+        resolucao.metodoResolucaoMeli || Number(resolucao.statusHttp) !== 200 ||
+        resolucao.urlCapturada !== original || resolucao.linkOriginalRadar !== original) return "";
+    return urlCatalogoTecnicoMercadoLivre(resolucao.urlResolvida) ? resolucao.urlResolvida : "";
+  } catch { return ""; }
+}
+
+// Prova técnica do produto de catálogo. Não representa anúncio, vendedor ou condições comerciais.
+function extrairCatalogoTecnicoMercadoLivre({ html = "", entrada, final }) {
+  const id = urlCatalogoTecnicoMercadoLivre(entrada);
+  if (!id || urlCatalogoTecnicoMercadoLivre(final) !== id) return null;
+  const canonicas = (html.match(/<link\b[^>]*\brel\s*=\s*["']canonical["'][^>]*>/gi) || []);
+  const canonical = canonicas[0]?.match(/\bhref\s*=\s*(["'])(.*?)\1/i)?.[2];
+  if (canonicas.length !== 1 || urlCatalogoTecnicoMercadoLivre(htmlDecode(canonical || "")) !== id) return null;
+  const produtos = [];
+  let ambigua = false;
+  function visitar(obj, profundidade = 0) {
+    if (!obj || typeof obj !== "object") return;
+    if (profundidade > 8) { ambigua = true; return; }
+    const tipos = [obj["@type"]].flat().map(tipo => String(tipo || "").toLowerCase());
+    if (tipos.includes("productgroup") || ["hasVariant", "isVariantOf", "variesBy", "inProductGroupWithID",
+      "variationId", "variation_id", "variantId", "variants"].some(campo => Object.hasOwn(obj, campo))) ambigua = true;
+    if (tipos.includes("product")) produtos.push(obj);
+    for (const valor of Object.values(obj)) visitar(valor, profundidade + 1);
+  }
+  for (const script of html.matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+    try { visitar(JSON.parse(script[1])); }
+    catch { try { visitar(JSON.parse(htmlDecode(script[1]))); } catch { return null; } }
+  }
+  if (ambigua || produtos.length !== 1) return null;
+  const produto = produtos[0];
+  const ids = [produto.productID, produto.productId, produto.catalogProductId, produto.catalog_product_id, produto.sku];
+  if (ids[0] == null || ids.some(valor => valor != null && String(valor).trim().replace("-", "").toUpperCase() !== id) ||
+      produto.itemId != null || produto.item_id != null) return null;
+  if ([produto.url, produto["@id"]].some(url => url != null && urlCatalogoTecnicoMercadoLivre(url) !== id)) return null;
+  const { tituloFactual } = require("../../optimus-capture/local-worker/mercadolivre-identity");
+  const titulo = tituloFactual(htmlDecode(produto.name || ""));
+  if (!titulo || /^(?:loja|store)\b|\b(?:official store|loja oficial)\b/i.test(titulo)) return null;
+  const imagem = [produto.image].flat().map(valor => {
+    try {
+      const url = new URL(typeof valor === "string" ? valor : valor?.url);
+      return url.protocol === "https:" && /(?:^|\.)mlstatic\.com$/i.test(url.hostname) &&
+        !url.username && !url.password && !url.port ? url.href : "";
+    } catch { return ""; }
+  }).find(Boolean) || "";
+  return { titulo, imagem };
+}
+
 module.exports = {
+  urlCatalogoTecnicoMercadoLivre,
+  urlRedirectDiretoCatalogoMl,
+  extrairCatalogoTecnicoMercadoLivre,
   htmlDecode,
   extrairMeta,
   extrairJsonLd,

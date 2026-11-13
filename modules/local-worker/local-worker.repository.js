@@ -248,7 +248,7 @@ function criarLocalWorkerRepository(opcoes = {}) {
     `);
   }
 
-  async function garantirTask({ type, marketplace, productId, sourceUrl = "", technicalSlug = "", capability, idempotencyKey = "", maxAttempts = 3, ttlMs = 15 * 60 * 1000, reutilizarCompleted = true } = {}) {
+  async function garantirTask({ type, marketplace, productId, sourceUrl = "", technicalSlug = "", capability, idempotencyKey = "", maxAttempts = 3, ttlMs = 15 * 60 * 1000, reutilizarCompleted = true, vincularIdempotencia = false, deadline = null } = {}) {
     const pool = poolDisponivel(poolProvider);
     if (!pool) return { ok: false, motivo: "database_indisponivel" };
     await ensureSchema();
@@ -256,23 +256,42 @@ function criarLocalWorkerRepository(opcoes = {}) {
     const tipo = texto(type), mp = texto(marketplace).toLowerCase(), pid = texto(productId), cap = texto(capability);
     if (!tipo || !mp || !pid || !cap) return { ok: false, motivo: "task_invalida" };
     const idem = texto(idempotencyKey) || `${mp}:${pid}:${tipo}`;
-    const existente = await pool.query(`
-      SELECT * FROM local_worker_tasks
-      WHERE marketplace = $1 AND product_id = $2 AND type = $3
-      ORDER BY id DESC LIMIT 1
-    `, [mp, pid, tipo]);
-    if (existente.rows[0] && ([STATUS.PENDING, STATUS.LEASED].includes(existente.rows[0].status) || (reutilizarCompleted && existente.rows[0].status === STATUS.COMPLETED))) {
-      return { ok: true, criada: false, task: payloadTask(existente.rows[0]) };
+    const filtroVinculo = vincularIdempotencia ? "AND idempotency_key = $4 AND expires_at > NOW()" : "AND idempotency_key NOT LIKE 'mercadolivre:ocorrencia:%'";
+    const parametrosBusca = vincularIdempotencia ? [mp, pid, tipo, idem] : [mp, pid, tipo];
+    async function obterOuCriar(db) {
+      const existente = await db.query(`
+        SELECT * FROM local_worker_tasks
+        WHERE marketplace = $1 AND product_id = $2 AND type = $3 ${filtroVinculo}
+        ORDER BY id DESC LIMIT 1
+      `, parametrosBusca);
+      if (existente.rows[0] && ([STATUS.PENDING, STATUS.LEASED].includes(existente.rows[0].status) || (reutilizarCompleted && existente.rows[0].status === STATUS.COMPLETED))) {
+        return { ok: true, criada: false, task: payloadTask(existente.rows[0]) };
+      }
+      const result = await db.query(`
+        INSERT INTO local_worker_tasks
+          (type, marketplace, product_id, source_url, technical_slug, status, capability, idempotency_key, max_attempts, expires_at)
+        SELECT $1, $2, $3, $4, $5, 'pending', $6, $7, $8,
+          LEAST(NOW() + ($9::bigint * INTERVAL '1 millisecond'), to_timestamp($10::double precision / 1000))
+        WHERE $10::double precision IS NULL OR clock_timestamp() < to_timestamp($10::double precision / 1000)
+        ON CONFLICT DO NOTHING RETURNING *
+      `, [tipo, mp, pid, texto(sourceUrl), texto(technicalSlug), cap, idem, Math.max(1, Number(maxAttempts) || 3), Math.max(1000, Number(ttlMs) || 900000), deadline]);
+      if (result.rows[0]) return { ok: true, criada: true, task: payloadTask(result.rows[0]) };
+      const repetida = await db.query(`SELECT * FROM local_worker_tasks WHERE marketplace = $1 AND product_id = $2 AND type = $3 ${filtroVinculo} AND status IN (${vincularIdempotencia && reutilizarCompleted ? "'pending', 'leased', 'completed'" : "'pending', 'leased'"}) ORDER BY id DESC LIMIT 1`, parametrosBusca);
+      return repetida.rows[0] ? { ok: true, criada: false, task: payloadTask(repetida.rows[0]) } : { ok: false, motivo: "task_concorrente_nao_localizada" };
     }
-    const result = await pool.query(`
-      INSERT INTO local_worker_tasks
-        (type, marketplace, product_id, source_url, technical_slug, status, capability, idempotency_key, max_attempts, expires_at)
-      VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, $8, NOW() + ($9::bigint * INTERVAL '1 millisecond'))
-      ON CONFLICT DO NOTHING RETURNING *
-    `, [tipo, mp, pid, texto(sourceUrl), texto(technicalSlug), cap, idem, Math.max(1, Number(maxAttempts) || 3), Math.max(1000, Number(ttlMs) || 900000)]);
-    if (result.rows[0]) return { ok: true, criada: true, task: payloadTask(result.rows[0]) };
-    const repetida = await pool.query(`SELECT * FROM local_worker_tasks WHERE marketplace = $1 AND product_id = $2 AND type = $3 AND status IN ('pending', 'leased') ORDER BY id DESC LIMIT 1`, [mp, pid, tipo]);
-    return repetida.rows[0] ? { ok: true, criada: false, task: payloadTask(repetida.rows[0]) } : { ok: false, motivo: "task_concorrente_nao_localizada" };
+    if (!vincularIdempotencia) return obterOuCriar(pool);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL lock_timeout = '200ms'");
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))", [cap, idem]);
+      const resultado = await obterOuCriar(client);
+      await client.query("COMMIT");
+      return resultado;
+    } catch (erro) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw erro;
+    } finally { client.release(); }
   }
 
   async function claim({ workerId, capabilities = [], leaseMs = 90000 } = {}) {
@@ -368,7 +387,7 @@ function criarLocalWorkerRepository(opcoes = {}) {
     } finally { client.release(); }
   }
 
-  async function completarTecnica({ taskId, workerId, leaseToken, metadata = {} } = {}) {
+  async function completarTecnica({ taskId, workerId, leaseToken, metadata = {}, exigirTtl = false } = {}) {
     const pool = poolDisponivel(poolProvider);
     if (!pool) return { ok: false, motivo: "database_indisponivel" };
     const client = await pool.connect();
@@ -378,7 +397,7 @@ function criarLocalWorkerRepository(opcoes = {}) {
       const row = atual.rows[0];
       if (!row) { await client.query("ROLLBACK"); return { ok: false, motivo: "task_inexistente" }; }
       if (row.status === STATUS.COMPLETED) { await client.query("COMMIT"); return { ok: true, idempotente: true, task: payloadTask(row) }; }
-      if (row.status !== STATUS.LEASED || row.claimed_by !== texto(workerId) || row.lease_token !== texto(leaseToken) || new Date(row.lease_until).getTime() <= Date.now()) {
+      if (row.status !== STATUS.LEASED || row.claimed_by !== texto(workerId) || row.lease_token !== texto(leaseToken) || new Date(row.lease_until).getTime() <= Date.now() || (exigirTtl && new Date(row.expires_at).getTime() <= Date.now())) {
         await client.query("ROLLBACK"); return { ok: false, motivo: "lease_invalido" };
       }
       const atualizado = await client.query(`UPDATE local_worker_tasks SET status = 'completed', completed_at = NOW(), lease_until = NULL, lease_token = NULL, updated_at = NOW(), result_metadata = $2::jsonb WHERE id = $1 RETURNING *`, [String(taskId), JSON.stringify(jsonSeguro(metadata))]);

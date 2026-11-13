@@ -7,6 +7,7 @@ const { spawnSync } = require("node:child_process");
 const crypto = require("node:crypto");
 
 const SHA_RE = /^[0-9a-f]{40}$/;
+const ML_SHARED_RUNTIME_PARSER = "optimus-capture/local-worker/mercadolivre-identity.js";
 const SAFE_PATH_RE = /^[A-Za-z0-9._/-]+$/;
 const WINDOWS_BACKEND = "C:\\Users\\Liva D1EGOPC\\Documents\\BACKEND-OFICIAL-2026";
 
@@ -294,7 +295,8 @@ function isNonRuntime(file) {
 }
 
 function isOverlayRuntime(file) {
-  if (file === "index.js") return true;
+  // This exact file is already required by the backend as well as by the extension.
+  if (file === "index.js" || file === ML_SHARED_RUNTIME_PARSER) return true;
   const root = file.split("/", 1)[0];
   return RUNTIME_ROOTS.has(root) && file.includes("/");
 }
@@ -314,7 +316,7 @@ function parseDiff(repo, base, source) {
   });
 }
 
-function buildPlan(repo, base, source, { releaseMode = "", fullImageProfile = RADAR_INGRESS_FULL_IMAGE_PROFILE } = {}) {
+function buildPlan(repo, base, source, { releaseMode = "", ciUniversalAnchor = false, fullImageProfile = RADAR_INGRESS_FULL_IMAGE_PROFILE } = {}) {
   const head = git(repo, ["rev-parse", "HEAD"]).stdout.trim();
   if (head !== source) throw new Error(`source_checkout_mismatch:${head}`);
   const dirt = git(repo, ["status", "--porcelain=v1"]).stdout.trim();
@@ -385,7 +387,7 @@ function buildPlan(repo, base, source, { releaseMode = "", fullImageProfile = RA
     sourceSha: source,
     baseSha: base,
     validation: blocked.length ? "BLOCKED" : "PASS",
-    deployMode: releaseMode === "full_image" ? "full_image" : bootstrapObservationProfile ? "baileys_bootstrap_observation" : balancedProfile ? "baileys_balanced_buffer_patch" : bufferProfile ? "baileys_buffer_patch" : runtimeFiles.length ? "overlay" : "none",
+    deployMode: ciUniversalAnchor ? "none" : releaseMode === "full_image" ? "full_image" : bootstrapObservationProfile ? "baileys_bootstrap_observation" : balancedProfile ? "baileys_balanced_buffer_patch" : bufferProfile ? "baileys_buffer_patch" : runtimeFiles.length ? "overlay" : "none",
     runtimeFiles,
     ignoredFiles,
     blocked
@@ -624,8 +626,8 @@ function executeSpec(spec, cwd, repoNodeModules) {
   return run(spec.command, spec.args, { cwd, env });
 }
 
-function validate(repo, base, source, { releaseMode = "" } = {}) {
-  const plan = buildPlan(repo, base, source, { releaseMode });
+function validate(repo, base, source, { releaseMode = "", ciUniversalAnchor = false } = {}) {
+  const plan = buildPlan(repo, base, source, { releaseMode, ciUniversalAnchor });
   if (plan.blocked.length) return { ...plan, result: "BLOCKED", tests: [] };
   const specs = testMatrix(plan);
   const results = [];
@@ -760,7 +762,7 @@ function main() {
     return;
   }
   if (command === "validate") {
-    const report = validate(repo, base, source, { releaseMode: args["release-mode"] || "" });
+    const report = validate(repo, base, source, { releaseMode: args["release-mode"] || "", ciUniversalAnchor: args["ci-universal-anchor"] === true });
     if (args.report) fs.writeFileSync(args.report, `${JSON.stringify(report, null, 2)}\n`);
     console.log(JSON.stringify(report, null, 2));
     if (report.result === "FAIL" || report.result === "BLOCKED") process.exitCode = 1;

@@ -1,3 +1,4 @@
+const { createHash } = require("node:crypto");
 "use strict";
 
 const {
@@ -243,6 +244,9 @@ function criarLocalWorkerService(opcoes = {}) {
         provaTecnica
       }, {
         expectedMlb: task.productId,
+        ...(/^[a-f0-9]{64}:\d{0,30}$/.test(task.technicalSlug || "") ? {
+          sourceUrl: task.sourceUrl, variationId: task.technicalSlug?.split(":")[1] || ""
+        } : {}),
         agoraMs: agora().getTime(),
         ttlMs: ML_IDENTITY_RESULT_TTL_MS
       });
@@ -346,6 +350,9 @@ function criarLocalWorkerService(opcoes = {}) {
         validado.provaTecnica.hostImagem = new URL(imagemFinalSanitizada).hostname;
         const recibo = criarReciboImagemMlIdentity(validado, validado.provaTecnica, { agoraMs: agora().getTime() });
         if (recibo) validado.provaTecnica.reciboImagem = recibo;
+      }
+      if (validado.provaTecnica.catalogId) {
+        return repo.completarTecnica({ taskId, workerId: worker.workerId, leaseToken, metadata: validado, exigirTtl: true });
       }
       return repo.completarIdentidade({
         taskId,
@@ -498,8 +505,41 @@ function criarLocalWorkerService(opcoes = {}) {
     });
   }
 
-  async function garantirIdentidadeMercadoLivre({ productId, sourceUrl = "" } = {}) {
+  async function garantirIdentidadeMercadoLivre({ productId, sourceUrl = "", vinculo, taskId } = {}) {
     const pid = texto(productId).toUpperCase();
+    let catalogo;
+    // Only the occurrence-bound path is new. Unbound calls retain legacy URL handling.
+    if (vinculo) {
+      const { urlCatalogo } = require("../../optimus-capture/local-worker/mercadolivre-identity");
+      const { ancoraMlAtiva } = require("../engine/importer/ml-work-enrichment-shadow");
+      if (!ancoraMlAtiva({ clienteId: vinculo.workspaceId, deps: opcoes })) {
+        return { ok: false, motivo: "task_ml_identity_workspace_fora_canario" };
+      }
+      try { catalogo = urlCatalogo(sourceUrl); } catch (_) { /* reject below */ }
+      if (!catalogo) return { ok: false, motivo: "task_ml_identity_invalida" };
+    }
+    if (catalogo) {
+      const agoraMs = agora().getTime();
+      const ttlMs = Math.min(15 * 60_000, Number(vinculo?.deadline) - agoraMs);
+      const chave = texto(vinculo?.chave);
+      const variante = texto(vinculo?.variationId);
+      if (catalogo.listingId !== pid || !/^[a-f0-9]{64}$/.test(chave) ||
+          (variante && !/^\d{1,30}$/.test(variante)) || !Number.isFinite(ttlMs) || ttlMs < 1000) {
+        return { ok: false, motivo: "task_ml_identity_invalida" };
+      }
+      const epoch = vinculo.epoch || "";
+      const chaveTecnica = createHash("sha256").update(JSON.stringify([catalogo.url, variante, epoch])).digest("hex");
+      const technicalSlug = chaveTecnica + ":" + variante;
+      if (taskId) {
+        const task = await repo.obterTask(taskId);
+        return task?.technicalSlug === technicalSlug && task?.sourceUrl === catalogo.url &&
+          task?.capability === ML_IDENTITY_CAPABILITY && task?.productId === pid
+          ? { ok: true, criada: false, task } : { ok: false, motivo: "task_ml_identity_vinculo_divergente" };
+      }
+      return repo.garantirTask({ type: ML_IDENTITY_TASK_TYPE, marketplace: "mercadolivre", productId: pid,
+        sourceUrl: catalogo.url, technicalSlug, capability: ML_IDENTITY_CAPABILITY,
+        idempotencyKey: "mercadolivre:ocorrencia:" + chaveTecnica, ttlMs, deadline: Number(vinculo.deadline), vincularIdempotencia: true });
+    }
     const sourceUrlSanitizada = sanitizarUrlMercadoLivre(sourceUrl);
     if (!/^MLB\d+$/.test(pid) || !urlMercadoLivreProdutoValida(sourceUrlSanitizada, pid)) return { ok: false, motivo: "task_ml_identity_invalida" };
     return repo.garantirTask({

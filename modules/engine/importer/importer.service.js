@@ -1,5 +1,6 @@
+const { categoriaOficialAutoritativa } = require("../../inteligencia-universal/categoria.service");
 const { queryEngine } = require("../database");
-const { sqlFiltroEpochReal } = require("../universal-ingress-fence");
+const { sqlFiltroEpochReal, verificarCapturaIngressReal, epochIngressReal } = require("../universal-ingress-fence");
 const { normalizarNumeroMoeda } = require("../../../utils/moeda");
 const {
   resolverPrioridadeFinalCupom
@@ -90,14 +91,21 @@ const { classificarLinkEngine } = require("../link-role.service");
 const { registrarAchado } = require("../../manual-v2/ofertas-v2-achados");
 const {
   consultarMlWorkIdentityBestEffort,
+  executarOperacaoLocalComTimeout,
   montarMlWorkEnrichmentShadow,
   mlWorkEnrichmentAtivo,
+  clientesCanarioAncoraMl,
+  ancoraMlAtiva,
   prepararMlWorkEnrichmentAtivo,
   aplicarImagemMlWorkCanonica,
   aplicarTituloMlWork,
   montarTelemetriaMlWorkAtivo
 } = require("./ml-work-enrichment-shadow");
-const { montarProvaTituloTecnico } = require("./adapters/prova-identidade-tecnica");
+const { createHash } = require("node:crypto");
+const { urlCatalogo, mesmaSelecaoCatalogo } = require("../../../optimus-capture/local-worker/mercadolivre-identity");
+const { urlCatalogoTecnicoMercadoLivre } = require("../../../marketplaces/mercadolivre/utils");
+const { validarResultadoMlIdentity, ML_IDENTITY_RESULT_TTL_MS } = require("../../local-worker/ml-identity.contract");
+const { montarProvaTituloTecnico, vincularOcorrenciaProduto } = require("./adapters/prova-identidade-tecnica");
 const {
   criarMedidorEngineMemoryStage,
   registrarPontoEngineMemoryStage,
@@ -144,6 +152,13 @@ function categoriaGenericaEngine(categoria = "") {
     || texto === "aliexpress"
     || texto === "awin"
     || texto === "kabum";
+}
+
+function categoriaMlOficialComprovada(produto, listingId) {
+  const prova = produto?.provaCategoriaOficial;
+  return prova?.fonte === "api_mercadolibre.items.category" && prova.produtoIdCanonico === listingId &&
+    prova.urlApi === "https://api.mercadolibre.com/items/" + listingId &&
+    categoriaOficialAutoritativa(prova.categoria) ? prova.categoria : "";
 }
 
 function resolverCategoriaEngine(resultado = {}, job = {}) {
@@ -607,13 +622,53 @@ function logSelecaoImagemMercadoLivre({ job = {}, evento = {}, oferta = {}, ofer
   }));
 }
 
+// The completed task is the durable signal. The existing scheduler and claim
+// read it directly so completion and wait registration can occur in either order.
+function sqlConclusaoIdentidadeMl(j) {
+  const r = `${j}.metadata->'localWorkerImageRetry'`;
+  const v = `(${r}->'vinculo')`;
+  return `(${r}->>'aguardandoConclusao' = 'true'
+    AND ${r}->>'conclusaoConsumida' IS NULL
+    AND ${r}->>'capability' = 'ml_identity_v1'
+    AND ${j}.oferta_id IS NULL
+    AND ${v}->>'workspaceId' = ${j}.cliente_id
+    AND ${v}->>'jobId' = ${j}.id::text
+    AND ${v}->>'eventoId' = ${j}.evento_id::text
+    AND clock_timestamp() < to_timestamp((${v}->>'deadline')::double precision / 1000)
+    AND EXISTS (SELECT 1 FROM engine_operation_state s WHERE s.id=1 AND s.mode='UNIVERSAL'
+      AND s.operation_epoch_started_at=(${v}->>'epoch')::timestamptz)
+    AND EXISTS (SELECT 1 FROM engine_links l WHERE l.id=(${v}->>'ocorrenciaId')::bigint
+      AND l.evento_id=${j}.evento_id AND l.url_original=${v}->>'urlOriginal')
+    AND EXISTS (SELECT 1 FROM local_worker_tasks t WHERE t.id=(${v}->>'taskId')::bigint
+      AND t.status='completed' AND t.marketplace='mercadolivre' AND t.capability='ml_identity_v1' AND t.type='identidade_oficial'
+      AND t.product_id=${v}->>'listingId' AND t.source_url=${v}->>'urlTecnica'
+      AND t.technical_slug=${v}->>'technicalSlug'
+      AND t.completed_at>=t.created_at AND t.completed_at<t.expires_at
+      AND t.completed_at<to_timestamp((${v}->>'deadline')::double precision / 1000)
+      AND t.result_metadata #>> '{provaTecnica,catalogId}' = ${v}->>'catalogId'
+      AND t.result_metadata #>> '{provaTecnica,listingId}' = ${v}->>'listingId'
+      AND (${v}->>'variationId'='' OR t.result_metadata->>'variationId'=${v}->>'variationId')
+      AND t.result_metadata->>'capability'='ml_identity_v1'
+      AND t.result_metadata #>> '{provaTecnica,source}'='local_first_party'
+      AND t.result_metadata #>> '{provaTecnica,provenance}'='local_worker.ml_identity_v1'
+      AND t.result_metadata->>'identidadeValidada'='true'
+      AND NULLIF(t.result_metadata->>'tituloOficial','') IS NOT NULL
+      AND (t.result_metadata->>'collectedAt')::timestamptz > clock_timestamp() - INTERVAL '${ML_IDENTITY_RESULT_TTL_MS} milliseconds'
+      AND (t.result_metadata->>'collectedAt')::timestamptz >= GREATEST(t.created_at, (${v}->>'epoch')::timestamptz)
+      AND (t.result_metadata->>'collectedAt')::timestamptz < to_timestamp((${v}->>'deadline')::double precision / 1000)))`;
+}
+
 async function buscarJobsProntos({ limite = 10, marketplace = "" } = {}) {
   const frescor = sqlFrescorComercialPreImporter("j", "e");
   const params = [];
   const retry = sqlRetryPreImporter("j");
+  const canario = clientesCanarioAncoraMl();
+  const parametroCanario = canario.length ? "$" + params.push(canario) : null;
   const filtros = [
     "j.status = 'pronto_para_importar'",
-    retry.vencido,
+    parametroCanario
+      ? `(${retry.vencido} OR (j.cliente_id = ANY(${parametroCanario}::text[]) AND ${sqlConclusaoIdentidadeMl("j")}))`
+      : retry.vencido,
     sqlFiltroEpochReal("e")
   ];
   const marketplaceExpr = "LOWER(COALESCE(NULLIF(TRIM(marketplace), ''), NULLIF(TRIM(marketplace_detectado), ''), ''))";
@@ -1026,13 +1081,30 @@ function separarResultadoJobsProntos(linhas = []) {
 }
 
 async function tentarMarcarImportando(jobId, client = null) {
+  const canario = clientesCanarioAncoraMl();
+  const params = canario.length ? [jobId, canario] : [jobId];
+  const conclusao = canario.length
+    ? `(engine_jobs_cliente.cliente_id = ANY($2::text[]) AND ${sqlConclusaoIdentidadeMl("engine_jobs_cliente")})`
+    : "FALSE";
   const sql = `UPDATE engine_jobs_cliente
-        SET status = 'importando', atualizado_em = NOW()
+        SET status = 'importando', atualizado_em = NOW(),
+            metadata = CASE WHEN ${conclusao}
+              THEN jsonb_set(metadata, '{localWorkerImageRetry,conclusaoConsumida}', 'true')
+              ELSE metadata END
       WHERE id = $1 AND status = 'pronto_para_importar'
+        AND (metadata #>> '{localWorkerImageRetry,vinculo,deadline}' IS NULL OR (
+          (metadata #>> '{localWorkerImageRetry,vinculo,deadline}')::bigint > EXTRACT(EPOCH FROM clock_timestamp()) * 1000
+          AND ((metadata #>> '{localWorkerImageRetry,proximaTentativaEmMs}')::bigint <= EXTRACT(EPOCH FROM clock_timestamp()) * 1000
+            OR ${conclusao})
+          AND EXISTS (SELECT 1 FROM engine_eventos_brutos e WHERE e.id = engine_jobs_cliente.evento_id
+            AND ${sqlFiltroEpochReal("e")})
+          AND (metadata #>> '{localWorkerImageRetry,vinculo,epoch}' IS NULL OR EXISTS (
+            SELECT 1 FROM engine_operation_state s WHERE s.id=1 AND s.mode='UNIVERSAL'
+              AND s.operation_epoch_started_at=(metadata #>> '{localWorkerImageRetry,vinculo,epoch}')::timestamptz))))
       RETURNING id, status`;
   if (client && typeof client.query === "function") {
     try {
-      const resultado = await client.query(sql, [jobId]);
+      const resultado = await client.query(sql, params);
       return {
         ok: resultado.rowCount > 0,
         ignorado: resultado.rowCount === 0,
@@ -1043,7 +1115,7 @@ async function tentarMarcarImportando(jobId, client = null) {
     }
   }
 
-  const resultado = await queryEngine(sql, [jobId]);
+  const resultado = await queryEngine(sql, params);
 
   if (!resultado.ok) return { ok: false, motivo: resultado.motivo, erro: resultado.erro };
   return { ok: resultado.resultado.rowCount > 0, ignorado: resultado.resultado.rowCount === 0 };
@@ -1056,7 +1128,11 @@ async function registrarEtapaImportacao(jobId, etapa, status, motivo = "", detal
   });
 }
 
-function extrairIdMercadoLivreDaUrl(url = "") {
+function extrairIdMercadoLivreDaUrl(url = "", ancoraAtiva = false) {
+  if (ancoraAtiva) try {
+    const selecao = urlCatalogo(url);
+    if (selecao) return selecao.listingId;
+  } catch (_) { return ""; }
   return String(url || "").match(/\bMLB-?(\d{6,})\b/i)?.[1]
     ? `MLB${String(url || "").match(/\bMLB-?(\d{6,})\b/i)[1]}`.toUpperCase()
     : "";
@@ -1072,7 +1148,7 @@ function extrairAsinDaUrlAncora(url = "") {
   }
 }
 
-function validarProvaTituloTecnico(resultado = {}, produto = {}, job = {}) {
+function validarProvaTituloTecnico(resultado = {}, produto = {}, job = {}, ancoraAtiva = false) {
   const metadata = resultado.metadata || {};
   const prova = metadata.provaTituloTecnico;
   const adapter = normalizarTexto(metadata.adapter || "").toLowerCase();
@@ -1123,9 +1199,16 @@ function validarProvaTituloTecnico(resultado = {}, produto = {}, job = {}) {
   if (adapter === "mercadolivre") {
     const identidade = metadata.identidadeCanonicaMl || metadata.revalidacaoMeliLa || {};
     const produtoIdCanonico = `MLB${productId.match(/(?:^|\b)MLB-?(\d{6,})\b/i)?.[1] || ""}`.toUpperCase();
-    const canonicalMlb = extrairIdMercadoLivreDaUrl(canonicalUrl);
-    const outputMlb = extrairIdMercadoLivreDaUrl(adapterCanonicalUrl);
-    const anchorMlb = extrairIdMercadoLivreDaUrl(anchorUrl);
+    const catalogoTecnico = produto.provaCatalogoTecnicoMl;
+    const catalogoConfirmado = ancoraAtiva && source === "jsonld.name" &&
+      catalogoTecnico?.catalogId === produtoIdCanonico && catalogoTecnico.titulo === title &&
+      [catalogoTecnico.urlFinal, canonicalUrl, adapterCanonicalUrl].every(url =>
+        urlCatalogoTecnicoMercadoLivre(url) === produtoIdCanonico);
+    const extrairIdDaProva = url => (catalogoConfirmado && urlCatalogoTecnicoMercadoLivre(url)) ||
+      extrairIdMercadoLivreDaUrl(url, ancoraAtiva);
+    const canonicalMlb = extrairIdDaProva(canonicalUrl);
+    const outputMlb = extrairIdDaProva(adapterCanonicalUrl);
+    const anchorMlb = extrairIdDaProva(anchorUrl);
     const fontesOficiais = new Set(["jsonld.name", "og:title", "twitter:title", "html.title"]);
     const apiProof = produto.provaTituloOficial || {};
     if (source === "api_mercadolibre.items.title" && apiProof.fonte === source &&
@@ -1136,7 +1219,7 @@ function validarProvaTituloTecnico(resultado = {}, produto = {}, job = {}) {
     if (identidade.status !== "consistente" || identidade.mlbForteConfirmado !== true ||
         identidade.mlbProduto !== identidade.mlbRevalidado || identidade.mlbRevalidado !== produtoIdCanonico ||
         normalizarTexto(identidade.urlOriginal || "") !== anchorUrl ||
-        ([anchorMlb, extrairIdMercadoLivreDaUrl(metadataOriginal), extrairIdMercadoLivreDaUrl(resultOriginal)]
+        ([anchorMlb, extrairIdDaProva(metadataOriginal), extrairIdDaProva(resultOriginal)]
           .some(id => id && id !== produtoIdCanonico)) ||
         normalizarTexto(identidade.urlCanonicaRevalidada || "") !== canonicalUrl ||
         canonicalMlb !== produtoIdCanonico || outputMlb !== produtoIdCanonico || identityFallbackMercadoLivre(metadata, produto) ||
@@ -1295,10 +1378,10 @@ function montarProvaTituloMlWorkAncorada({
   return validada ? { prova: proof, validada, produto, anchorUrl, canonicalUrl, expectedMlb, source } : null;
 }
 
-function comprovarTituloTecnicoDoLink(resultado = {}, produto = {}, job = {}, mlConfirmado = false) {
+function comprovarTituloTecnicoDoLink(resultado = {}, produto = {}, job = {}, mlConfirmado = false, ancoraAtiva = false) {
   const metadata = resultado.metadata || {};
   const adapter = normalizarTexto(metadata.adapter || "").toLowerCase();
-  const provaValidada = validarProvaTituloTecnico(resultado, produto, job);
+  const provaValidada = validarProvaTituloTecnico(resultado, produto, job, ancoraAtiva);
   if (adapter === "mercadolivre" || adapter === "amazon" || adapter === "shopee") {
     return {
       confirmada: Boolean(provaValidada),
@@ -1346,7 +1429,7 @@ function comprovarTituloTecnicoDoLink(resultado = {}, produto = {}, job = {}, ml
   return { confirmada: false };
 }
 
-function normalizarOfertaImportada(resultado = {}, job = {}) {
+function normalizarOfertaImportada(resultado = {}, job = {}, provaAncorada = null, ancoraAtiva = false) {
   const produtoMetadata = resultado?.metadata?.produto && typeof resultado.metadata.produto === "object"
     ? resultado.metadata.produto
     : {};
@@ -1354,11 +1437,11 @@ function normalizarOfertaImportada(resultado = {}, job = {}) {
   const tituloImportado = normalizarTexto(resultado.titulo || resultado.nome || "");
   const marketplaceTitulo = normalizarTexto(resultado.marketplace || job.marketplace || job.marketplace_detectado);
   const tituloSeguro = tituloComercialUniversalValido(tituloImportado, { marketplace: marketplaceTitulo }) ? tituloImportado : "";
-  const provaTituloValidada = validarProvaTituloTecnico(resultado, produtoMetadata, job);
+  const provaTituloValidada = provaAncorada || validarProvaTituloTecnico(resultado, produtoMetadata, job, ancoraAtiva);
   const tituloOficialConfirmado = marketplaceTitulo.toLowerCase() === "mercadolivre" && Boolean(provaTituloValidada);
   const tituloMetadata = normalizarTexto(produtoMetadata.titulo || produtoMetadata.nome || produtoMetadata.title || "");
-  const identidadeTecnica = comprovarTituloTecnicoDoLink(resultado, produtoMetadata, job, tituloOficialConfirmado);
-  const tituloTecnico = identidadeTecnica.confirmada &&
+  const identidadeTecnica = comprovarTituloTecnicoDoLink(resultado, produtoMetadata, job, tituloOficialConfirmado, ancoraAtiva);
+  const tituloTecnico = (provaAncorada || identidadeTecnica.confirmada) &&
     tituloComercialUniversalValido(tituloMetadata, { marketplace: marketplaceTitulo })
     ? tituloMetadata : "";
   // Um título proveniente do Radar só serve de descrição do produto se passar
@@ -1366,6 +1449,8 @@ function normalizarOfertaImportada(resultado = {}, job = {}) {
   const tituloFallback = tituloSeguro && tituloFactualConfiavelEngine(tituloSeguro, marketplaceTitulo) &&
     (!resultado.metadata?.adapter || identidadeTecnica.fallbackRadar === true)
     ? tituloSeguro : "";
+  const categoriaOficialAncorada = ancoraAtiva && marketplaceTitulo.toLowerCase() === "mercadolivre" && provaTituloValidada
+    ? categoriaMlOficialComprovada(produtoMetadata, provaTituloValidada.produto?.produtoIdCanonico) : "";
   const tituloParaCategoria = tituloTecnico || tituloFallback;
   const resultadoParaCategoria = tituloParaCategoria
     ? { ...resultado, titulo: tituloParaCategoria, nome: tituloParaCategoria }
@@ -1402,7 +1487,8 @@ function normalizarOfertaImportada(resultado = {}, job = {}) {
     linkOriginal: normalizarTexto(resultado.linkOriginal || ""),
     linkExpandido: normalizarTexto(resultado.linkExpandido || resultado.urlFinal || ""),
     linkAfiliado: normalizarTexto(resultado.linkAfiliado || resultado.linkFinal || resultado.link || ""),
-    categoria: resolverCategoriaEngine(resultadoParaCategoria, job),
+    categoria: categoriaOficialAncorada || resolverCategoriaEngine(resultadoParaCategoria, job),
+    ...(categoriaOficialAncorada ? { categoriaOficialAncorada } : {}),
     cupom: normalizarTexto(resultado.cupom || ""),
     cupomTipo: normalizarTexto(resultado.cupomTipo || resultado.tipoCupom || ""),
     score: normalizarNumero(resultado.score),
@@ -2243,6 +2329,10 @@ async function buscarImagemOficialMercadoLivrePorMlb(mlb = "", opcoes = {}) {
     const dados = await response.json();
     const imagemApi = extrairImagemOficialMercadoLivreApi(dados);
     const mlbApi = normalizarTexto(dados?.id || "").replace(/[^0-9]/g, "");
+    const categoria = normalizarTexto(dados?.category?.name || "");
+    const categoriaComprovada = normalizarTexto(dados?.id).match(/^MLB-?(\d+)$/i)?.[1] === id && response.status === 200 && response.url === urlApi &&
+      /^MLB\d+$/.test(normalizarTexto(dados?.category_id)) && dados.category_id === dados?.category?.id &&
+      categoriaOficialAutoritativa(categoria);
     return {
       mlb: mlbApi ? `MLB${mlbApi}` : `MLB${id}`,
       tituloOficial: normalizarTexto(dados?.title || dados?.name || ""),
@@ -2251,6 +2341,8 @@ async function buscarImagemOficialMercadoLivrePorMlb(mlb = "", opcoes = {}) {
         (!response.url || response.url === urlApi) && normalizarTexto(dados?.title || "")
         ? { provaTituloOficial: { produtoIdCanonico: `MLB${mlbApi}`,
             fonte: "api_mercadolibre.items.title", urlApi } } : {}),
+      ...(categoriaComprovada ? { provaCategoriaOficial: { categoria, produtoIdCanonico: "MLB" + id,
+        fonte: "api_mercadolibre.items.category", urlApi } } : {}),
       imagem: imagemApi.imagem,
       origem: imagemApi.imagem ? imagemApi.origem : "",
       linkResolvido: urlApi,
@@ -4028,7 +4120,7 @@ function avaliarGateQualidadeAliExpressImagem(oferta = {}, metadata = {}) {
   };
 }
 
-function avaliarGateIdentidadeMercadoLivre(oferta = {}, metadata = {}) {
+function avaliarGateIdentidadeMercadoLivre(oferta = {}, metadata = {}, ancoraAtiva = false) {
   const marketplace = normalizarMarketplaceMemoria(oferta.marketplace || metadata.marketplace || "");
   if (marketplace !== "mercadolivre") {
     return { retida: false, motivo: "" };
@@ -4065,6 +4157,11 @@ function avaliarGateIdentidadeMercadoLivre(oferta = {}, metadata = {}) {
     normalizarTexto(provaTitulo.produto?.produtoIdCanonico || "").toUpperCase() ===
       normalizarTexto(identidade.mlbRevalidado || identidade.mlbProduto || "").toUpperCase() &&
     normalizarTexto(provaTitulo.titulo?.valor || "") === normalizarTexto(oferta.titulo || oferta.nome || "");
+  let catalogo = false;
+  if (ancoraAtiva) try { catalogo = Boolean(urlCatalogo(identidade.urlCanonicaRevalidada)); } catch (_) { catalogo = true; }
+  if (catalogo && !provaOficialCorrespondente) {
+    return { retida: true, status: "retida_v2", motivo: "mercadolivre_titulo_tecnico_nao_confirmado", reprocessavel: true };
+  }
   if (identidade.status === "consistente" && identidade.mlbForteConfirmado === true &&
       metadata.fallbackMercadoLivreRadar !== true && metadata.fallbackMercadoLivreClonador !== true &&
       !provaOficialCorrespondente) {
@@ -4324,6 +4421,7 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
       clienteId: job.cliente_id || job.clienteId || "",
       origem: "engine_importer",
       exigirLinkAfiliado: true,
+      ...(oferta.categoriaOficialAncorada ? { categoriaOficialComprovada: oferta.categoriaOficialAncorada } : {}),
       memoriaAnteriores: memoriaCandidatos,
       memoriaDisponivel: consultaMemoria.memoriaDisponivel === true,
       memoriaMotivoIndisponivel: consultaMemoria.motivo || ""
@@ -4418,7 +4516,7 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
         ...oferta,
         // Somente famílias funcionais homologadas: a categoria diagnosticada
         // deve chegar ao objeto persistido/roteado, sem promover laboratório.
-        ...((resultadoV2.logs || []).some(log =>
+        ...(!oferta.categoriaOficialAncorada && (resultadoV2.logs || []).some(log =>
           log.etapa === "categoria" && log.correcaoFuncionalHomologada === true)
           ? { categoria: resultadoV2.categoria } : {}),
         score: scoreV2 !== null ? scoreV2 : oferta.score,
@@ -4533,7 +4631,89 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
   }
 }
 
+async function enriquecerTituloMlPorOcorrencia({ job, evento, link, oferta, deps, agoraMs = Date.now() }) {
+  const metadata = oferta.metadata || {};
+  if (metadata.adapter !== "mercadolivre" || !ancoraMlAtiva({ clienteId: job.cliente_id, deps }) ||
+      typeof deps.garantirIdentidadeMercadoLivreLocalWorker !== "function" ||
+      validarProvaTituloTecnico(oferta, metadata.produto, job, true)) return null;
+  const ancora = vincularOcorrenciaProduto({ job, evento, link, marketplace: "mercadolivre", urlOriginal: metadata.linkOriginalEngine });
+  if (!ancora || !Array.isArray(deps.linksEventoPersistidos) ||
+      deps.linksEventoPersistidos.filter(item => item.url_original === ancora.urlOriginal).length !== 1 ||
+      !deps.linksEventoPersistidos.some(item => item === link && String(item.evento_id) === ancora.eventoId) ||
+      !verificarCapturaIngressReal(evento.capturado_em).ok) return null;
+  const identidade = metadata.identidadeCanonicaMl || {};
+  if (identidade.status !== "consistente" || identidade.urlOriginal !== ancora.urlOriginal) return null;
+  const transporte = metadata.resolucaoRadar?.provaTransporteShowProduct;
+  let selecao, direta;
+  try {
+    selecao = urlCatalogo(identidade.urlCanonicaRevalidada);
+    direta = urlCatalogo(ancora.urlOriginal);
+  } catch (_) { return null; }
+  if (!selecao || !(direta ? mesmaSelecaoCatalogo(direta, selecao) :
+      transporte?.ok === true && identidade.transporteShowProductConfirmado === true &&
+      transporte.linkResolvidoTecnico === selecao.url &&
+      metadata.transporteTecnicoMl?.linkOriginalRadar === ancora.urlOriginal)) return null;
+  if ([identidade.mlbProduto, identidade.mlbRevalidado].some(id =>
+      id && ![selecao.catalogId, selecao.listingId].includes(id))) return null;
+  const variationId = normalizarTexto(metadata.produto?.variationId || metadata.produto?.variantId || "");
+  if (variationId && !/^\d{1,30}$/.test(variationId)) return null;
+  const frescor = avaliarFrescorPreImporter({ ...job, evento_capturado_em: evento.capturado_em }, { agoraMs });
+  const deadline = Date.parse(frescor.expiraEmComercial);
+  if (frescor.expirada || !Number.isFinite(deadline) || deadline <= agoraMs) return null;
+  const epoch = epochIngressReal();
+  const chave = createHash("sha256").update(JSON.stringify([ancora, selecao.url, variationId, deadline, epoch])).digest("hex");
+  const anterior = job.metadata?.localWorkerImageRetry?.vinculo;
+  if (anterior && (anterior.chave !== chave || anterior.epoch !== epoch)) return null;
+  const pendente = (taskId = anterior?.taskId) => ({ pendente: true,
+    vinculo: { ...ancora, chave, epoch, ...(taskId ? { taskId: String(taskId) } : {}), deadline,
+      listingId: selecao.listingId, catalogId: selecao.catalogId, urlTecnica: selecao.url, variationId,
+      technicalSlug: createHash("sha256").update(JSON.stringify([selecao.url, variationId, epoch || ""])).digest("hex") + ":" + variationId } });
+  let retorno;
+  try {
+    retorno = await executarOperacaoLocalComTimeout(() => deps.garantirIdentidadeMercadoLivreLocalWorker({
+      productId: selecao.listingId, sourceUrl: selecao.url, vinculo: { workspaceId: ancora.workspaceId, chave, variationId, deadline, epoch }, taskId: anterior?.taskId
+    }));
+  } catch (_) { return pendente(); }
+  if (["task_concorrente_nao_localizada", "database_indisponivel"].includes(retorno?.motivo)) return pendente();
+  const task = retorno?.task;
+  if (retorno?.ok !== true || !task?.id || (anterior?.taskId && String(task.id) !== anterior.taskId)) return null;
+  if (["pending", "leased"].includes(task.status)) return pendente(task.id);
+  const terminou = Date.parse(task.completedAt);
+  const taskCriadaEm = Date.parse(task.createdAt);
+  const taskExpiraEm = Date.parse(task.expiresAt);
+  if (task.status !== "completed" || !Number.isFinite(terminou) || !Number.isFinite(taskCriadaEm) ||
+      !Number.isFinite(taskExpiraEm) || terminou < taskCriadaEm || terminou >= deadline || terminou >= taskExpiraEm || Date.now() >= deadline) return null;
+  let resultado;
+  try {
+    resultado = validarResultadoMlIdentity(task.resultMetadata, { expectedMlb: selecao.listingId,
+      sourceUrl: selecao.url, variationId, agoraMs });
+  } catch (_) { return null; }
+  if (Date.parse(resultado.collectedAt) < taskCriadaEm ||
+      Date.parse(resultado.collectedAt) >= deadline) return null;
+  if (epoch && Date.parse(resultado.collectedAt) < Date.parse(epoch)) return null;
+  const titulo = resultado.tituloOficial;
+  if (!tituloComercialUniversalValido(titulo, { marketplace: "mercadolivre" })) return null;
+  const prova = montarProvaTituloTecnico({ marketplace: "mercadolivre", job, workspaceId: ancora.workspaceId,
+    links: deps.linksEventoPersistidos, linkEscolhido: { link, campo: "url_original" },
+    urlOriginal: ancora.urlOriginal, urlCanonica: resultado.canonicalUrl, produtoId: selecao.listingId,
+    titulo, fonteTitulo: resultado.origemTitulo });
+  if (!prova) return null;
+  const provaValidada = { ...prova, validacao: "confirmada_pelo_importador" };
+  return { provaValidada, oferta: {
+    ...oferta, titulo, nome: titulo, categoria: "", categoriaProduto: "", produtoIdDetectado: selecao.listingId,
+    metadata: { ...metadata, provaTituloTecnico: prova, provaTituloTecnicoValidada: provaValidada,
+      identidadeCanonicaMl: { ...identidade, mlbProduto: selecao.listingId, mlbRevalidado: selecao.listingId,
+        mlbForteConfirmado: true, catalogId: selecao.catalogId, variationId: resultado.variationId },
+      produto: { ...metadata.produto, titulo, tituloFactual: titulo, tituloFonteOficial: resultado.origemTitulo } }
+  } };
+}
+
 async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrada = {}, deps = {}) {
+  const enriquecimento = await enriquecerTituloMlPorOcorrencia({ job, evento, link, oferta: ofertaEntrada, deps });
+  if (enriquecimento?.pendente) return { ok: false, retriavel: true,
+    motivo: "mercadolivre_titulo_tecnico_nao_confirmado", motivoDetalhe: "aguardando_enriquecimento_local",
+    localWorker: { capability: "ml_identity_v1", vinculo: enriquecimento.vinculo } };
+  if (enriquecimento?.oferta) ofertaEntrada = enriquecimento.oferta;
   const contextoMemoriaHistoricaJob = {};
   const origemFluxo = resolverOrigemFluxo(ofertaEntrada, job, evento);
   const fidelidadeTraceIdPrincipal = fidelidadeObs.flagAtiva()
@@ -4571,7 +4751,9 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       ? "URL_http_presente"
       : "ausente_no_importador"
   });
-  let oferta = normalizarOfertaImportada(ofertaEntrada, job);
+  const mlWorkAtivoAgora = mlWorkEnrichmentAtivo({ deps });
+  const ancoraAtiva = ancoraMlAtiva({ clienteId: job.cliente_id, deps });
+  let oferta = normalizarOfertaImportada(ofertaEntrada, job, enriquecimento?.provaValidada, ancoraAtiva);
   if (origemFluxo && !oferta.origemFluxo) oferta = { ...oferta, origemFluxo };
   const comercialClonador = aplicarComercialCapturadoClonador({ oferta, ofertaEntrada, evento, job });
   oferta = comercialClonador.oferta || oferta;
@@ -4758,9 +4940,8 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   let mlWorkIdentityShadowConsulta = null;
   let mlWorkPromocaoAtiva = null;
   let mlWorkImagemBaseline = null;
-  const mlWorkAtivoAgora = mlWorkEnrichmentAtivo({ deps });
   if (normalizarMarketplaceMemoria(oferta.marketplace) === "mercadolivre"
-    && (mercadoLivrePrecisaImagem || mlWorkAtivoAgora)) {
+    && (mercadoLivrePrecisaImagem || mlWorkAtivoAgora) && !enriquecimento?.provaValidada) {
     const metadataGateMlWorker = objetoSeguro(oferta.metadata);
     const metadataEntradaGateMlWorker = objetoSeguro(ofertaEntrada.metadata);
     const produtoMetadataGateMlWorker = objetoSeguro(metadataGateMlWorker.produto || metadataEntradaGateMlWorker.produto);
@@ -4773,6 +4954,8 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     let imagemEnviavelGateMlWorker = oferta.imagemEnviavel === true || Boolean(imagemCanonicaFinal.imagemCanonicaDuravel);
     let imagemStatusGateMlWorker = normalizarTexto(oferta.imagemStatus || metadataGateMlWorker.imagemStatus || imagemCanonicaFinal.imagemStatus || "");
     const sourceUrlMlWorker = normalizarTexto(oferta.linkExpandido || oferta.linkOriginal || imagemCanonicaFinal.linkResolvido || "");
+    let catalogoMlWorker = false;
+    if (ancoraAtiva) try { catalogoMlWorker = Boolean(urlCatalogo(sourceUrlMlWorker)); } catch (_) { catalogoMlWorker = true; }
     let identidadeMlWorker = {};
     let produtoIdMlWorker = "";
     let cacheLookupExecutadoMlWorker = false;
@@ -4862,7 +5045,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       sourceUrl: sourceUrlMlWorker
     });
     produtoIdMlWorker = identidadeResolvidaMlWorker.produtoId || "";
-    if (!imagemCanonicaFinal.imagemCanonicaDuravel || mlWorkAtivoAgora) {
+    if (!catalogoMlWorker && (!imagemCanonicaFinal.imagemCanonicaDuravel || mlWorkAtivoAgora)) {
       const depsIdentity = mercadoLivrePrecisaImagem
         ? deps
         : { ...deps, garantirIdentidadeMercadoLivreLocalWorker: null };
@@ -5239,7 +5422,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   }
   const inteligenciaV2 = objetoSeguro(metadataFinal.inteligenciaUniversalV2);
   const gateQualidadeAliExpressImagem = avaliarGateQualidadeAliExpressImagem(oferta, metadataFinal);
-  const gateIdentidadeMercadoLivre = avaliarGateIdentidadeMercadoLivre(oferta, metadataFinal);
+  const gateIdentidadeMercadoLivre = avaliarGateIdentidadeMercadoLivre(oferta, metadataFinal, ancoraAtiva);
   if (gateQualidadeAliExpressImagem.retida) {
     metadataFinal = {
       ...metadataFinal,
@@ -5982,18 +6165,37 @@ function planoRetryImagemMercadoLivreLocal(job = {}, agora = new Date()) {
 }
 
 async function agendarRetryImagemMercadoLivreLocal(job = {}, detalhes = {}, opcoes = {}) {
-  const plano = planoRetryImagemMercadoLivreLocal(job, opcoes.agora || new Date());
-  if (!plano.reagendar) return { ok: false, esgotado: true, motivo: "sem_imagem_apos_retries", ...plano };
+  const agora = new Date(opcoes.agora || Date.now());
+  const vinculo = detalhes.vinculo;
+  const anterior = job.metadata?.localWorkerImageRetry?.vinculo;
+  const tentativaAnterior = anterior ? Number(job.metadata.localWorkerImageRetry.tentativas) : 0;
+  const plano = planoRetryImagemMercadoLivreLocal(vinculo ? { metadata: { localWorkerImageRetry: { tentativas: tentativaAnterior } } } : job, agora);
+  const ultimaEspera = vinculo && (plano.tentativa > 2 || !(plano.proximaTentativaEmMs < vinculo.deadline));
+  const aguardarConclusao = ultimaEspera && Boolean(vinculo.taskId && vinculo.epoch && vinculo.technicalSlug);
+  if (vinculo && (job.metadata?.localWorkerImageRetry?.aguardandoConclusao ||
+      vinculo.deadline <= agora.getTime() || (ultimaEspera && !aguardarConclusao) ||
+      (anterior && (anterior.chave !== vinculo.chave || anterior.epoch !== vinculo.epoch ||
+        (anterior.taskId && anterior.taskId !== vinculo.taskId))))) {
+    return { ok: false, esgotado: true, motivo: "identidade_local_expirada", ...plano };
+  }
+  if (!plano.reagendar && !aguardarConclusao) return { ok: false, esgotado: true, motivo: "sem_imagem_apos_retries", ...plano };
+  if (aguardarConclusao) {
+    plano.proximaTentativaEmMs = vinculo.deadline;
+    plano.proximaTentativaEm = new Date(vinculo.deadline).toISOString();
+    plano.atrasoMs = vinculo.deadline - agora.getTime();
+  }
   const estadoRetry = {
     tentativas: plano.tentativa,
+    ...(aguardarConclusao ? { aguardandoConclusao: true } : {}),
     motivo: "sem_imagem_local_worker_pendente",
     ultimoErroEm: new Date(opcoes.agora || Date.now()).toISOString(),
     proximaTentativaEm: plano.proximaTentativaEm,
     proximaTentativaEmMs: plano.proximaTentativaEmMs,
+    ...(vinculo ? { vinculo } : {}),
     ...(detalhes.productId ? { productId: detalhes.productId } : {}),
     ...(detalhes.capability ? { capability: detalhes.capability } : {})
   };
-  const resultado = await queryEngine(
+  const reagendar = () => queryEngine(
     `UPDATE engine_jobs_cliente
         SET status = 'pronto_para_importar',
             tentativas = COALESCE(tentativas, 0) + 1,
@@ -6001,9 +6203,19 @@ async function agendarRetryImagemMercadoLivreLocal(job = {}, detalhes = {}, opco
             metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('localWorkerImageRetry', $2::jsonb),
             atualizado_em = NOW()
       WHERE id = $1 AND status = 'importando'
+        AND ($3::bigint IS NULL OR (clock_timestamp() < to_timestamp($3::double precision / 1000)
+          AND COALESCE(metadata #>> '{localWorkerImageRetry,vinculo,chave}', '') = $4
+          AND (CASE WHEN $4 = '' THEN 0 ELSE (metadata #>> '{localWorkerImageRetry,tentativas}')::int END) = $5::int
+          AND ($6::timestamptz IS NULL OR EXISTS (SELECT 1 FROM engine_operation_state s
+            WHERE s.id=1 AND s.mode='UNIVERSAL' AND s.operation_epoch_started_at=$6::timestamptz))
+          AND EXISTS (SELECT 1 FROM engine_eventos_brutos e WHERE e.id = engine_jobs_cliente.evento_id
+            AND ${sqlFiltroEpochReal("e")})))
       RETURNING id, status, tentativas, motivo_final, metadata`,
-    [job.id, JSON.stringify(estadoRetry)]
+    [job.id, JSON.stringify(estadoRetry), vinculo?.deadline || null,
+      anterior?.chave || "", tentativaAnterior, vinculo?.epoch || null]
   );
+  let resultado = await reagendar();
+  if (vinculo && !resultado.ok) resultado = await reagendar();
   if (!resultado.ok) return { ...resultado, ...plano };
   if (resultado.resultado.rowCount === 0) return { ...resultado, ok: false, ignorado: true, motivo: "job_nao_importando", ...plano };
   await registrarEtapaImportacao(job.id, "importacao_retry_agendado", "pendente", "aguardando_enriquecimento_local", {
@@ -6037,6 +6249,7 @@ module.exports = {
   planoRetryImagemMercadoLivreLocal,
   agendarRetryImagemMercadoLivreLocal,
   normalizarOfertaImportada,
+  enriquecerTituloMlPorOcorrencia,
   avaliarGateQualidadeAliExpressImagem,
   avaliarGateIdentidadeMercadoLivre,
   resolverCategoriaEngine,

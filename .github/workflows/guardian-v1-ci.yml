@@ -13,6 +13,7 @@ on:
       - validation/magalu-identity-subreason-20261108
       - validation/magalu-anchor-identity-20261109
       - validation/universal-anchor-title-category-20261109
+      - validation/universal-closure-p0-20261112
       - validation/intelligence-metadata-reconciled-20261108
       - validation/mensageiro-v4-20261025
       - validation/mensageiro-v4-canary-runtime-20261025
@@ -608,6 +609,7 @@ jobs:
             refs/heads/validation/guardian-v1-ml-identity-images-20261028) base=b8f5746e4d562deaa5c4081738de89e0bf5fc508 ;;
             refs/heads/validation/guardian-v1-classifier-copy-focal-20261027) base=f800da32e987c740854a9de02d5bcc93d7f149e9 ;;
             refs/heads/validation/guardian-v1-radar-ingress-continuous-20261031) base=7708855e014d54a48825b0d3ae1f77da43294ad0 ;;
+            refs/heads/validation/guardian-v1-universal-offer-anchor|refs/heads/validation/universal-closure-p0-20261112|refs/heads/validation/guardian-v1-anchor-release-gates-20261112) base=dadd878fd2cd81fec01b0317903462f8b734f8db ;;
             refs/heads/validation/guardian-v1-universal-link-anchor-identity-20261110) base=1b2e098827adc8e8bdba4cc20b9167ce10dcd9fe ;;
             refs/heads/validation/classificador-universal-v3-20261027) base=3ab4f29d7812cf0f9e996f210762fd94c1296322 ;;
             refs/heads/validation/telemetria-operacional-20261027) base=227c860e43d1d31904bd5a1332fa29b629a5b3de ;;
@@ -625,6 +627,12 @@ jobs:
           guardian_args=(validate --base "$base" --source "$source" --report "$RUNNER_TEMP/guardian-v1-report.json")
           if [[ "$GITHUB_REF" == refs/heads/validation/guardian-v1-radar-ingress-continuous-20261031 ]]; then
             guardian_args+=(--release-mode full_image)
+          fi
+          if [[ "$GITHUB_REF" == refs/heads/validation/guardian-v1-universal-offer-anchor || "$GITHUB_REF" == refs/heads/validation/universal-closure-p0-20261112 ]]; then
+            guardian_args+=(--ci-universal-anchor)
+          fi
+          if [[ "$GITHUB_REF" == refs/heads/validation/guardian-v1-anchor-release-gates-20261112 ]]; then
+            guardian_args+=(--release-mode overlay)
           fi
           node scripts/guardian-v1.cjs "${guardian_args[@]}"
       - name: Radar formatter and presentation regressions
@@ -785,6 +793,134 @@ jobs:
           export V4_FIXTURE_SERVER_HOST="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' '${{ job.services.postgres.id }}')"
           test -n "$V4_FIXTURE_SERVER_HOST"
           node --test tests/mensageiro-v4-credit-scope.postgres.test.cjs
+
+  universal-offer-anchor-postgres:
+    if: github.ref == 'refs/heads/validation/guardian-v1-universal-offer-anchor' || github.ref == 'refs/heads/validation/universal-closure-p0-20261112' || github.ref == 'refs/heads/validation/guardian-v1-anchor-release-gates-20261112'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: optimus_universal_fixture
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 127.0.0.1:55433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d optimus_universal_fixture"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Clean declared dependencies
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: ssh://git@github.com/
+        run: npm ci
+      - name: Anchor, worker, commercial links, memory and concurrent PostgreSQL claims
+        env:
+          OPTIMUS_TEST_PG17: '1'
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node --test --test-reporter=tap \
+            tests/universal-offer-anchor-local.test.cjs \
+            tests/ofertas-v2-dedup-ancora-historica.test.cjs \
+            tests/optimus-capture-ml-catalog-selection.test.cjs \
+            tests/optimus-capture-local-worker-ml-identity.test.js \
+            tests/local-worker-idempotency.test.js \
+            tests/link-anchor-identity-proof-focal.test.cjs \
+            tests/link-conversao-ocorrencia-marketplaces.test.js \
+            tests/mercadolivre-identidade-canonica.test.js \
+            tests/engine-importer-origem-fairness.test.js \
+            tests/universal-flow-turbo-commercial.test.js \
+            tests/universal-flow-queue-executor.test.js
+          node --test --test-name-pattern='CI da âncora' tests/guardian-v1.test.cjs
+          if [[ "$GITHUB_REF" == refs/heads/validation/universal-closure-p0-20261112 || "$GITHUB_REF" == refs/heads/validation/guardian-v1-anchor-release-gates-20261112 ]]; then
+            node --test tests/ml-catalogo-tecnico-ancora.test.cjs \
+              tests/universal-flow-vitrine-projector.test.js \
+              tests/universal-flow-social-opportunities.test.js \
+              tests/ofertas-v2-achados-dedupe-memoria.test.js
+          fi
+
+      - name: Legacy ML enrichment and overlay guardrails
+        if: github.ref == 'refs/heads/validation/guardian-v1-anchor-release-gates-20261112'
+        run: node --test tests/ml-work-enrichment-active.test.js tests/ml-work-enrichment-active-integration.test.js tests/deploy-backend-v2-overlay-validation.test.cjs
+      - name: Build official overlay and smoke-test the shared ML parser in an isolated image
+        if: github.ref == 'refs/heads/validation/guardian-v1-anchor-release-gates-20261112'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          base=dadd878fd2cd81fec01b0317903462f8b734f8db
+          parser=optimus-capture/local-worker/mercadolivre-identity.js
+          base_tag="local/optimus-deploy-base:ci-$GITHUB_RUN_ID"
+          candidate="local/optimus-anchor-overlay:ci-$GITHUB_RUN_ID"
+          fixture="$(mktemp -d)"
+          mkdir -p "$fixture/base"
+          if ! git cat-file -e "${base}^{commit}"; then
+            echo "::error::Required base commit $base is unavailable in the checkout; refusing to build a synthetic baseline." >&2
+            exit 1
+          fi
+          git archive "$base" | tar -x -C "$fixture/base"
+          test -f "$fixture/base/Dockerfile"
+          if [[ -f "$fixture/base/$parser" ]]; then
+            echo "BASE_PARSER_ORIGIN=clean_git_archive:$base:$parser"
+            sha256sum "$fixture/base/$parser" | cut -d" " -f1 > "$fixture/base.sha"
+          else
+            echo "BASE_PARSER_ORIGIN=absent_from_clean_git_archive:$base"
+            : > "$fixture/base.sha"
+          fi
+          if [[ ! -s "$fixture/base.sha" ]]; then
+            echo "Baseline parser is absent from the clean Git base; refusing to synthesize a prior parser" >&2
+            exit 1
+          fi
+          git show "$GITHUB_SHA:$parser" > "$fixture/candidate-parser.js"
+          sha256sum "$fixture/candidate-parser.js" | cut -d" " -f1 > "$fixture/expected.sha"
+          test "$(sha256sum "$parser" | cut -d" " -f1)" = "$(cat "$fixture/expected.sha")"
+          node scripts/guardian-v1.cjs prepare --base "$base" --source "$GITHUB_SHA" --release-mode overlay > "$fixture/plan.json"
+          node -e '
+            const fs = require("node:fs");
+            const plan = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+            const parser = process.argv[2];
+            if (plan.validation !== "PASS" || !plan.runtimeFiles.includes(parser)) process.exit(1);
+            if (plan.runtimeFiles.some(file => file.startsWith("optimus-capture/") && file !== parser)) process.exit(2);
+            if (plan.runtimeFiles.includes("optimus-capture/local-worker/task-runner.js")) process.exit(3);
+            console.log("OVERLAY_CAPTURE_ALLOWLIST=" + parser);
+          ' "$fixture/plan.json" "$parser"
+          node scripts/guardian-v1.cjs build-dockerfile --base "$base" --source "$GITHUB_SHA" --base-tag "$base_tag" > "$fixture/Dockerfile"
+          grep -Fx "COPY --chown=node:node $parser /app/$parser" "$fixture/Dockerfile"
+          if awk -v expected="/app/$parser" '$1 == "COPY" && $4 ~ /^\/app\/optimus-capture\// && $4 != expected { found=1 } END { exit !found }' "$fixture/Dockerfile"; then
+            echo "Unexpected Optimus Capture path in overlay" >&2
+            exit 1
+          fi
+          if grep -F "COPY --chown=node:node optimus-capture/local-worker/task-runner.js" "$fixture/Dockerfile"; then
+            echo "Chrome task runner must stay outside the overlay" >&2
+            exit 1
+          fi
+          docker build -t "$base_tag" "$fixture/base"
+          docker build --pull=false --network=none -f "$fixture/Dockerfile" -t "$candidate" .
+          test "$(docker run --rm --network=none "$base_tag" sha256sum "/app/$parser" | cut -d" " -f1)" = "$(cat "$fixture/base.sha")"
+          test "$(docker run --rm --network=none "$candidate" sha256sum "/app/$parser" | cut -d" " -f1)" = "$(cat "$fixture/expected.sha")"
+          echo "DOCKER_IMAGE_ID=$(docker image inspect "$candidate" --format '{{.Id}}')"
+          docker run --rm --network=none "$candidate" node -e '
+            const assert = require("node:assert/strict");
+            const parser = require("/app/optimus-capture/local-worker/mercadolivre-identity.js");
+            const contract = require("/app/modules/local-worker/ml-identity.contract.js");
+            const url = "https://www.mercadolivre.com.br/p/MLB1234567?pdp_filters=item_id%3AMLB7654321";
+            assert.equal(parser.urlCatalogo(url).listingId, "MLB7654321");
+            assert.equal(parser.urlCatalogo(url).catalogId, "MLB1234567");
+            assert.throws(() => parser.urlCatalogo(url.replace("www.mercadolivre.com.br", "example.invalid")));
+            assert.equal(contract.ML_IDENTITY_CAPABILITY, "ml_identity_v1");
+          '
 
   commercial-recovery-p0:
     if: github.ref == 'refs/heads/validation/commercial-recovery-p0-20261110' || github.ref == 'refs/heads/validation/universal-commercial-recovery-p0-20261110' || github.ref == 'refs/heads/validation/commercial-recovery-p0-composition-20261110' || github.ref == 'refs/heads/validation/getpool-image-reconcile-20261111' || github.ref == 'refs/heads/validation/guardian-v1-op-geral-render-20261111'

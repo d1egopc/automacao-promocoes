@@ -57,4 +57,5 @@ function sqlFiltroEpochReal(eventAlias = "e") {
 }
 
 module.exports = { instalarEstadoIngressReal, verificarCapturaIngressReal,
-  modoIngressReal, exigirAutoridadeLegacyReal, sqlFiltroEpochReal };
+  modoIngressReal, exigirAutoridadeLegacyReal, sqlFiltroEpochReal,
+  epochIngressReal: () => runtimeState?.operationEpochStartedAt || null };
