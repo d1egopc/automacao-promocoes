@@ -1,4 +1,5 @@
 "use strict";
+const { avaliarSegurancaPublicacao } = require("../inteligencia-universal/foundation-v1.service");
 
 const storage = require("./storage");
 const { resolverImagemUniversal } = require("../imagens/resolver-imagem-universal");
@@ -362,6 +363,8 @@ function publicarOfertaConfirmadaVitrine({ clienteId = "", oferta = {}, destinos
     if (!workspaceId) return { ok: false, motivo: "workspace_invalido" };
     if (!oferta || typeof oferta !== "object") return { ok: false, motivo: "oferta_invalida" };
     if (!mesmoWorkspace(workspaceId, oferta)) return { ok: false, motivo: "workspace_divergente" };
+    const seguranca = avaliarSegurancaPublicacao(oferta);
+    if (!seguranca.ok) return { ok: false, motivo: seguranca.motivo };
     if (numero(destinosEnviados) <= 0) return { ok: false, motivo: "sem_envio_confirmado" };
     if (texto(oferta.status).toLowerCase() && texto(oferta.status).toLowerCase() !== "enviado") {
       return { ok: false, motivo: "status_nao_enviado" };

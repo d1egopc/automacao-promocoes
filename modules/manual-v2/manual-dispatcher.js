@@ -1,3 +1,4 @@
+const { avaliarSegurancaPublicacao } = require("../inteligencia-universal/foundation-v1.service");
 const {
   buscarOfertaManualV2,
   atualizarMetadadosEnvioManualV2
@@ -479,6 +480,8 @@ async function enviarOfertaManualV2({ clienteId = "admin", ofertaId = "", destin
   if (!oferta) {
     return criarRetornoBase(false, idOferta, "Oferta Manual V2 nao encontrada");
   }
+  const seguranca = avaliarSegurancaPublicacao(oferta);
+  if (!seguranca.ok) return criarRetornoBloqueioGlobal(oferta.id || idOferta, seguranca.motivo);
   if (texto(oferta.marketplace).toLowerCase() === "shopee") {
     const integracao = typeof deps.getIntegracaoCliente === "function" ? deps.getIntegracaoCliente(cliente, "shopee") || {} : {};
     const afiliacao = validarOfertaAfiliacaoWorkspaceShopee(oferta, {

@@ -1,4 +1,5 @@
 "use strict";
+const { avaliarSegurancaPublicacao } = require("../inteligencia-universal/foundation-v1.service");
 
 // The Universal queue never interprets a pending row as permission to send.
 // Reuse the classified commercial freshness and destination cadence services;
@@ -92,6 +93,8 @@ function criarPreflightFilaUniversal({ pool, getPool = null, configGlobal = {},
         String(oferta.engineOfertaId || "") !== String(claim.oferta_id || "")) {
       return { ready: false, reason: "universal_send_offer_identity_mismatch" };
     }
+    const seguranca = avaliarSegurancaPublicacao(oferta);
+    if (!seguranca.ok) return { ready: false, reason: seguranca.motivo, terminalNoSend: true };
     const { turbo, freshness } = await executarEtapaPreflight("commercial_freshness", () => ({
       turbo: classificarTurboComercialCandidato(oferta),
       freshness: avaliarFrescorPosClassificacaoCandidato(oferta, currentMs)

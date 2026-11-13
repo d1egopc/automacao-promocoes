@@ -36,6 +36,8 @@ const MOTIVOS_TEMPORARIOS = new Set([
 ]);
 
 const MOTIVOS_DEFINITIVOS = new Set([
+  "seguranca_conteudo_adulto",
+  "seguranca_conteudo_incerto",
   "marketplace_bloqueado",
   "marketplace_desabilitado",
   "retida_marketplace_nao_marcado",

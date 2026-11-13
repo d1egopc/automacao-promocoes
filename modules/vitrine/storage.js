@@ -1,4 +1,5 @@
 "use strict";
+const { avaliarSegurancaPublicacao } = require("../inteligencia-universal/foundation-v1.service");
 
 const ARQUIVO_VITRINE = "vitrine.json";
 const ARQUIVO_SLUGS = "vitrine-slugs.json";
@@ -418,7 +419,8 @@ function normalizarPaginacao(opcoes = {}) {
 }
 
 function paginarOfertasPublicas(ofertas = [], opcoes = {}) {
-  const retidas = aplicarRetencaoOfertas(ofertas);
+  const retidas = aplicarRetencaoOfertas(ofertas)
+    .filter(item => avaliarSegurancaPublicacao(item).ok);
   const { page, limit, offset } = normalizarPaginacao(opcoes);
   const total = retidas.length;
   const totalPages = Math.max(1, Math.ceil(total / limit));
@@ -443,6 +445,8 @@ function chaveOferta(oferta = {}) {
 }
 
 function upsertOfertaVitrine(clienteId = "", oferta = {}, deps = {}) {
+  const seguranca = avaliarSegurancaPublicacao(oferta);
+  if (!seguranca.ok) return { ok: false, motivo: seguranca.motivo };
   const atual = lerVitrineWorkspace(clienteId, deps);
   if (atual.config.ativa !== true) {
     return { ok: false, motivo: "vitrine_inativa" };

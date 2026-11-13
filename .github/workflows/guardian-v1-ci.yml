@@ -1045,6 +1045,17 @@ jobs:
           node --version
           node --test --test-reporter=tap \
             tests/universal-identidade-titulo-categoria-p0.test.cjs \
+            tests/universal-content-safety-p0.test.cjs \
+            tests/intelligence-v1-phase-d.test.cjs \
+            tests/universal-flow-queue-preflight.test.js \
+            tests/ofertas-v2-achados-listas.test.js \
+            tests/vitrine-v1-backend.test.js \
+            tests/vitrine-v1-hook-pos-envio.test.js \
+            tests/manual-v2-dispatcher.test.js \
+            tests/manual-v2-scheduler.test.js \
+            tests/manual-v2-scheduler-runner.test.js \
+            tests/social-instagram-reels.test.js \
+            tests/social-automatico-agendamentos.test.js \
             tests/magalu-v2-golden-path.test.js \
             tests/link-anchor-identity-proof-focal.test.cjs \
             tests/classificador-universal-v3.test.cjs \
@@ -1076,7 +1087,7 @@ jobs:
             tests/kabum-anchor-queue.postgres.cjs tests/ofertas-v2-dedup-ancora-historica.test.cjs | tee "$RUNNER_TEMP/pg17.log"
           grep -Eq '^# pass 3$' "$RUNNER_TEMP/pg17.log"
           grep -Eq '^# skipped 0$' "$RUNNER_TEMP/pg17.log"
-      - name: Compare six known failures against the exact base
+      - name: Compare known failures against the exact base
         shell: bash
         run: |
           set -euo pipefail
@@ -1097,6 +1108,7 @@ jobs:
               "fila-historico-v2-leitura.test.js": (10, r"GET /fila/status"),
               "universal-flow-job-destination-fanout.test.js": (38, r"false !== true"),
               "template-universal-visual-contract.test.js": (63, r"Resgate:"),
+              "social-instagram-fase-a.test.js": (515, r"resposta Token inválido deve estar em UTF-8"),
           }
 
           def compare(root, file, line, expected):

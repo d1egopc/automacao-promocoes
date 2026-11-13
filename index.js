@@ -116,6 +116,7 @@ const { discoverSources: discoverGcReferenceSources } =
   require("./modules/engine/auto-clean/gc-reference-index-builder");
 const { readDestinationDailyUsage } =
   require("./modules/engine/universal-queue.repository");
+const { avaliarSegurancaPublicacao } = require("./modules/inteligencia-universal/foundation-v1.service");
 const { processVitrineProjectionBatch } =
   require("./modules/engine/universal-vitrine-projector");
 const { consultarFilaPublicaUniversal, consultarDetalheUniversal } =
@@ -8373,6 +8374,9 @@ function motivoRetencaoSemDestino(analises = []) {
   if (!analises.length) return "retida_sem_destino_compativel";
 
   const motivos = analises.map(item => item?.analise?.motivo || "").filter(Boolean);
+  const bloqueioSeguranca = motivos.find(motivo =>
+    motivo === "seguranca_conteudo_adulto" || motivo === "seguranca_conteudo_incerto");
+  if (bloqueioSeguranca) return bloqueioSeguranca;
 
   if (motivos.length && motivos.every(motivo => motivo === "categoria")) {
     return "retida_categoria_nao_marcada";
@@ -9546,6 +9550,8 @@ function criarExecutorFilaUniversalReal(pool, { oneShotId = null,
 }
 
 async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId, configCliente, opcoes = {}) {
+  const seguranca = avaliarSegurancaPublicacao(oferta);
+  if (!seguranca.ok) return { enviado: false, tentouEnvio: false, motivo: seguranca.motivo };
   let tentouEnvio = false;
   let confirmouEnvio = false;
   let contextoFidelidadeExecutor = {};
@@ -13195,6 +13201,8 @@ app.post("/enviar-manual", async (req, res) => {
         erro: "legacy_manual_queue_unavailable_in_universal_epoch" });
     }
     const body = req.body || {};
+    const seguranca = avaliarSegurancaPublicacao(body);
+    if (!seguranca.ok) return res.status(422).json({ ok: false, motivo: seguranca.motivo });
 
     const categoriaManual =
       body.categoria &&
@@ -14803,6 +14811,9 @@ app.post("/fila/:id/reprocessar", auth, async (req, res) => {
       erro: "Oferta nÃ£o encontrada"
     });
   }
+
+  const seguranca = avaliarSegurancaPublicacao(oferta);
+  if (!seguranca.ok) return res.status(422).json({ ok: false, motivo: seguranca.motivo });
 
   oferta.status = "pendente";
   oferta.statusDetalhe = "Reprocessada manualmente";
@@ -17463,6 +17474,9 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
       erro: "Oferta nÃ£o encontrada"
     };
   }
+
+  const seguranca = avaliarSegurancaPublicacao(oferta);
+  if (!seguranca.ok) return { ok: false, statusHttp: 422, codigo: seguranca.motivo };
 
   const advisoryFuncionalFila = await catracaAdvisoryFuncionalFila.adquirir({
     clienteId,
@@ -34301,6 +34315,8 @@ if (process.env.CAMPANHAS_AGENDAMENTOS_SCHEDULER !== "false" && !global.__optimu
 // ================= TELEGRAM =================
 
 async function enviarTelegram(oferta, mensagem) {
+  const seguranca = avaliarSegurancaPublicacao(oferta);
+  if (!seguranca.ok) return { enviado: false, tentouEnvio: false, motivo: seguranca.motivo };
   try {
     if (!config.telegram?.ativo) {
       console.log("[TELEGRAM] Telegram desativado.");

@@ -635,7 +635,7 @@ function criarRepositorioClonadorGrupos(opcoes = {}) {
       await bloquearWorkspace(client, "clonador_grupos:achados_projection", item.clienteId);
       const projecao = await projetar(item);
       if (projecao?.ok !== true && !["INVALID_TECHNICAL",
-        "EXPIRED_BEFORE_ACHADOS_PROJECTION"].includes(projecao?.motivo)) {
+        "EXPIRED_BEFORE_ACHADOS_PROJECTION", "seguranca_conteudo_adulto", "seguranca_conteudo_incerto"].includes(projecao?.motivo)) {
         throw erroDb({ motivo: projecao?.motivo || "achados_projection_falhou" });
       }
       const estado = projecao.ok ? "MATERIALIZED" :

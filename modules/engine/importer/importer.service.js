@@ -1,3 +1,4 @@
+const { avaliarSegurancaPublicacao } = require("../../inteligencia-universal/foundation-v1.service");
 const { categoriaOficialAutoritativa, categoriaGenerica: categoriaGenericaEngine } = require("../../inteligencia-universal/categoria.service");
 const { queryEngine } = require("../database");
 const { sqlFiltroEpochReal, verificarCapturaIngressReal, epochIngressReal } = require("../universal-ingress-fence");
@@ -4741,6 +4742,7 @@ async function enriquecerTituloMlPorOcorrencia({ job, evento, link, oferta, deps
 }
 
 async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrada = {}, deps = {}) {
+  const entradaSeguranca = { ...ofertaEntrada, evento_metadata: evento.metadata, job_metadata: job.metadata };
   const enriquecimento = await enriquecerTituloMlPorOcorrencia({ job, evento, link, oferta: ofertaEntrada, deps });
   if (enriquecimento?.pendente) return { ok: false, retriavel: true,
     motivo: "mercadolivre_titulo_tecnico_nao_confirmado", motivoDetalhe: "aguardando_enriquecimento_local",
@@ -5493,9 +5495,11 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   }
   const fidelidadeRadar = validarFidelidadeComercialRadar(oferta, metadataFinal);
   if (fidelidadeRadar.aplicavel) metadataFinal = { ...metadataFinal, fidelidadeComercialRadar: fidelidadeRadar };
-  const retidaV2 = !fidelidadeRadar.ok || gateQualidadeAliExpressImagem.retida === true || gateIdentidadeMercadoLivre.retida === true || inteligenciaV2.status === "retida" || sombraV2.ok === false;
+  const seguranca = avaliarSegurancaPublicacao({ ...oferta, metadata: metadataFinal }, entradaSeguranca, ofertaEntrada);
+  if (!seguranca.ok) metadataFinal = { ...metadataFinal, segurancaPublicacao: seguranca };
+  const retidaV2 = !fidelidadeRadar.ok || !seguranca.ok || gateQualidadeAliExpressImagem.retida === true || gateIdentidadeMercadoLivre.retida === true || inteligenciaV2.status === "retida" || sombraV2.ok === false;
   const statusPersistencia = retidaV2 ? "retida_v2" : "importada";
-  const motivoPersistencia = !fidelidadeRadar.ok
+  const motivoPersistencia = !seguranca.ok ? seguranca.motivo : !fidelidadeRadar.ok
     ? fidelidadeRadar.motivos[0]
     : gateQualidadeAliExpressImagem.retida
     ? gateQualidadeAliExpressImagem.motivo
@@ -5878,7 +5882,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       };
     }
     // Projeção leve após a Oferta Universal validada e persistida. Nunca interfere no Engine.
-    if (validacaoOfertaUniversal.ok === true) {
+    if (seguranca.ok && validacaoOfertaUniversal.ok === true) {
       try {
         registrarAchado({
           clienteId: job.cliente_id || job.clienteId,

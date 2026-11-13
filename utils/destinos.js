@@ -1,3 +1,4 @@
+const { avaliarSegurancaPublicacao } = require("../modules/inteligencia-universal/foundation-v1.service");
 const { resolverOrigemFluxoExplicita } = require("./origem-fluxo");
 
 const FORMATADOR_HORARIO_SAO_PAULO = new Intl.DateTimeFormat("en-US", {
@@ -305,6 +306,9 @@ function analisarDestinoOferta(destino, oferta, opcoes = {}) {
     classificarCategoriaOferta(oferta, oferta.termo || "");
 
   const categoriaOferta = normalizarCategoriaDestino(categoriaClassificada);
+  const seguranca = avaliarSegurancaPublicacao(oferta);
+  if (!seguranca.ok) return { aceita: false, motivo: seguranca.motivo, marketplaceOferta, categoriaOferta,
+    aceitaMarketplace: false, aceitaCategoria: false, aceitaOrigem, origemOfertasDestino };
 
   const marketplacesDestino = expandirMarketplacesDestino(
     primeiraListaDestino(destino.marketplaces, destino.marketplacesPermitidos)

@@ -1,3 +1,4 @@
+const { avaliarSegurancaPublicacao } = require("../../inteligencia-universal/foundation-v1.service");
 const crypto = require("crypto");
 const {
   listClientes,
@@ -745,6 +746,7 @@ function carregarOfertaClienteOperacional(clienteId = "admin", ofertaId = "") {
 }
 
 function montarOfertaCliente(oferta, alvo, clienteId) {
+  const seguranca = avaliarSegurancaPublicacao(oferta);
   const v2 = oferta.inteligenciaUniversalV2 || {};
   const imagem = texto(oferta.imagem || oferta.image || oferta.thumbnail);
   const videoUrl = texto(oferta.videoUrl || oferta.video_url || oferta.mediaUrl || oferta.midiaUrl || oferta.video);
@@ -768,7 +770,8 @@ function montarOfertaCliente(oferta, alvo, clienteId) {
     cupom: texto(oferta.cupom || oferta.cupomCodigo || oferta.cupomInfo?.cupom),
     categoria: texto(v2.categoria || oferta.categoria),
     videoUrl,
-    videoMimeType
+    videoMimeType,
+    ...(!seguranca.ok ? { segurancaPublicacao: seguranca } : {})
   };
 }
 
@@ -1710,6 +1713,7 @@ async function publicarImagemInstagram({
   }
 
   const oferta = await carregarOfertaClienteOperacional(clienteId, ofertaIdSeguro);
+  if (oferta.segurancaPublicacao) throw new Error(oferta.segurancaPublicacao.motivo);
   if (!oferta.linkAfiliado) throw new Error("oferta_link_ausente");
   const imagemOriginalUrl = validarImagemPublica(oferta.imagem);
   const gatilhoSeguro = gatilho && typeof gatilho === "object" ? sanitizarGatilhoInstagram(gatilho) : null;
@@ -1919,6 +1923,7 @@ async function publicarReelInstagram({
       };
     }
     oferta = await carregarOfertaClienteOperacional(clienteId, ofertaIdSeguro);
+    if (oferta.segurancaPublicacao) throw new Error(oferta.segurancaPublicacao.motivo);
     if (!oferta.linkAfiliado) throw new Error("oferta_link_ausente");
   }
 
