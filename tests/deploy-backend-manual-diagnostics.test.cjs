@@ -44,7 +44,7 @@ function assertDiagnostic(result, stage, code, resultCode = "command_failed") {
   assert.doesNotMatch(output, /BASH_COMMAND|fixture-secret-must-not-be-logged|authorization\s*[:=]|password\s*[:=]|token\s*[:=]/i);
 }
 
-function makeFixture(scenario, { activeMismatch = false, switched = false, persistentShadowOverlay = false } = {}) {
+function makeFixture(scenario, { activeMismatch = false, switched = false, persistentShadowOverlay = false, canary = false } = {}) {
   const parent = path.join(root, "tmp", "test-tmp");
   fs.mkdirSync(parent, { recursive: true });
   const dir = fs.mkdtempSync(path.join(parent, "deploy-manual-diagnostics-"));
@@ -83,6 +83,10 @@ function makeFixture(scenario, { activeMismatch = false, switched = false, persi
 
   const activeImageFile = path.join(dir, "active-image.txt");
   const rollbackMarker = path.join(dir, "rollback-calls.txt");
+  const canaryFile = path.join(infra, "backend-ml-canary.yml");
+  if (canary) fs.writeFileSync(canaryFile, "services:\n  backend:\n    environment:\n      ML_WORK_ENRICHMENT_CANARY_CLIENTES: fixture-workspace\n");
+  const liveCanary = path.join(dir, "live-canary.txt");
+  fs.writeFileSync(liveCanary, canary ? "yes" : "no");
   fs.writeFileSync(activeImageFile, activeMismatch ? `sha256:${"c".repeat(64)}` : baseImage);
   if (switched) fs.writeFileSync(path.join(infra, "backend-release.yml"), `services:\n  backend:\n    image: local/optimus-backend:${sourceSha}-fixture-1\n`);
   if (persistentShadowOverlay) {
@@ -106,6 +110,8 @@ function makeFixture(scenario, { activeMismatch = false, switched = false, persi
     fixtureScript,
     activeImageFile,
     rollbackMarker,
+    canaryFile,
+    liveCanary,
     baseSha,
     sourceSha,
     baseHash,
@@ -124,6 +130,7 @@ function makeFixture(scenario, { activeMismatch = false, switched = false, persi
       DEPLOY_FIXTURE_INFRA: toShellPath(infra),
       DEPLOY_FIXTURE_ACTIVE_IMAGE: toShellPath(activeImageFile),
       DEPLOY_FIXTURE_ROLLBACK_MARKER: toShellPath(rollbackMarker),
+      DEPLOY_FIXTURE_LIVE_CANARY: toShellPath(liveCanary),
       DEPLOY_FIXTURE_BASE_IMAGE: baseImage,
       DEPLOY_FIXTURE_CANDIDATE_IMAGE: candidateImage,
       DEPLOY_FIXTURE_BASE_COMPOSE_IMAGE: baseComposeImage,
@@ -154,16 +161,22 @@ curl() {
   return 0
 }
 docker() {
-  local action="BASH_PARAM{1:-}" format="BASH_PARAM{3:-}" reference="BASH_PARAM{5:-}" file="" image="" environment='{"FIXTURE":"same"}' previous=0 arg
+  local action="BASH_PARAM{1:-}" format="BASH_PARAM{3:-}" reference="BASH_PARAM{5:-}" file="" image="" environment='{"FIXTURE":"value"}' previous=0 arg canary=no files=""
   if [[ "$action" == exec && "$2" == optimus-backend ]]; then
     if [[ "BASH_PARAM{3:-}" == sh ]]; then printf file; return 0; fi
     if [[ "BASH_PARAM{3:-}" == sha256sum ]]; then printf '%s  %s\n' "$DEPLOY_FIXTURE_IMAGE_HASH" "BASH_PARAM{4:-/app/index.js}"; return 0; fi
     return 90
   fi
   if [[ "$action" == image && "$2" == inspect ]]; then
+    if [[ "BASH_PARAM{4:-}" == '{{json .Config.Env}}' ]]; then
+      printf '["FIXTURE=value","OPTIMUS_INTELLIGENCE_V1_MODE=shadow","OPTIMUS_INTELLIGENCE_V1_MEMORY_MODE=shadow","OPTIMUS_INTELLIGENCE_V1_ROUTING_MODE=shadow"]'
+      return 0
+    fi
     reference="BASH_PARAM{@: -1}"
     case "$reference" in
-      "$DEPLOY_FIXTURE_BASE_IMAGE"|local/optimus-deploy-base:*|local/optimus-backend-recovery:*) printf '%s\n' "$DEPLOY_FIXTURE_BASE_IMAGE" ;;
+      local/optimus-backend-recovery:*)
+        if [[ "$DEPLOY_FIXTURE_SCENARIO" == recovery_mismatch ]]; then printf '%s\n' "$DEPLOY_FIXTURE_CANDIDATE_IMAGE"; else printf '%s\n' "$DEPLOY_FIXTURE_BASE_IMAGE"; fi ;;
+      "$DEPLOY_FIXTURE_BASE_IMAGE"|local/optimus-deploy-base:*) printf '%s\n' "$DEPLOY_FIXTURE_BASE_IMAGE" ;;
       "$DEPLOY_FIXTURE_BASE_COMPOSE_IMAGE")
         if [[ "$DEPLOY_FIXTURE_SCENARIO" == compose_image ]]; then printf 'sha256:%064d\n' 0; else printf '%s\n' "$DEPLOY_FIXTURE_BASE_IMAGE"; fi
         ;;
@@ -180,7 +193,16 @@ docker() {
       '{{.State.Status}}') printf running ;;
       '{{.State.OOMKilled}}') printf false ;;
       '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Type}}{{end}}{{end}}') printf bind ;;
-      '{{json .Config.Env}}') printf '["FIXTURE=value"]' ;;
+      '{{json .Config.Env}}')
+        local values='"FIXTURE=value","OPTIMUS_INTELLIGENCE_V1_MODE=shadow","OPTIMUS_INTELLIGENCE_V1_MEMORY_MODE=shadow","OPTIMUS_INTELLIGENCE_V1_ROUTING_MODE=shadow"'
+        if [[ "$(cat "$DEPLOY_FIXTURE_LIVE_CANARY")" == yes ]]; then values+=',"ML_WORK_ENRICHMENT_CANARY_CLIENTES=fixture-workspace"'; fi
+        printf '[%s]' "$values" ;;
+      '{{index .Config.Labels "com.docker.compose.project.config_files"}}')
+        files="$DEPLOY_FIXTURE_INFRA/compose.yml"
+        if [[ -f "$DEPLOY_FIXTURE_INFRA/backend-release.yml" ]]; then files+=",$DEPLOY_FIXTURE_INFRA/backend-release.yml"; fi
+        if [[ "$(cat "$DEPLOY_FIXTURE_LIVE_CANARY")" == yes ]]; then files+=",$DEPLOY_FIXTURE_INFRA/backend-ml-canary.yml"; fi
+        if [[ "$DEPLOY_FIXTURE_SCENARIO" == unknown_override ]]; then files+=",$DEPLOY_FIXTURE_INFRA/unknown.yml"; fi
+        printf '%s\n' "$files" ;;
       '{{json .Mounts}}') printf '[{"Type":"bind","Source":"/fixture/data","Destination":"/data","RW":true}]' ;;
       '{{json .HostConfig.Ulimits}}') printf '[{"Name":"core","Soft":0,"Hard":0}]' ;;
       *) return 92 ;;
@@ -202,31 +224,34 @@ docker() {
       ;;
     run) return 0 ;;
     compose)
+      for arg in "$@"; do
+        if [[ "$previous" == 1 ]]; then
+          if [[ "$arg" == "$DEPLOY_FIXTURE_INFRA/backend-ml-canary.yml" ]]; then canary=yes; else file="$arg"; fi
+          previous=0
+        elif [[ "$arg" == -f ]]; then previous=1; fi
+      done
       if [[ " $* " == *" ps -q postgres "* ]]; then printf 'fixture-postgres-id\n'; return 0; fi
       if [[ " $* " == *" config --format json "* ]]; then
-        previous=0
-        for arg in "$@"; do
-          if [[ "$previous" == 1 ]]; then file="$arg"; previous=0; elif [[ "$arg" == -f ]]; then previous=1; fi
-        done
         image="$DEPLOY_FIXTURE_BASE_COMPOSE_IMAGE"
         if [[ "$file" != "$DEPLOY_FIXTURE_INFRA/compose.yml" ]]; then image="$(awk '$1 == "image:" { print $2 }' "$file")"; fi
         if [[ -f "$file" ]] && grep -q 'OPTIMUS_INTELLIGENCE_V1_MODE: shadow' "$file"; then
-          environment='{"FIXTURE":"same","OPTIMUS_INTELLIGENCE_V1_MEMORY_MODE":"shadow","OPTIMUS_INTELLIGENCE_V1_MODE":"shadow","OPTIMUS_INTELLIGENCE_V1_ROUTING_MODE":"shadow"}'
+          environment='{"FIXTURE":"value","OPTIMUS_INTELLIGENCE_V1_MEMORY_MODE":"shadow","OPTIMUS_INTELLIGENCE_V1_MODE":"shadow","OPTIMUS_INTELLIGENCE_V1_ROUTING_MODE":"shadow"}'
         fi
-        if [[ "$DEPLOY_FIXTURE_SCENARIO" == before_swap && "$file" != "$DEPLOY_FIXTURE_INFRA/compose.yml" ]]; then
-          environment='{"FIXTURE":"same","unexpected":"different"}'
-          printf '{"services":{"backend":{"image":"%s","environment":%s,"volumes":[]},"postgres":{"image":"postgres"}}}\n' "$image" "$environment"
-        else
-          printf '{"services":{"backend":{"image":"%s","environment":%s,"volumes":[]},"postgres":{"image":"postgres"}}}\n' "$image" "$environment"
+        if [[ "$canary" == yes ]]; then environment="BASH_PARAM{environment%\}},\"ML_WORK_ENRICHMENT_CANARY_CLIENTES\":\"fixture-workspace\"}"; fi
+        if [[ "$DEPLOY_FIXTURE_SCENARIO" == before_swap && "$file" != "$DEPLOY_FIXTURE_INFRA/compose.yml" ]]; then environment='{"FIXTURE":"value","unexpected":"different"}'; fi
+        local volume=/fixture/data secret=/fixture/secret postgres=postgres
+        if [[ "$file" == */.backend-release.* ]]; then
+          case "$DEPLOY_FIXTURE_SCENARIO" in
+            volume_drift) volume=/fixture/other ;;
+            secret_drift) secret=/fixture/other ;;
+            service_drift) postgres=other ;;
+          esac
         fi
+        printf '{"services":{"backend":{"image":"%s","environment":%s,"volumes":[{"type":"bind","source":"%s","target":"/data"}],"secrets":["fixture_secret"]},"postgres":{"image":"%s"}},"secrets":{"fixture_secret":{"file":"%s"}}}\n' "$image" "$environment" "$volume" "$postgres" "$secret"
         return 0
       fi
       if [[ " $* " == *" up -d "* ]]; then
-        file=""
-        previous=0
-        for arg in "$@"; do
-          if [[ "$previous" == 1 ]]; then file="$arg"; previous=0; elif [[ "$arg" == -f ]]; then previous=1; fi
-        done
+        [[ "$*" == *" up -d --no-deps --no-build --force-recreate backend" ]] || return 95
         if [[ -n "$file" && "$file" != "$DEPLOY_FIXTURE_INFRA/compose.yml" && -f "$file" ]]; then
           image="$(awk '$1 == "image:" { print $2 }' "$file")"
         else
@@ -237,7 +262,8 @@ docker() {
         else
           printf '%s' "$DEPLOY_FIXTURE_BASE_IMAGE" > "$DEPLOY_FIXTURE_ACTIVE_IMAGE"
         fi
-        printf 'compose_up\n' >> "$DEPLOY_FIXTURE_ROLLBACK_MARKER"
+        printf '%s' "$canary" > "$DEPLOY_FIXTURE_LIVE_CANARY"
+        printf 'compose_up canary=%s\n' "$canary" >> "$DEPLOY_FIXTURE_ROLLBACK_MARKER"
         return 0
       fi
       return 93
@@ -374,6 +400,42 @@ test("erro operacional novo após a troca aciona rollback", () => {
     assert.equal(fs.readFileSync(fixture.rollbackMarker, "utf8").trim().split(/\r?\n/).length, 2);
   });
 });
+
+for (const [scenario, expectedImage, calls] of [
+  ["success", candidateImage, 1],
+  ["operational_error", baseImage, 2]
+]) {
+  test(`canário ativo preserva o override em todas as recriações (${scenario})`, () => {
+    withFixture(scenario, { canary: true }, (fixture) => {
+      const original = fs.readFileSync(fixture.canaryFile, "utf8");
+      const result = executeFixture(fixture);
+      if (scenario === "success") assert.equal(result.status, 0, diagnosticOutput(result));
+      else assertDiagnostic(result, "post_deploy_operational_observation", 1);
+      assert.equal(fs.readFileSync(fixture.activeImageFile, "utf8"), expectedImage);
+      assert.equal(fs.readFileSync(fixture.liveCanary, "utf8"), "yes");
+      assert.equal(fs.readFileSync(fixture.canaryFile, "utf8"), original);
+      assert.deepEqual(fs.readFileSync(fixture.rollbackMarker, "utf8").trim().split(/\r?\n/),
+        Array(calls).fill("compose_up canary=yes"));
+    });
+  });
+}
+
+for (const [scenario, stage] of [
+  ["unknown_override", "validate_compose_baseline"],
+  ["recovery_mismatch", "build_candidate_image"],
+  ["volume_drift", "validate_compose_overlay"],
+  ["secret_drift", "validate_compose_overlay"],
+  ["service_drift", "validate_compose_overlay"]
+]) {
+  test(`bloqueia ${scenario} antes de recriar o backend`, () => {
+    withFixture(scenario, { canary: true }, (fixture) => {
+      const result = executeFixture(fixture);
+      assertDiagnostic(result, stage, 1);
+      assert.equal(fs.existsSync(fixture.rollbackMarker), false);
+      assert.equal(fs.readFileSync(fixture.activeImageFile, "utf8"), baseImage);
+    });
+  });
+}
 
 test("diagnóstico não inclui comandos, valores secretos ou dados de ambiente", () => {
   const diagnosticStart = sourceScript.indexOf("# BEGIN deploy failure diagnostics");
