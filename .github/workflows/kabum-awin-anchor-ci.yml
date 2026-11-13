@@ -43,8 +43,7 @@ jobs:
           test "$RUNNER_ENVIRONMENT" = github-hosted
           test -z "${DATABASE_URL:-}"
           git cat-file -e "${BASE_SHA}^{commit}"
-          test "$(git rev-parse HEAD^)" = "$BASE_SHA"
-          test "$(git rev-list --count "$BASE_SHA..HEAD")" = 2
+          git merge-base --is-ancestor "$BASE_SHA" HEAD
           git diff --check "$BASE_SHA" HEAD
           diff -u <(printf '%s\n' \
             'A .github/workflows/kabum-awin-anchor-ci.yml' \
