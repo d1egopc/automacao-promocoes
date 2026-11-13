@@ -695,6 +695,14 @@ jobs:
           node tests/deploy-backend-v2-overlay-validation.test.cjs
           node tests/deploy-backend-compose-image-validation.test.cjs
           node tests/deploy-backend-manual-diagnostics.test.cjs
+      - name: ML canary isolation - importer and legacy parity
+        if: github.ref == 'refs/heads/validation/guardian-v1-ml-canary-isolation-p0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node --test tests/ml-work-enrichment-active-integration.test.js tests/ml-work-enrichment-active.test.js tests/ml-work-enrichment-shadow.test.js tests/ml-catalogo-tecnico-ancora.test.cjs tests/mercadolivre-work-backend-order.test.js
       - name: ML identity propagation P0 - official title, anchor and commercial fidelity
         if: github.ref == 'refs/heads/validation/ml-identity-propagation-p0-20261110' || github.ref == 'refs/heads/validation/commercial-recovery-p0-composition-20261110'
         shell: bash
