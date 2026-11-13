@@ -1039,7 +1039,9 @@ jobs:
           echo "EXTENSION_TREE_UNCHANGED=PASS"
           echo "OVERLAY_IMAGE_ID=$(docker image inspect "$candidate" --format '{{.Id}}')"
           docker run --rm --network=none "$candidate" node -e '
+            (async () => {
             const assert = require("node:assert/strict");
+            assert.match(process.version, /^v24\./);
             const parser = require("/app/optimus-capture/local-worker/mercadolivre-identity.js");
             const adapter = require("/app/modules/engine/importer/adapters/mercadolivre.adapter.js");
             const importer = require("/app/modules/engine/importer/importer.service.js");
@@ -1080,6 +1082,7 @@ jobs:
               item_payload: { ...claim.item_payload, titulo: "Carretilha Maruri Black Tamba BG" } });
             assert.equal(accepted.ready, true);
             console.log("OVERLAY_ML_SMOKE=PASS node=" + process.version + " identity anchor factual title footer pre-send");
+            })().catch(error => { console.error(error); process.exitCode = 1; });
           '
 
   commercial-recovery-p0:
