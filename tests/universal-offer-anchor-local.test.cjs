@@ -177,6 +177,54 @@ test("worker real do checkout, com fetch stub, enriquece somente a ocorrência e
   console.log("TEMPO_FIXTURE_MS=" + (Date.now() - start));
 });
 
+test("redirect técnico ancorado aguarda worker e só aceita título oficial da mesma ocorrência", async t => {
+  const f = fixture();
+  f.oferta.titulo = "";
+  f.oferta.nome = "";
+  f.oferta.metadata.aguardaTituloMl = true;
+  f.oferta.metadata.identidadeCanonicaMl.status = "transporte_confirmado";
+  f.oferta.metadata.identidadeCanonicaMl.transporteShowProductConfirmado = false;
+  f.oferta.metadata.identidadeCanonicaMl.transporteRedirectConfirmado = true;
+  f.oferta.metadata.resolucaoRadar = { ok: true, urlCapturada: original, linkOriginalRadar: original,
+    urlResolvida: sourceUrl, tipoLinkRadar: "shortlink_meli", statusHttp: 200 };
+  f.deps.garantirIdentidadeMercadoLivreLocalWorker = async () => ({ ok: true,
+    task: { id: "redirect-17", status: "pending" } });
+  const pending = await enriquecerTituloMlPorOcorrencia(f);
+  assert.equal(pending.pendente, true);
+  assert.equal(pending.vinculo.listingId, listingId);
+  const rejected = await gravarOfertaEngine(f.job, f.evento, f.link, f.oferta,
+    { ...f.deps, garantirIdentidadeMercadoLivreLocalWorker: null });
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.motivo, "mercadolivre_titulo_tecnico_nao_confirmado");
+  f.job.metadata = { localWorkerImageRetry: { vinculo: { ...pending.vinculo, taskId: "redirect-17" } } };
+  const data = await proof(t);
+  const start = Date.now();
+  f.deps.garantirIdentidadeMercadoLivreLocalWorker = async () => ({ ok: true,
+    task: { id: "redirect-17", status: "completed", createdAt: iso(start - 1000),
+      completedAt: iso(Date.now()), expiresAt: iso(Date.now() + 60_000), resultMetadata: data } });
+  const enriched = await enriquecerTituloMlPorOcorrencia(f);
+  assert.equal(enriched.oferta.titulo, titulo);
+  assert.equal(enriched.oferta.metadata.identidadeCanonicaMl.status, "consistente");
+  assert.equal(enriched.oferta.metadata.identidadeCanonicaMl.mlbProduto, listingId);
+  assert.equal(enriched.oferta.produtoId, listingId);
+  assert.equal(enriched.oferta.metadata.produto.produtoId, listingId);
+  assert.equal(enriched.oferta.cupom, "FIX10");
+  const persisted = await gravarOfertaEngine(f.job, f.evento, f.link, f.oferta, f.deps);
+  assert.equal(persisted.ok, true);
+  assert.equal(persisted.oferta.titulo, titulo);
+  assert.equal(persisted.oferta.categoria, "Pesca e Camping");
+  assert.equal(persisted.oferta.preco, 90);
+  const other = fixture({ workspace: "workspace-b" });
+  other.oferta = f.oferta;
+  other.deps.garantirIdentidadeMercadoLivreLocalWorker = f.deps.garantirIdentidadeMercadoLivreLocalWorker;
+  assert.equal((await enriquecerTituloMlPorOcorrencia(other)).provaValidada.workspaceId, "workspace-b",
+    "a prova técnica compartilhada gera vínculo individual por workspace");
+  const wrongAnchor = fixture({ anchor: "https://meli.la/outra-ocorrencia" });
+  wrongAnchor.oferta = f.oferta;
+  wrongAnchor.deps.garantirIdentidadeMercadoLivreLocalWorker = f.deps.garantirIdentidadeMercadoLivreLocalWorker;
+  assert.equal(await enriquecerTituloMlPorOcorrencia(wrongAnchor), null);
+});
+
 test("timeout ou colisão deixa a ocorrência pendente; flag OFF não consulta o worker", async () => {
   const f = fixture();
   let chamadas = 0;

@@ -506,6 +506,62 @@ async function testarWallSemTituloFalhaSeguro() {
   assert.strictEqual(resultado.metadata.insuficiente.titulo, true);
 }
 
+async function testarRodapeNaoViraTituloPublicavel() {
+  for (const titulo of ["Sujeito a alteração de preço/estoque.", "Conheça nossos canais de Ofertas:",
+    "Loja Oficial Maruri no Mercado Livre"]) {
+    const contexto = depsBase({ wall: true });
+    const resultado = await importarMercadoLivreEngine({
+      job: job(), evento: eventoRadar({ titulo }), links: links(), deps: contexto.deps
+    });
+    assert.strictEqual(resultado.ok, false, titulo);
+    assert.strictEqual(resultado.motivo, "fallback_radar_insuficiente", titulo);
+    assert.strictEqual(resultado.metadata.insuficiente.titulo, true, titulo);
+  }
+}
+
+async function testarRedirectSelecionadoAguardaProvaOficial() {
+  const anterior = process.env.ML_WORK_ENRICHMENT_CANARY_CLIENTES;
+  process.env.ML_WORK_ENRICHMENT_CANARY_CLIENTES = "workspace_ml";
+  try {
+    const original = "https://meli.la/fixture-pesca";
+    const catalogo = "https://www.mercadolivre.com.br/carretilha/p/MLB22147432";
+    const selecionada = `${catalogo}?pdp_filters=item_id%3AMLB4772233032`;
+    const evento = eventoRadar({ titulo: "Sujeito a alteração de preço/estoque." });
+    evento.texto_original = `Sujeito a alteração de preço/estoque.\nPor R$ 149,90\nCupom PROMO50\n${original}`;
+    evento.links_extraidos = [original];
+    const link = { id: 445, evento_id: evento.id, url_original: original,
+      url_normalizada: original, url_expandida: catalogo, marketplace_detectado: "mercadolivre" };
+    const contexto = depsBase({ wall: true });
+    contexto.deps.mlWorkEnrichmentAtivo = true;
+    contexto.deps.resolverLinkOriginalRadar = async () => ({ ok: true, urlCapturada: original,
+      linkOriginalRadar: original, linkOriginalLimpo: catalogo, linkResolvido: catalogo,
+      urlResolvida: selecionada, tipoLinkRadar: "shortlink_meli", statusHttp: 200 });
+    const resultado = await importarMercadoLivreEngine({ job: job(), evento, links: [link], deps: contexto.deps });
+    assert.equal(resultado.ok, true);
+    assert.equal(resultado.titulo, "", "rodapé não pode ocupar o título durante a espera");
+    assert.equal(resultado.linkOriginal, original);
+    assert.equal(resultado.linkExpandido, selecionada);
+    assert.equal(resultado.preco, 149.9);
+    assert.equal(resultado.cupom, "PROMO50");
+    assert.equal(resultado.metadata.aguardaTituloMl, true);
+    assert.equal(resultado.metadata.identidadeCanonicaMl.status, "transporte_confirmado");
+    assert.equal(resultado.metadata.identidadeCanonicaMl.mlbProduto, "MLB22147432");
+    assert.equal(resultado.metadata.identidadeCanonicaMl.urlCanonicaRevalidada, selecionada);
+    contexto.deps.resolverLinkOriginalRadar = async () => ({ ok: true, urlCapturada: original,
+      linkOriginalRadar: original, linkOriginalLimpo: catalogo, linkResolvido: catalogo,
+      urlResolvida: selecionada, tipoLinkRadar: "shortlink_meli", statusHttp: 302 });
+    const semRedirectComprovado = await importarMercadoLivreEngine({ job: job(), evento,
+      links: [link], deps: contexto.deps });
+    assert.equal(semRedirectComprovado.ok, false, "sem transporte comprovado não solicita título de outro produto");
+    const foraCanario = await importarMercadoLivreEngine({ job: job({ cliente_id: "workspace-controle" }), evento,
+      links: [link], deps: contexto.deps });
+    assert.equal(foraCanario.ok, false, "legado não cria o caminho novo");
+  } finally {
+    if (anterior === undefined) delete process.env.ML_WORK_ENRICHMENT_CANARY_CLIENTES;
+    else process.env.ML_WORK_ENRICHMENT_CANARY_CLIENTES = anterior;
+  }
+}
+
 async function testarTituloWindowsIsoladoContinuaBloqueado() {
   const contexto = depsBase({ wall: true });
   const resultado = await importarMercadoLivreEngine({
@@ -1502,6 +1558,8 @@ async function testarErroGenericoNaoAtivaFallback() {
   await testarWallRadarPdpSemItemIdNaoPublicaImagemRadar();
   await testarWallComThumbnailEDirectPathSegueSemImagem();
   await testarWallSemTituloFalhaSeguro();
+  await testarRodapeNaoViraTituloPublicavel();
+  await testarRedirectSelecionadoAguardaProvaOficial();
   await testarTituloWindowsIsoladoContinuaBloqueado();
   await testarTituloLegitimoComWindowsContinuaAceito();
   await testarWallSemPrecoFalhaSeguro();

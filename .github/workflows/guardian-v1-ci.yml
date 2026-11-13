@@ -720,6 +720,38 @@ jobs:
           node tests/link-conversao-ocorrencia-marketplaces.test.js
           node tests/contrato-comercial-final-universal.test.js
           node tests/radar-commercial-fidelity.test.cjs
+      - name: ML recovery P0 - canonical identity, official fallback, titles and commercial safety
+        if: github.ref == 'refs/heads/validation/guardian-v1-ml-recovery-p0-20261113'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          base=e6ffc5db7050abb7937157df44944e8076595ae6
+          git merge-base --is-ancestor "$base" HEAD
+          git diff --name-only "$base" HEAD | sort > "$RUNNER_TEMP/ml-recovery-actual-files.txt"
+          cat > "$RUNNER_TEMP/ml-recovery-expected-files.txt" <<'FILES'
+          .github/workflows/guardian-v1-ci.yml
+          modules/engine/importer/adapters/mercadolivre.adapter.js
+          modules/engine/importer/importer.service.js
+          modules/engine/universal-queue-preflight.js
+          modules/radar/comercial-precedencia.js
+          tests/contrato-comercial-papeis.test.js
+          tests/mercadolivre-identidade-canonica.test.js
+          tests/mercadolivre-radar-fallback.test.js
+          tests/universal-flow-queue-preflight.test.js
+          tests/universal-offer-anchor-local.test.cjs
+          FILES
+          diff -u "$RUNNER_TEMP/ml-recovery-expected-files.txt" "$RUNNER_TEMP/ml-recovery-actual-files.txt"
+          node --check modules/engine/importer/adapters/mercadolivre.adapter.js
+          node --check modules/engine/importer/importer.service.js
+          node --check modules/engine/universal-queue-preflight.js
+          node --check modules/radar/comercial-precedencia.js
+          node tests/mercadolivre-identidade-canonica.test.js
+          node tests/mercadolivre-radar-fallback.test.js
+          node tests/contrato-comercial-papeis.test.js
+          node tests/universal-flow-queue-preflight.test.js
+          node --test tests/ml-work-enrichment-active.test.js tests/ml-work-enrichment-active-integration.test.js tests/ml-work-enrichment-shadow.test.js tests/ml-catalogo-tecnico-ancora.test.cjs tests/mercadolivre-identidade-promocional-focal.test.cjs tests/universal-content-safety-p0.test.cjs tests/inteligencia-universal-decisao.test.js tests/radar-commercial-fidelity.test.cjs tests/contrato-comercial-final-universal.test.js tests/link-conversao-ocorrencia-marketplaces.test.js tests/magalu-v2-golden-path.test.js tests/aliexpress-app-moedas-contrato.test.js tests/shopee-rio-titulo-beneficio.test.js
       - name: Classification V3 offline replay and benchmark
         if: github.ref == 'refs/heads/validation/classificador-universal-v3-20261027'
         shell: bash
@@ -804,7 +836,7 @@ jobs:
           node --test tests/mensageiro-v4-credit-scope.postgres.test.cjs
 
   universal-offer-anchor-postgres:
-    if: github.ref == 'refs/heads/validation/guardian-v1-universal-offer-anchor' || github.ref == 'refs/heads/validation/universal-closure-p0-20261112' || github.ref == 'refs/heads/validation/guardian-v1-anchor-release-gates-20261112'
+    if: github.ref == 'refs/heads/validation/guardian-v1-universal-offer-anchor' || github.ref == 'refs/heads/validation/universal-closure-p0-20261112' || github.ref == 'refs/heads/validation/guardian-v1-anchor-release-gates-20261112' || github.ref == 'refs/heads/validation/guardian-v1-ml-recovery-p0-20261113'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -922,6 +954,7 @@ jobs:
           echo "DOCKER_IMAGE_ID=$(docker image inspect "$candidate" --format '{{.Id}}')"
           docker run --rm --network=none "$candidate" node -e '
             const assert = require("node:assert/strict");
+            assert.match(process.version, /^v24\./);
             const parser = require("/app/optimus-capture/local-worker/mercadolivre-identity.js");
             const contract = require("/app/modules/local-worker/ml-identity.contract.js");
             const url = "https://www.mercadolivre.com.br/p/MLB1234567?pdp_filters=item_id%3AMLB7654321";
@@ -929,6 +962,127 @@ jobs:
             assert.equal(parser.urlCatalogo(url).catalogId, "MLB1234567");
             assert.throws(() => parser.urlCatalogo(url.replace("www.mercadolivre.com.br", "example.invalid")));
             assert.equal(contract.ML_IDENTITY_CAPABILITY, "ml_identity_v1");
+          '
+      - name: Build ML recovery P0 overlay and smoke-test runtime in an isolated image
+        if: github.ref == 'refs/heads/validation/guardian-v1-ml-recovery-p0-20261113'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          base=e6ffc5db7050abb7937157df44944e8076595ae6
+          parser=optimus-capture/local-worker/mercadolivre-identity.js
+          base_tag="local/optimus-deploy-base:ml-recovery-ci-$GITHUB_RUN_ID"
+          candidate="local/optimus-ml-recovery-overlay:ci-$GITHUB_RUN_ID"
+          fixture="$(mktemp -d)"
+          mkdir -p "$fixture/base"
+          git cat-file -e "${base}^{commit}"
+          git archive "$base" | tar -x -C "$fixture/base"
+          test -f "$fixture/base/Dockerfile"
+          git diff --exit-code "$base" "$GITHUB_SHA" -- optimus-capture
+          node scripts/guardian-v1.cjs prepare --base "$base" --source "$GITHUB_SHA" --release-mode overlay > "$fixture/plan.json"
+          node - "$fixture/plan.json" <<'NODE'
+          const assert = require("node:assert/strict");
+          const fs = require("node:fs");
+          const plan = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+          const expected = [
+            "modules/engine/importer/adapters/mercadolivre.adapter.js",
+            "modules/engine/importer/importer.service.js",
+            "modules/engine/universal-queue-preflight.js",
+            "modules/radar/comercial-precedencia.js"
+          ].sort();
+          assert.equal(plan.validation, "PASS");
+          assert.deepEqual(plan.runtimeFiles.slice().sort(), expected);
+          assert.deepEqual(plan.blocked, []);
+          console.log("OVERLAY_RUNTIME_EXACT=" + expected.join(","));
+          NODE
+          node scripts/guardian-v1.cjs build-dockerfile --base "$base" --source "$GITHUB_SHA" --base-tag "$base_tag" > "$fixture/Dockerfile"
+          node - "$fixture/Dockerfile" <<'NODE'
+          const assert = require("node:assert/strict");
+          const fs = require("node:fs");
+          const file = fs.readFileSync(process.argv[2], "utf8");
+          const copied = file.split(/\r?\n/).filter(line => line.startsWith("COPY "));
+          const expected = [
+            "COPY --chown=node:node modules/engine/importer/adapters/mercadolivre.adapter.js /app/modules/engine/importer/adapters/mercadolivre.adapter.js",
+            "COPY --chown=node:node modules/engine/importer/importer.service.js /app/modules/engine/importer/importer.service.js",
+            "COPY --chown=node:node modules/engine/universal-queue-preflight.js /app/modules/engine/universal-queue-preflight.js",
+            "COPY --chown=node:node modules/radar/comercial-precedencia.js /app/modules/radar/comercial-precedencia.js"
+          ];
+          assert.deepEqual(copied, expected);
+          assert(!file.includes("/app/optimus-capture/"), "overlay must not replace Chrome extension files");
+          console.log("OVERLAY_COPY_ALLOWLIST=" + copied.length + " files; extension paths=none");
+          NODE
+          sha256sum "$parser" | cut -d' ' -f1 > "$fixture/parser.sha"
+          docker build -t "$base_tag" "$fixture/base"
+          node scripts/guardian-v1.cjs build-dockerfile --base "$base" --source "$GITHUB_SHA" --base-tag "$base_tag" > "$fixture/Dockerfile"
+          docker build --pull=false --network=none -f "$fixture/Dockerfile" -t "$candidate" .
+          for path in \
+            modules/engine/importer/adapters/mercadolivre.adapter.js \
+            modules/engine/importer/importer.service.js \
+            modules/engine/universal-queue-preflight.js \
+            modules/radar/comercial-precedencia.js; do
+            expected="$(git show "$GITHUB_SHA:$path" | sha256sum | cut -d' ' -f1)"
+            source="$(sha256sum "$path" | cut -d' ' -f1)"
+            actual="$(docker run --rm --network=none "$candidate" sha256sum "/app/$path" | cut -d' ' -f1)"
+            test "$expected" = "$source"
+            test "$expected" = "$actual"
+            echo "RUNTIME_HASH_OK $path $actual"
+          done
+          parser_base="$(docker run --rm --network=none "$base_tag" sha256sum "/app/$parser" | cut -d' ' -f1)"
+          parser_candidate="$(docker run --rm --network=none "$candidate" sha256sum "/app/$parser" | cut -d' ' -f1)"
+          test "$parser_base" = "$(cat "$fixture/parser.sha")"
+          test "$parser_candidate" = "$parser_base"
+          echo "BASE_PARSER_HASH_PRESERVED=$parser_candidate"
+          docker run --rm --network=none "$base_tag" sh -c 'cd /app && find optimus-capture -type f -print | LC_ALL=C sort | xargs -r sha256sum' > "$fixture/extension-base.sha"
+          docker run --rm --network=none "$candidate" sh -c 'cd /app && find optimus-capture -type f -print | LC_ALL=C sort | xargs -r sha256sum' > "$fixture/extension-candidate.sha"
+          diff -u "$fixture/extension-base.sha" "$fixture/extension-candidate.sha"
+          echo "EXTENSION_TREE_UNCHANGED=PASS"
+          echo "OVERLAY_IMAGE_ID=$(docker image inspect "$candidate" --format '{{.Id}}')"
+          docker run --rm --network=none "$candidate" node -e '
+            (async () => {
+            const assert = require("node:assert/strict");
+            assert.match(process.version, /^v24\./);
+            const parser = require("/app/optimus-capture/local-worker/mercadolivre-identity.js");
+            const adapter = require("/app/modules/engine/importer/adapters/mercadolivre.adapter.js");
+            const importer = require("/app/modules/engine/importer/importer.service.js");
+            const { criarPreflightFilaUniversal } = require("/app/modules/engine/universal-queue-preflight.js");
+            const { tituloComercialUniversalValido } = require("/app/modules/radar/comercial-precedencia.js");
+            assert.equal(typeof importer.enriquecerTituloMlPorOcorrencia, "function");
+            assert.equal(typeof criarPreflightFilaUniversal, "function");
+            const url = "https://www.mercadolivre.com.br/carretilha/p/MLB22147432?pdp_filters=item_id%3AMLB4772233032";
+            const identity = parser.urlCatalogo(url);
+            assert.equal(identity.catalogId, "MLB22147432");
+            assert.equal(identity.listingId, "MLB4772233032");
+            assert.equal(adapter._test.escolherProdutoResolvido({
+              linkOriginalLimpo: "https://www.mercadolivre.com.br/carretilha/p/MLB22147432",
+              linkResolvido: "https://www.mercadolivre.com.br/carretilha/p/MLB22147432",
+              urlResolvida: url
+            }, "https://meli.la/captured-occurrence", { priorizarSelecaoCatalogo: true }), url);
+            assert.equal(tituloComercialUniversalValido("Carretilha Maruri Black Tamba BG", { marketplace: "mercadolivre" }), true);
+            assert.equal(tituloComercialUniversalValido("Sujeito a alteração de preço/estoque.", { marketplace: "mercadolivre" }), false);
+            const now = Date.parse("2026-10-10T12:30:00.000Z");
+            let rendered = false;
+            const pass = async () => ({ ok: true });
+            const preflight = criarPreflightFilaUniversal({
+              pool: { connect() {} }, now: () => now, readClock: async () => null,
+              resolveDestination: async ({ destinationId }) => ({ ok: true, destination: { id: destinationId, tipo: "whatsapp", intervaloMinutos: 2.5 } }),
+              checkWindow: pass, checkDailyLimit: pass, checkSession: pass, checkCredits: pass,
+              checkMedia: pass, checkLinks: pass, checkDedup: pass,
+              renderMessage: async () => { rendered = true; return { ok: true, message: "fixture" }; }
+            });
+            const claim = { workspace_id: "ws_fixture", destination_id: "dest_fixture",
+              capturado_em: "2026-10-10T12:10:00.000Z", operationEpochStartedAt: "2026-10-10T11:00:00.000Z",
+              evento_id: 1, oferta_id: 2, origem_fluxo: "optimus",
+              item_payload: { clienteId: "ws_fixture", engineOfertaId: 2, marketplace: "mercadolivre", titulo: "Sujeito a alteração de preço/estoque." } };
+            const rejected = await preflight(claim);
+            assert.equal(rejected.reason, "ml_titulo_nao_produto");
+            assert.equal(rejected.terminalNoSend, true);
+            assert.equal(rendered, false);
+            const accepted = await preflight({ ...claim,
+              item_payload: { ...claim.item_payload, titulo: "Carretilha Maruri Black Tamba BG" } });
+            assert.equal(accepted.ready, true);
+            console.log("OVERLAY_ML_SMOKE=PASS node=" + process.version + " identity anchor factual title footer pre-send");
+            })().catch(error => { console.error(error); process.exitCode = 1; });
           '
 
   commercial-recovery-p0:

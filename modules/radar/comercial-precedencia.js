@@ -42,6 +42,9 @@ function tituloPublicitarioOuInstrucao(titulo = "") {
   if (/^(?:suas?|esses?|essas?)\b.*\b(?:agradecem|cuidado|merecem)\b/.test(normalizado)) return true;
   if (/\b(?:no|na|nos|nas)\b.*\b(?:canto|rodape|menu|aba|tela)\b.*\b(?:direito|esquerdo|mais|clique|va)\b/.test(normalizado)) return true;
   if (/\b(?:cara das ofertas|equipe de ofertas|admin(?:istrador|istradora)? do grupo)\b.*\b(?:achou|encontrou|separou|trouxe|pra voce)\b/.test(normalizado)) return true;
+  if (/^sujeito a alteracao de (?:preco|estoque)(?: (?:e |ou )?(?:preco|estoque))?$/.test(normalizado)) return true;
+  if (/^conheca (?:nossos?|os) canais? de ofertas?$/.test(normalizado)) return true;
+  if (/^loja (?:oficial|verificada)(?:\s+[\p{L}\p{N}]+){0,8}\s+(?:no|do)\s+(?:mercado livre|ml)$/u.test(normalizado)) return true;
   return false;
 }
 

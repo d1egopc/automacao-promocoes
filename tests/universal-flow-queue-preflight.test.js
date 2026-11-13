@@ -84,6 +84,23 @@ test("original T0 is revalidated before any destination/provider call", async ()
   assert.equal(oldEpoch.reason, "universal_send_identity_or_t0_invalid");
 });
 
+test("old ML offer with footer title is terminal before transport, without an ACK", async () => {
+  let rendered = false;
+  const preflight = build({ overrides: { renderMessage: async () => {
+    rendered = true;
+    return { ok: true, message: "fixture" };
+  } } });
+  const oldOffer = fixture();
+  oldOffer.item_payload.titulo = "Sujeito a alteração de preço/estoque.";
+  assert.deepEqual(await preflight(oldOffer), {
+    ready: false, reason: "ml_titulo_nao_produto", terminalNoSend: true
+  });
+  assert.equal(rendered, false);
+  const valid = fixture();
+  valid.item_payload.titulo = "Carretilha Maruri Black Tamba BG";
+  assert.equal((await preflight(valid)).ready, true);
+});
+
 test("normal 20 min stays fresh, factual Turbo at 15 min expires", async () => {
   const normal = await build()(fixture());
   assert.equal(normal.ready, true);
