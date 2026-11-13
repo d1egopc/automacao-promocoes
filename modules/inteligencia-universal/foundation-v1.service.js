@@ -223,13 +223,22 @@ function resolverTituloFactualIntelligenceV1(oferta = {}, identidade = resolverI
   });
 }
 
+// Only the matched noun phrase is industrial. Other occurrences and other
+// safety evidence still apply, including evidence in a different field.
+function removerMencoesVibradorIndustrial(textoNormalizado) {
+  return textoNormalizado.replace(
+    /\bvibrador(?:es)? (?:(?:industrial|industriais) )?(?:(?:de|para) concreto|(?:para|de) construcao civil)\b/g,
+    " "
+  );
+}
+
 function resolverSafetyClassIntelligenceV1(oferta = {}, tituloFactual = {}) {
   const raw = objeto(oferta.raw);
   const metadados = [objeto(oferta.metadata), objeto(raw.metadata),
     objeto(oferta.evento_metadata), objeto(oferta.job_metadata?.metadataEvento)];
   const produtos = [objeto(oferta.produto), objeto(oferta.ofertaUniversal?.produto),
     ...metadados.flatMap(m => [objeto(m.produto), objeto(m.ofertaUniversal?.produto)])];
-  const textoSeguranca = normalizarComparacao([
+  const camposSeguranca = [
     tituloFactual.title, oferta.titulo, oferta.tituloFactual, oferta.tituloOficial, oferta.nome, oferta.descricao,
     raw.titulo, raw.descricao,
     ...metadados.flatMap(m => [m.provaTituloTecnicoValidada?.titulo?.valor,
@@ -240,8 +249,13 @@ function resolverSafetyClassIntelligenceV1(oferta = {}, tituloFactual = {}) {
     oferta.categoriaMarketplace?.tipoProduto,
     ...(Array.isArray(oferta.categoriaMarketplace?.hierarquia)
       ? oferta.categoriaMarketplace.hierarquia.slice(0, 8) : [])
-  ].filter(v => typeof v === "string").map(v => v.slice(0, 2000)).join(" "));
-  const adulto = /\b(?:sex toys?|sex shop|vibrador(?:es)?|dildos?|masturbador(?:es)?|estimulador sexual|eroticos?|eroticas?|plug anal)\b/.test(textoSeguranca);
+  ].filter(v => typeof v === "string").map(v => normalizarComparacao(v.slice(0, 2000)));
+  const textoSeguranca = camposSeguranca.join(" ");
+  const adulto = camposSeguranca.some(campo =>
+    /\b(?:sex toys?|sex shop|dildos?|masturbador(?:es)?|estimulador sexual|eroticos?|eroticas?|plug anal)\b/.test(campo) ||
+    /\bvibrador(?:es)?\b/.test(removerMencoesVibradorIndustrial(campo))
+  ) || (/\bvibrador(?:es)?\b/.test(textoSeguranca) &&
+    /\b(?:intim[oa]s?|sexua(?:l|is)|orgasmos?|clitoris|clitoriano|vaginal|anal|adult[oa]s?)\b/.test(textoSeguranca));
   const infantil = /\b(?:infantil|bebe|crianca|menino|menina|juvenil)\b/.test(textoSeguranca);
   const classesRegistradas = [oferta.segurancaPublicacao?.class, ...metadados.flatMap(m => [
     m.segurancaPublicacao?.class,
@@ -363,6 +377,7 @@ module.exports = {
   resolverIdentidadeIntelligenceV1,
   resolverTituloFactualIntelligenceV1,
   resolverSafetyClassIntelligenceV1,
+  removerMencoesVibradorIndustrial,
   avaliarSegurancaPublicacao,
   resolverClassificacaoIntelligenceV1,
   construirMetadataIntelligenceV1,

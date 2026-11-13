@@ -2679,11 +2679,32 @@ async function processarEventoComentarioInstagramInterno(evento = {}, { httpClie
   }
 
   const tipoPublicacaoWebhook = texto(publicacao.tipoPublicacao || (texto(publicacao.ofertaId) ? "oferta" : "livre"));
-  const ofertaEncontrada = texto(publicacao.ofertaId)
-    ? carregarOfertaClienteOperacional(clienteId, publicacao.ofertaId)
-    : ofertaDaPublicacaoLivre({ ...publicacao, clienteId });
-  const oferta = ofertaEncontrada && typeof ofertaEncontrada.then === "function"
-    ? await ofertaEncontrada : ofertaEncontrada;
+  let oferta;
+  let bloqueioSeguranca;
+  try {
+    if (texto(publicacao.ofertaId)) {
+      oferta = await carregarOfertaClienteOperacional(clienteId, publicacao.ofertaId);
+    } else if (tipoPublicacaoWebhook === "livre") {
+      oferta = ofertaDaPublicacaoLivre({ ...publicacao, clienteId });
+    }
+    if (!oferta) throw new Error("oferta_nao_encontrada");
+    const seguranca = avaliarSegurancaPublicacao(oferta, {
+      titulo: publicacao.titulo, descricao: publicacao.legenda,
+      categoria: publicacao.categoria, segurancaPublicacao: publicacao.segurancaPublicacao
+    });
+    if (!seguranca.ok) bloqueioSeguranca = seguranca.motivo;
+  } catch {
+    bloqueioSeguranca = "seguranca_oferta_indisponivel";
+  }
+  if (bloqueioSeguranca) {
+    const interacao = salvarInteracaoInstagram(clienteId, {
+      ...base, statusGeral: "ignorado", erro: { message: bloqueioSeguranca }
+    });
+    logWebhookDescartadoInstagram(bloqueioSeguranca, {
+      clienteId, instagramMediaId: evento.instagramMediaId, instagramCommentId: evento.instagramCommentId
+    });
+    return { status: "ignorado", interacao: interacaoSanitizada(interacao) };
+  }
   if (tipoPublicacaoWebhook === "livre") {
     oferta.linkAfiliado = texto(oferta.linkAfiliado) || linkFinalPublicacaoLivre(publicacao);
   }

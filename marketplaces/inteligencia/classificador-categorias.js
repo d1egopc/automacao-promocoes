@@ -1,4 +1,6 @@
 let categoriasDestinos = {};
+const { removerMencoesVibradorIndustrial, avaliarSegurancaPublicacao } =
+  require("../../modules/inteligencia-universal/foundation-v1.service");
 const { avaliarFamiliaFuncional, avaliarNaturezaFuncional } = require("./evidencia-funcional");
 
 try {
@@ -817,7 +819,8 @@ function categoriaMarketplaceComprovada(oferta = {}) {
   const identidade = String(oferta.produtoId || oferta.productId || oferta.produtoIdDetectado || raw.produtoId || raw.productId || raw.produtoIdDetectado || produto.produtoId || produto.productId || "");
   const marketplace = String(oferta.marketplace || raw.marketplace || "").toLowerCase();
   if (!evidencia || !EVIDENCIAS_MARKETPLACE.has(evidencia) || evidencia.produtoId !== identidade || evidencia.marketplace !== marketplace) return null;
-  if (/\b(?:sex toy|sex shop|vibrador|dildo|masturbador|erotico|erotica)\b/.test(normalizarTextoLocal(evidencia.tipoProduto)))
+  if (/\b(?:sex toy|sex shop|vibrador|dildo|masturbador|erotico|erotica)\b/.test(
+    removerMencoesVibradorIndustrial(normalizarTextoLocal(evidencia.tipoProduto))))
     return { categoria: CATEGORIA.diversos, fonte: evidencia.fonte, adulto: true };
   const tipo = MAPA_CATEGORIAS_EXTERNAS.find(([, padrao]) => padrao.test(normalizarTextoLocal(evidencia.tipoProduto)))?.[0];
   for (let i = evidencia.hierarquia.length - 1; i >= 0; i--) {
@@ -871,11 +874,16 @@ function avaliarEvidenciaCategoria(oferta = {}, termo = "") {
   const oficial = categoriaMarketplaceComprovada(oferta);
   const declarada = categoriaDeclaradaValida(oferta);
   let categoria = "", motivo = "natureza_produto_explicita", finalidadePesca = "", funcional = null;
-  if (oficial?.adulto || /\b(?:sex shop|vibrador(?:es)?|dildos?|masturbador(?:es)?|estimulador sexual|eroticos?|eroticas?)\b/.test(titulo) ||
+  const mencaoIndustrial = removerMencoesVibradorIndustrial(titulo) !== titulo;
+  const conflitoIndustrial = mencaoIndustrial && !avaliarSegurancaPublicacao({ ...oferta, titulo }).ok;
+  if (oficial?.adulto || conflitoIndustrial ||
+      /\b(?:sex shop|vibrador(?:es)?|dildos?|masturbador(?:es)?|estimulador sexual|eroticos?|eroticas?)\b/.test(removerMencoesVibradorIndustrial(titulo)) ||
       (/\badultos?\b/.test(titulo) && (/\b(?:infantil|bebe|juvenil|crianca|meninos?|meninas?)\b/.test(titulo) ||
         [CATEGORIA.bebes, CATEGORIA.infantil, CATEGORIA.brinquedos].includes(oficial?.categoria || declarada)))) {
     categoria = CATEGORIA.diversos;
     motivo = "conteudo_adulto_sem_categoria_habilitada";
+  } else if (mencaoIndustrial && !/\b(?:brinquedo|miniatura|manual)\b/.test(titulo)) {
+    categoria = CATEGORIA.ferramentas;
   } else if ((categoria = categoriaPorNaturezaExplicita(oferta, termo))) {
     motivo = categoria === CATEGORIA.diversos
       ? "natureza_nautica_sem_taxonomia"
@@ -997,7 +1005,7 @@ function classificarCategoriaLegada(oferta = {}, termo = "") {
 
   // Conteúdo adulto explícito permanece em Diversos nesta versão; nunca o
   // encaminha a uma categoria infantil por sinais conflitantes no título.
-  const conteudoAdultoExplicito = /\b(?:sex shop|vibrador(?:es)?|dildo(?:s)?|masturbador(?:es)?|estimulador sexual|eroticos?|eroticas?)\b/.test(texto);
+  const conteudoAdultoExplicito = /\b(?:sex shop|vibrador(?:es)?|dildo(?:s)?|masturbador(?:es)?|estimulador sexual|eroticos?|eroticas?)\b/.test(removerMencoesVibradorIndustrial(texto));
   const faixaEtariaConflitante = /\badultos?\b/.test(texto) && /\b(?:infantil|bebe|juvenil|crianca|meninos?|meninas?)\b/.test(texto);
   if (conteudoAdultoExplicito || faixaEtariaConflitante) {
     return CATEGORIA.diversos;

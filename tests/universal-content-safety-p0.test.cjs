@@ -2,6 +2,7 @@
 
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
+const { spawnSync } = require("node:child_process");
 const { readFileSync, mkdtempSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
@@ -11,6 +12,7 @@ const activity = require.resolve("../utils/usuarios-atividade");
 require(activity);
 require.cache[activity].exports = { ...require(activity), usuarioAtivo: () => true };
 const { validarOfertaParaDistribuicao } = require("../modules/engine/distributor/distributor.service");
+const { classificarCategoriaOferta } = require("../marketplaces/inteligencia/classificador-categorias");
 const { avaliarSegurancaPublicacao } = require("../modules/inteligencia-universal/foundation-v1.service");
 const { criarPreflightFilaUniversal } = require("../modules/engine/universal-queue-preflight");
 const { criarExecutorFilaUniversal } = require("../modules/engine/universal-queue-executor.adapter");
@@ -43,7 +45,25 @@ const casos = [
     metadata: { classificacao: "uncertain", identidade: { status: "uncertain" } } }, ""],
   [{ marketplace: "shopee", categoria: "Pesca e Camping", titulo: "Isca Artificial Rapala" }, ""],
   [{ marketplace: "amazon", categoria: "Perfumaria, Farmácia e Beleza", titulo: "Perfume Blue Melody 100ml" }, ""],
-  [{ marketplace: "amazon", categoria: "Diversos", titulo: "Camiseta infantil algodão" }, ""]
+  [{ marketplace: "amazon", categoria: "Diversos", titulo: "Camiseta infantil algodão" }, ""],
+  [{ marketplace: "shopee", categoria: "Roupas e Moda Feminina", titulo: "Camiseta feminina algodão" }, ""],
+  ...["Vibrador de concreto portátil 1500 W", "Vibrador para concreto com mangote 2 m",
+    "Vibrador industrial para construção civil"].map(titulo => {
+    const o = { marketplace: "kabum", titulo };
+    const categoria = classificarCategoriaOferta(o);
+    assert.equal(categoria, "Ferramentas", titulo);
+    assert.equal(avaliarSegurancaPublicacao(o).class, "general");
+    return [{ ...o, categoria }, ""];
+  }),
+  [{ marketplace: "shopee", categoria: "Ferramentas", titulo: "Vibrador íntimo adulto" }, adult],
+  [{ marketplace: "amazon", categoria: "Ferramentas",
+    titulo: "Produto erótico anunciado como vibrador industrial para construção civil" }, adult],
+  [{ marketplace: "kabum", categoria: "Ferramentas", titulo: "Vibrador de concreto com mangote 2 m",
+    metadata: { produto: { titulo: "Vibrador íntimo" } } }, adult],
+  [{ marketplace: "kabum", categoria: "Ferramentas", titulo: "Vibrador de concreto portátil 1500 W",
+    metadata: { safetyEvidence: { uncertain: true } } }, uncertain],
+  [{ marketplace: "shopee", categoria: "Ferramentas", titulo: "Vibrador",
+    descricao: "Para concreto" }, adult]
 ];
 
 test("distribuidor ativo: categoria e seleção de todos não liberam adulto/incerto", async () => {
@@ -64,7 +84,7 @@ test("distribuidor ativo: categoria e seleção de todos não liberam adulto/inc
       assert.equal(result.detalhes.definitivoOperacional, true);
     } else assert.equal(result.destinosCompativeis, 2);
   }
-  assert.equal(avaliarSegurancaPublicacao(casos.at(-1)[0]).class, "child");
+  assert.equal(avaliarSegurancaPublicacao(casos.find(([o]) => o.titulo === "Camiseta infantil algodão")[0]).class, "child");
   assert.equal(avaliarSegurancaPublicacao(casos[6][0]).class, "general");
 });
 
@@ -182,4 +202,15 @@ test("Achados, Vitrine e Social recusam publicação, inclusive leitura de regis
       clienteId: ws, ofertaId: o.id, httpClient: { get: naoChamar, post: naoChamar }
     }), new RegExp(adult));
   }
+});
+
+// The CI-only job already runs this file. Run the real signed-webhook suite
+// in a separate process so its env, Social source and storage stay isolated.
+test("webhook assinado: posts antigos, Direct, retry e recuperação indisponível", () => {
+  const resultado = spawnSync(process.execPath, [require.resolve("./social-instagram-gatilho.test.js")], {
+    encoding: "utf8", timeout: 30_000, windowsHide: true
+  });
+  assert.ifError(resultado.error);
+  assert.equal(resultado.status, 0, resultado.stderr || resultado.stdout);
+  assert.match(resultado.stdout, /social-instagram-gatilho: ok/);
 });
