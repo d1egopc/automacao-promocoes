@@ -204,7 +204,97 @@ function mockHttpClient(opcoes = {}) {
   };
 }
 
+async function testarBloqueioSegurancaPublicacaoAntiga() {
+  const cliente = "cliente_seguranca";
+  const ig = "ig_seguranca";
+  const media = "media_seguranca";
+  const oferta = "oferta_antiga";
+  salvarClienteInstagram(cliente, { ig, media, oferta });
+  const [item] = readClienteJson(cliente, "fila.json", []);
+  const [post] = readClienteJson(cliente, "social-publicacoes.json", []);
+  const comFallback = { ...post, urlDestino: "https://go.optimus.test/fallback",
+    gatilho: { ...post.gatilho, respostaPublica: "Confira em https://go.optimus.test/publico" } };
+  writeClienteJson(cliente, "social-publicacoes.json", [comFallback]);
+
+  for (const [sufixo, itemAtual, motivo] of [
+    ["diversos", { titulo: "Vibrador íntimo adulto", categoria: "Diversos" }, "seguranca_conteudo_adulto"],
+    ["categoria_errada", { titulo: "Vibrador íntimo adulto", categoria: "Eletrônicos" }, "seguranca_conteudo_adulto"],
+    ["incerto", { titulo: "Modelo Fixture", metadata: { safetyEvidence: { uncertain: true } } }, "seguranca_conteudo_incerto"],
+    ["titulo_editado", { titulo: "Produto editado", categoria: "Diversos",
+      segurancaPublicacao: { class: "adult" } }, "seguranca_conteudo_adulto"],
+    ["ausente", null, "seguranca_oferta_indisponivel"],
+    ["fonte_falhou", null, "seguranca_oferta_indisponivel"]
+  ]) {
+    if (sufixo === "fonte_falhou") {
+      fonteUniversalSocial.configurarFonteUniversalSocial({
+        getMode: () => "UNIVERSAL",
+        getPool: () => ({ async query() { throw new Error("fixture_fonte_indisponivel"); } })
+      });
+    }
+    try {
+      writeClienteJson(cliente, "fila.json", itemAtual ? [{ ...item, ...itemAtual }] : []);
+      const comment = "comment_seguranca_" + sufixo;
+      const payload = payloadComentario({ ig, media, comment });
+      const httpClient = mockHttpClient();
+      const r = await instagram.processarWebhookInstagram({ payload, ...assinar(payload), httpClient });
+      assert.strictEqual(r.resultados[0].status, "ignorado", sufixo);
+      const interacao = instagram.listarInteracoesInstagram(cliente).find(x => x.instagramCommentId === comment);
+      assert.strictEqual(interacao?.erro?.message, motivo);
+      assert.strictEqual(interacao.statusGeral, "ignorado");
+      assert.strictEqual(interacao.respostaPublicaStatus, "nao_enviada");
+      assert.strictEqual(interacao.privateReplyStatus, "nao_enviado");
+      assert.strictEqual(interacao.respondidoEm, "");
+      assert.deepStrictEqual(httpClient.chamadas, []);
+    } finally {
+      fonteUniversalSocial.configurarFonteUniversalSocial({ getMode: () => "LEGACY", getPool: () => null });
+    }
+  }
+
+  writeClienteJson(cliente, "fila.json", [item]);
+  for (const [sufixo, publicacao, motivo] of [
+    ["post_marcado", { ...comFallback, segurancaPublicacao: { class: "adult" } }, "seguranca_conteudo_adulto"],
+    ["vinculo_ausente", { ...comFallback, tipoPublicacao: "oferta", ofertaId: "" }, "seguranca_oferta_indisponivel"]
+  ]) {
+    writeClienteJson(cliente, "social-publicacoes.json", [publicacao]);
+    const payload = payloadComentario({ ig, media, comment: "comment_seguranca_" + sufixo });
+    const httpClient = mockHttpClient();
+    const r = await instagram.processarWebhookInstagram({ payload, ...assinar(payload), httpClient });
+    assert.strictEqual(r.resultados[0].status, "ignorado");
+    assert.strictEqual(r.resultados[0].interacao.erro.message, motivo);
+    assert.deepStrictEqual(httpClient.chamadas, []);
+  }
+  writeClienteJson(cliente, "social-publicacoes.json", [comFallback]);
+
+  // O retry do Direct não pode usar o link depois de um bloqueio descoberto.
+  const comment = "comment_seguranca_retry";
+  writeClienteJson(cliente, "social-interacoes.json", [{
+    id: "interacao-retry", instagramCommentId: comment,
+    respostaPublicaStatus: "concluida", respostaPublicaEnviadaEm: "2026-01-01T00:00:00.000Z",
+    statusGeral: "erro", privateReplyStatus: "erro"
+  }]);
+  writeClienteJson(cliente, "fila.json", [{ ...item, segurancaPublicacao: { class: "adult" } }]);
+  const payload = payloadComentario({ ig, media, comment });
+  const httpClient = mockHttpClient();
+  const r = await instagram.processarWebhookInstagram({ payload, ...assinar(payload), httpClient });
+  assert.strictEqual(r.resultados[0].interacao.respostaPublicaStatus, "concluida");
+  assert.strictEqual(r.resultados[0].interacao.privateReplyStatus, "erro");
+  assert.strictEqual(r.resultados[0].interacao.erro.message, "seguranca_conteudo_adulto");
+  assert.strictEqual(r.resultados[0].interacao.respondidoEm, "");
+  assert.deepStrictEqual(httpClient.chamadas, []);
+
+  writeClienteJson(cliente, "fila.json", [{ ...item, titulo: "Isca artificial para pesca" }]);
+  const normal = payloadComentario({ ig, media, comment: "comment_seguranca_comum" });
+  const httpNormal = mockHttpClient();
+  const resultado = await instagram.processarWebhookInstagram({
+    payload: normal, ...assinar(normal), httpClient: httpNormal
+  });
+  assert.strictEqual(resultado.resultados[0].status, "respondida");
+  assert.strictEqual(httpNormal.chamadas.filter(c => c.url.endsWith("/replies")).length, 1);
+  assert.strictEqual(httpNormal.chamadas.filter(c => c.url.endsWith("/messages")).length, 1);
+}
+
 (async () => {
+  await testarBloqueioSegurancaPublicacaoAntiga();
   salvarClienteInstagram("cliente_a");
   salvarClienteInstagram("cliente_b", {
     ig: "ig_cliente_b",

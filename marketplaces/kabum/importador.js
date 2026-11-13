@@ -551,6 +551,7 @@ avisoPagamento = avisoPagamento || "";
   return {
   marketplace: "kabum",
   titulo: tituloFinal,
+  tituloFonteOficial: skuSolicitado ? "kabum_html.title" : "",
   produtoId: diagnosticoProduto.produtoIdCanonico || "",
   produtoIdCanonico: diagnosticoProduto.produtoIdCanonico || "",
   chaveCanonica: diagnosticoProduto.chaveCanonica || "",

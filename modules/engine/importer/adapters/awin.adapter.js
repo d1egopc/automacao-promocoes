@@ -1,3 +1,4 @@
+const { montarProvaTituloTecnico } = require("./prova-identidade-tecnica");
 const { normalizarNumeroMoeda } = require("../../../../utils/moeda");
 const {
   escolherProdutoPrincipal,
@@ -558,6 +559,12 @@ async function importarAwinEngine({ job = {}, evento = {}, links = [], deps = {}
     evento
   });
 
+  const provaTituloTecnico = produto.tituloFonteOficial === "kabum_html.title"
+    ? montarProvaTituloTecnico({
+        marketplace: "awin_kabum", job, workspaceId: clienteId, links, linkEscolhido,
+        urlOriginal: urlCapturadaEngine, urlCanonica: primeiroValor(produto.linkOriginal, produto.linkExpandido),
+        produtoId: produto.produtoIdCanonico, titulo: produto.titulo, fonteTitulo: produto.tituloFonteOficial
+      }) : null;
   return {
     ok: true,
     marketplace,
@@ -603,6 +610,7 @@ async function importarAwinEngine({ job = {}, evento = {}, links = [], deps = {}
       linksClassificados: linksClassificadosComConversao,
       linksComerciais: linksClassificadosComConversao,
       integracaoUsada: integracaoAwin ? "awin" : "kabum",
+      ...(provaTituloTecnico ? { provaTituloTecnico } : {}),
       camposProduto: Object.keys(produto || {}),
       produto
     }

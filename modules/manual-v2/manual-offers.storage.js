@@ -1,3 +1,4 @@
+const { avaliarSegurancaPublicacao } = require("../inteligencia-universal/foundation-v1.service");
 const crypto = require("crypto");
 const { centavosMonetarios } = require("../../utils/moeda");
 const {
@@ -612,11 +613,13 @@ function atualizarOfertaManualV2(clienteId = "admin", ofertaId = "", alteracoes 
   if (index < 0) return null;
 
   const existente = lista[index];
+  const seguranca = avaliarSegurancaPublicacao(existente, alteracoes);
   const agora = storage.now();
   const normalizada = normalizarOfertaManualV2(
     {
       ...existente,
       ...alteracoes,
+      segurancaPublicacao: seguranca,
       id: existente.id,
       clienteId: id,
       criadoEm: existente.criadoEm,

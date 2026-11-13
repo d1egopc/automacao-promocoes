@@ -1,3 +1,4 @@
+const { avaliarSegurancaPublicacao } = require("../../inteligencia-universal/foundation-v1.service");
 const path = require("path");
 const { validarFidelidadeComercialRadar } = require("../../radar/comercial-precedencia");
 const { getEnginePool, engineDbHabilitado } = require("../database");
@@ -1389,6 +1390,9 @@ async function validarOfertaParaDistribuicao(oferta = {}, contexto = {}) {
     };
   };
 
+  const seguranca = avaliarSegurancaPublicacao(oferta);
+  if (!seguranca.ok) return rejeitar(seguranca.motivo);
+
   const fidelidadeRadar = validarFidelidadeComercialRadar(oferta);
   if (!fidelidadeRadar.ok) return rejeitar(fidelidadeRadar.motivos[0], { fidelidadeRadar });
 
@@ -1477,6 +1481,8 @@ async function validarOfertaParaDistribuicao(oferta = {}, contexto = {}) {
 }
 
 async function adicionarOfertaNaFilaCliente(oferta = {}, contexto = {}) {
+  const seguranca = avaliarSegurancaPublicacao(oferta);
+  if (!seguranca.ok) return { ok: false, motivo: seguranca.motivo };
   const fidelidadeRadar = validarFidelidadeComercialRadar(oferta);
   if (!fidelidadeRadar.ok) return { ok: false, motivo: fidelidadeRadar.motivos[0] };
   const clienteId = normalizarTexto(oferta.cliente_id);

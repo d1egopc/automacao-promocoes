@@ -223,24 +223,53 @@ function resolverTituloFactualIntelligenceV1(oferta = {}, identidade = resolverI
   });
 }
 
+// Only the matched noun phrase is industrial. Other occurrences and other
+// safety evidence still apply, including evidence in a different field.
+function removerMencoesVibradorIndustrial(textoNormalizado) {
+  return textoNormalizado.replace(
+    /\bvibrador(?:es)? (?:(?:industrial|industriais) )?(?:(?:de|para) concreto|(?:para|de) construcao civil)\b/g,
+    " "
+  );
+}
+
 function resolverSafetyClassIntelligenceV1(oferta = {}, tituloFactual = {}) {
   const raw = objeto(oferta.raw);
-  const metadata = objeto(oferta.metadata || raw.metadata);
-  const produto = objeto(metadata.produto);
-  const textoSeguranca = normalizarComparacao([
-    tituloFactual.title,
-    oferta.titulo,
-    oferta.nome,
-    oferta.descricao,
-    raw.descricao,
-    produto.tipoProduto,
-    produto.categoriaOficial
-  ].filter(Boolean).join(" "));
-  const adulto = /\b(?:sex shop|vibrador(?:es)?|dildos?|masturbador(?:es)?|estimulador sexual|eroticos?|eroticas?|plug anal)\b/.test(textoSeguranca);
+  const metadados = [objeto(oferta.metadata), objeto(raw.metadata),
+    objeto(oferta.evento_metadata), objeto(oferta.job_metadata?.metadataEvento)];
+  const produtos = [objeto(oferta.produto), objeto(oferta.ofertaUniversal?.produto),
+    ...metadados.flatMap(m => [objeto(m.produto), objeto(m.ofertaUniversal?.produto)])];
+  const camposSeguranca = [
+    tituloFactual.title, oferta.titulo, oferta.tituloFactual, oferta.tituloOficial, oferta.nome, oferta.descricao,
+    raw.titulo, raw.descricao,
+    ...metadados.flatMap(m => [m.provaTituloTecnicoValidada?.titulo?.valor,
+      m.radarMirror?.produto?.tituloCapturado, m.radarEspelhoComercial?.radarMirror?.produto?.tituloCapturado]),
+    ...produtos.flatMap(p => [p.titulo, p.tituloFactual, p.nome, p.tipoProduto, p.categoriaOficial,
+      p.categoriaMarketplace?.tipoProduto, ...(Array.isArray(p.categoriaMarketplace?.hierarquia)
+        ? p.categoriaMarketplace.hierarquia.slice(0, 8) : [])]),
+    oferta.categoriaMarketplace?.tipoProduto,
+    ...(Array.isArray(oferta.categoriaMarketplace?.hierarquia)
+      ? oferta.categoriaMarketplace.hierarquia.slice(0, 8) : [])
+  ].filter(v => typeof v === "string").map(v => normalizarComparacao(v.slice(0, 2000)));
+  const textoSeguranca = camposSeguranca.join(" ");
+  const adulto = camposSeguranca.some(campo =>
+    /\b(?:sex toys?|sex shop|dildos?|masturbador(?:es)?|estimulador sexual|eroticos?|eroticas?|plug anal)\b/.test(campo) ||
+    /\bvibrador(?:es)?\b/.test(removerMencoesVibradorIndustrial(campo))
+  ) || (/\bvibrador(?:es)?\b/.test(textoSeguranca) &&
+    /\b(?:intim[oa]s?|sexua(?:l|is)|orgasmos?|clitoris|clitoriano|vaginal|anal|adult[oa]s?)\b/.test(textoSeguranca));
   const infantil = /\b(?:infantil|bebe|crianca|menino|menina|juvenil)\b/.test(textoSeguranca);
-  const incertaExplicita = metadata.safetyEvidence?.uncertain === true || produto.safetyUncertain === true;
+  const classesRegistradas = [oferta.segurancaPublicacao?.class, ...metadados.flatMap(m => [
+    m.segurancaPublicacao?.class,
+    // Persisted JSON carries a value. A lazy shadow accessor is not a
+    // requirement for the authoritative safety decision.
+    Object.getOwnPropertyDescriptor(m, "intelligenceV1Routing")?.value?.safety?.class
+  ])];
+  const categoriaReservada = [oferta.categoria, oferta.categoriaProduto,
+    ...produtos.map(p => p.categoriaNormalizada)].some(v =>
+    normalizarComparacao(v) === normalizarComparacao(RESERVED_COMMERCIAL_CATEGORY));
+  const incertaExplicita = metadados.some(m => m.safetyEvidence?.uncertain === true) ||
+    produtos.some(p => p.safetyUncertain === true) || classesRegistradas.includes(SAFETY_CLASS.UNCERTAIN);
 
-  if (adulto) {
+  if (adulto || categoriaReservada || classesRegistradas.includes(SAFETY_CLASS.ADULT)) {
     return Object.freeze({
       class: SAFETY_CLASS.ADULT,
       reason: infantil ? "adult_child_conflict" : "explicit_adult_nature",
@@ -274,6 +303,20 @@ function resolverSafetyClassIntelligenceV1(oferta = {}, tituloFactual = {}) {
     adultDistributionAllowed: false,
     reservedCommercialCategory: null
   });
+}
+
+function avaliarSegurancaPublicacao(...ofertas) {
+  let classe = SAFETY_CLASS.GENERAL;
+  for (const oferta of ofertas) {
+    if (!oferta || typeof oferta !== "object") continue;
+    const safety = resolverSafetyClassIntelligenceV1(oferta);
+    if (safety.class === SAFETY_CLASS.ADULT) { classe = safety.class; break; }
+    if (safety.class === SAFETY_CLASS.UNCERTAIN ||
+        (safety.class === SAFETY_CLASS.CHILD && classe === SAFETY_CLASS.GENERAL)) classe = safety.class;
+  }
+  const motivo = classe === SAFETY_CLASS.ADULT ? "seguranca_conteudo_adulto"
+    : classe === SAFETY_CLASS.UNCERTAIN ? "seguranca_conteudo_incerto" : "";
+  return { ok: !motivo, class: classe, motivo };
 }
 
 function resolverClassificacaoIntelligenceV1(oferta = {}, identidade, tituloFactual, safety) {
@@ -334,6 +377,8 @@ module.exports = {
   resolverIdentidadeIntelligenceV1,
   resolverTituloFactualIntelligenceV1,
   resolverSafetyClassIntelligenceV1,
+  removerMencoesVibradorIndustrial,
+  avaliarSegurancaPublicacao,
   resolverClassificacaoIntelligenceV1,
   construirMetadataIntelligenceV1,
   avaliarIntelligenceV1Global,

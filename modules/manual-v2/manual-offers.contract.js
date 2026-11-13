@@ -1,3 +1,4 @@
+const { avaliarSegurancaPublicacao } = require("../inteligencia-universal/foundation-v1.service");
 const MARKETPLACES_MANUAL_V2 = Object.freeze([
   "mercadolivre",
   "amazon",
@@ -181,6 +182,7 @@ function gerarIdManualV2() {
 }
 
 function normalizarOfertaManualV2(entrada = {}, contexto = {}) {
+  const seguranca = avaliarSegurancaPublicacao(entrada);
   const agora = texto(contexto.now) || new Date().toISOString();
   const fonteEntrada = entrada.fonteImportacao && typeof entrada.fonteImportacao === "object"
     ? entrada.fonteImportacao
@@ -279,6 +281,7 @@ function normalizarOfertaManualV2(entrada = {}, contexto = {}) {
     beneficioTexto: primeiroTexto(entrada.beneficioTexto, entrada.beneficio),
 
     status: normalizarStatusManualV2(entrada.status),
+    ...(!seguranca.ok ? { segurancaPublicacao: seguranca } : {}),
 
     fonteImportacao: normalizarFonteImportacaoManualV2(fonteEntrada, {
       ...contexto,

@@ -1,3 +1,4 @@
+const { avaliarSegurancaPublicacao } = require("../inteligencia-universal/foundation-v1.service");
 const express = require("express");
 const crypto = require("crypto");
 const { registrarEtapa, marcarEntradaHandler } = require("../../utils/painel-latencia");
@@ -267,6 +268,8 @@ function criarRotasManualV2(deps = {}) {
   }
 
   function derivarNovaOfertaManualV2ParaVitrine(clienteId, oferta) {
+    const seguranca = avaliarSegurancaPublicacao(oferta);
+    if (!seguranca.ok) return { acionada: false, ok: false, motivo: seguranca.motivo };
     const logger = deps.logger || console;
     let etapa = "config";
 

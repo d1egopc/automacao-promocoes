@@ -31,7 +31,8 @@ const {
   produtoIdUrlMagalu,
   chaveIdentidadeMagalu
 } = require("../../../local-worker/magalu-identity.contract");
-const { tituloPublicitarioOuInstrucao } = require("../../../radar/comercial-precedencia");
+const { tituloComercialUniversalValido, tituloCapturadoCompativel } = require("../../../radar/comercial-precedencia");
+const { montarProvaTituloTecnico } = require("./prova-identidade-tecnica");
 
 const POLITICA_MAGALU_ENGINE = Object.freeze({
   timeoutMs: 2500,
@@ -217,7 +218,7 @@ function tituloRadarSeguroMagalu(valor = "") {
   if (valor && typeof valor === "object") return "";
   const titulo = texto(valor).replace(/\s+/g, " ");
   if (titulo.length < 4) return "";
-  if (tituloPublicitarioOuInstrucao(titulo)) return "";
+  if (!tituloComercialUniversalValido(titulo, { marketplace: "magalu" })) return "";
   if (/https?:\/\//i.test(titulo)) return "";
   if (/r\$\s*\d/i.test(titulo)) return "";
 
@@ -800,7 +801,14 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
     produtoIdRadar
   });
   const tituloOficialVinculado = tituloOficialMagaluVinculadoProduto(produto, produtoIdRadar);
-  const tituloFinal = tituloRadarSeguro || tituloOficialVinculado;
+  const tituloFinal = tituloOficialVinculado && !tituloCapturadoCompativel(tituloRadarSeguro, tituloOficialVinculado)
+    ? tituloOficialVinculado : tituloRadarSeguro;
+  const provaTituloTecnico = identidadeProdutoConfirmada && tituloOficialVinculado
+    ? montarProvaTituloTecnico({
+        marketplace: "magalu", job, workspaceId: clienteId, links, linkEscolhido,
+        urlOriginal: urlOriginalEngine, urlCanonica: produto.urlCanonica,
+        produtoId: produtoIdRadar, titulo: tituloOficialVinculado, fonteTitulo: produto.metadata?.fontes?.titulo
+      }) : null;
   const precoRadarSeguro = extrairPrecoRadarSeguroMagalu(evento);
   const radarDefiniuPreco = numeroPreco(precoRadarSeguro) !== null;
   const precoAtual = radarDefiniuPreco ? precoRadarSeguro : "";
@@ -1091,6 +1099,7 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
         ? {
             capability: identidadeLocalWorker.capability || "",
             identityKey: identidadeLocalWorker.identityKey || "",
+            sourceUrl: oneLinkPendente.url || "",
             observedProductId: identidadeLocalWorker.observedProductId || "",
             canonicalUrl: identidadeLocalWorker.canonicalUrl || "",
             collectedAt: identidadeLocalWorker.collectedAt || ""
@@ -1139,6 +1148,7 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
         origemPreco: radarDefiniuPreco ? "texto_radar" : "radar_ausente",
         motivoEscolhaPreco: radarDefiniuPreco ? "preco_radar_explicito_confiavel" : "preco_radar_ausente_nao_publicavel"
       },
+      ...(provaTituloTecnico ? { provaTituloTecnico } : {}),
       camposProduto: Object.keys(produto || {}),
       produto
     }
@@ -1148,5 +1158,6 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
 module.exports = {
   importarProdutoMagaluEngine,
   escolherLinkMagalu,
+  tituloOficialMagaluVinculadoProduto,
   extrairPrecoRadarSeguroMagalu
 };

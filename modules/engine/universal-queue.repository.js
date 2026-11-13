@@ -1,4 +1,5 @@
 "use strict";
+const { avaliarSegurancaPublicacao } = require("../inteligencia-universal/foundation-v1.service");
 
 // Post-epoch operational authority. Never reads or writes VIVA/JSON.
 const { randomUUID, createHash } = require("node:crypto");
@@ -184,6 +185,8 @@ async function enqueue({ pool, workspaceId, jobId, ofertaId, itemPayload,
       typeof itemPayload !== "object" || Array.isArray(itemPayload)) {
     throw new Error("queue_item_invalid");
   }
+  const seguranca = avaliarSegurancaPublicacao(itemPayload);
+  if (!seguranca.ok) throw new Error(seguranca.motivo);
   const targets = validarDestinos(destinations);
   return transaction(pool, async client => {
     const state = await activeEpoch(client);

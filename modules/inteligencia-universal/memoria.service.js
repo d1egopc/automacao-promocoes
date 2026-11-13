@@ -1,5 +1,6 @@
 const { urlCatalogo, mesmaSelecaoCatalogo } = require("../../optimus-capture/local-worker/mercadolivre-identity");
 const { texto } = require("./normalizacao.service");
+const { tituloCapturadoCompativel } = require("../radar/comercial-precedencia");
 const { cupomValido } = require("./beneficios.service");
 const { calcularValorEfetivo } = require("./valor-efetivo.service");
 
@@ -35,7 +36,7 @@ function identidadeMlAncorada(oferta = {}) {
   const workspace = texto(oferta.clienteId || oferta.workspaceId);
   if (oferta.marketplace !== "mercadolivre" || prova?.validacao !== "confirmada_pelo_importador" ||
       prova.versao !== 1 || prova.marketplace !== "mercadolivre" || !texto(prova.titulo?.valor) ||
-      texto(prova.titulo.valor) !== texto(oferta.titulo) || identidade?.status !== "consistente" ||
+      !tituloCapturadoCompativel(oferta.titulo, prova.titulo.valor) || identidade?.status !== "consistente" ||
       identidade.mlbForteConfirmado !== true || !identidade.catalogId || !workspace ||
       prova.workspaceId !== workspace || !ocorrencia?.id || !ocorrencia.urlOriginal ||
       ocorrencia.urlOriginal !== oferta.linkOriginal || ocorrencia.urlOriginal !== identidade.urlOriginal ||

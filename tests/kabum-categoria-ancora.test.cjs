@@ -62,6 +62,30 @@ test("SKU divergente e URL externa não comprovam título nem categoria especial
   }
 });
 
+test("título da página KaBuM chega com o SKU e a ocorrência AWIN", async (t) => {
+  const { importarAwinEngine } = require("../modules/engine/importer/adapters/awin.adapter");
+  const titulo = "Barraca Camping Nautika 4 Pessoas";
+  const original = afiliado + "&awinmid=17729&awinaffid=111";
+  const workspaceUrl = original.replace("awinaffid=111", "awinaffid=222");
+  t.mock.method(axios, "get", async () => ({
+    status: 200, request: { res: { responseUrl: url } },
+    data: '<title>' + titulo + '</title><meta property="og:image" content="https://images.kabum.com.br/fixture.jpg">R$ 89,90'
+  }));
+  const job = { id: 1001, evento_id: 2001, cliente_id: "workspace_fixture", marketplace: "kabum" };
+  const bruto = await importarAwinEngine({
+    job, evento: { texto_original: "De R$ 109,90 por R$ 89,90\n" + original },
+    links: [{ id: 1, url_original: original, url_normalizada: original }],
+    deps: { importarProdutoKabumViaAwin, gerarDeepLinkAwin: async () => workspaceUrl,
+      getIntegracaoCliente: () => ({ credenciais: { publisherId: "222" } }) }
+  });
+  assert.equal(bruto.ok, true, bruto.motivo);
+  const o = normalizarOfertaImportada(bruto, job);
+  assert.equal(o.metadata.provaTituloTecnicoValidada?.titulo.valor, titulo);
+  assert.equal(o.metadata.provaTituloTecnicoValidada?.ocorrenciaLink.urlOriginal, original);
+  assert.equal(o.categoria, "Pesca e Camping");
+  assert.equal(o.linkAfiliado, workspaceUrl);
+});
+
 test("resposta da página de outro SKU não fornece dados técnicos para a âncora", async (t) => {
   t.mock.method(axios, "get", async () => ({
     status: 200,

@@ -1,9 +1,10 @@
 "use strict";
+const { avaliarSegurancaPublicacao } = require("../inteligencia-universal/foundation-v1.service");
 
 const queue = require("./universal-queue.repository");
 
 const SKIP_REASONS = new Set(["recurso_indisponivel", "vitrine_inativa",
-  "status_nao_enviado", "sem_envio_confirmado"]);
+  "status_nao_enviado", "sem_envio_confirmado", "seguranca_conteudo_adulto", "seguranca_conteudo_incerto"]);
 
 async function processVitrineProjectionBatch({ pool, publish, buildOffer,
   retentionMs, repository = queue, limit = 5, now = () => Date.now() }) {
@@ -27,7 +28,8 @@ async function processVitrineProjectionBatch({ pool, publish, buildOffer,
         reason = "vitrine_retention_expired";
       } else {
         const offer = buildOffer(claim);
-        const published = await publish(claim, offer);
+        const seguranca = avaliarSegurancaPublicacao(claim.itemPayload, claim.item_payload, offer);
+        const published = seguranca.ok ? await publish(claim, offer) : { ok: false, motivo: seguranca.motivo };
         reason = published?.motivo || "vitrine_projection_unknown";
         if (published?.ok === true) result = "completed";
         else if (SKIP_REASONS.has(reason)) result = "skipped";

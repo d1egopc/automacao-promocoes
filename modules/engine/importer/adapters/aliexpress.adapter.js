@@ -1,4 +1,5 @@
 const { normalizarNumeroMoeda } = require("../../../../utils/moeda");
+const { montarProvaTituloTecnico } = require("./prova-identidade-tecnica");
 const { importarAliExpress } = require("../../../../marketplaces/aliexpress/importar");
 const {
   escolherProdutoPrincipal,
@@ -1157,6 +1158,13 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
       : "cta_contextual_workspace_convertido"
   });
 
+  const provaTituloTecnico = produto.metadata?.tituloFonteOficial === "aliexpress_api.produto"
+    ? montarProvaTituloTecnico({
+        marketplace: "aliexpress", job, workspaceId: clienteId, links, linkEscolhido,
+        urlOriginal: urlOriginalEngine, urlCanonica: primeiroValor(produto.linkExpandido, produto.linkOriginal),
+        produtoId: produtoCanonico.produtoId, titulo: produto.titulo || produto.nome,
+        fonteTitulo: produto.metadata.tituloFonteOficial
+      }) : null;
   return {
     ok: true,
     marketplace: "aliexpress",
@@ -1221,6 +1229,7 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
         origemPreco: precoOrigem,
         motivoEscolhaPreco: radarDefiniuPreco ? "preco_radar_explicito_confiavel" : "preco_api_sem_preco_radar"
       },
+      ...(provaTituloTecnico ? { provaTituloTecnico } : {}),
       camposProduto: Object.keys(produto || {}),
       produto,
       produtoCanonico

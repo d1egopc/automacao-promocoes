@@ -1,3 +1,4 @@
+const { avaliarSegurancaPublicacao } = require("../inteligencia-universal/foundation-v1.service");
 const fs = require("fs");
 const { registrarArquivo } = require("../../utils/painel-latencia");
 const { getClienteJsonPath, writeClienteJson, normalizarClienteId } = require("../../utils/storage");
@@ -219,6 +220,8 @@ function selecionarEstoque(achados, agoraMs = Date.now()) {
 function registrarAchado({ clienteId, ofertaId, ofertaUniversal, metadata = {}, capturedAt } = {}) {
   const id = normalizarClienteId(clienteId);
   const universal = objeto(ofertaUniversal);
+  const seguranca = avaliarSegurancaPublicacao({ ...universal, metadata });
+  if (!seguranca.ok) return { ok: false, motivo: seguranca.motivo };
   const validacao = objeto(metadata.ofertaUniversalValidacao);
   if (validacao.ok !== true || universal.workspaceId !== id || !universal.ofertaId ||
       String(universal.ofertaId) !== String(ofertaId) || !MARKETPLACES_ACHADOS.has(universal.marketplace) ||
@@ -279,6 +282,8 @@ function registrarAchadoCapacidadeClonador({ clienteId, bufferItem = {} } = {}) 
   const id = normalizarClienteId(clienteId);
   const metadata = objeto(bufferItem.metadata);
   const candidato = objeto(metadata.achadosCapacidade);
+  const seguranca = avaliarSegurancaPublicacao(bufferItem, candidato);
+  if (!seguranca.ok) return { ok: false, motivo: seguranca.motivo };
   const disposicao = objeto(metadata.capacityDisposition);
   const motivosAceitos = new Set([
     "CAPACITY_DISPLACED_TO_ACHADOS",
@@ -357,7 +362,7 @@ function registrarAchadoCapacidadeClonador({ clienteId, bufferItem = {} } = {}) 
 
 function listarAchados(clienteId, { marketplace = "", categoria = "", busca = "", nowMs = Date.now(), resolverLinkProduto } = {}) {
   const id = normalizarClienteId(clienteId);
-  const todos = selecionarEstoque(lerAchados(id), nowMs);
+  const todos = selecionarEstoque(lerAchados(id).filter(item => avaliarSegurancaPublicacao(item).ok), nowMs);
   const termo = texto(busca).toLowerCase();
   return todos.filter((item) => (!marketplace || item.marketplace === marketplace) &&
       (!categoria || item.categoria === categoria) &&
@@ -374,7 +379,7 @@ function listarAchados(clienteId, { marketplace = "", categoria = "", busca = ""
 }
 
 function buscarAchado(clienteId, achadoId, nowMs = Date.now()) {
-  return selecionarEstoque(lerAchados(normalizarClienteId(clienteId)), nowMs)
+  return selecionarEstoque(lerAchados(normalizarClienteId(clienteId)).filter(item => avaliarSegurancaPublicacao(item).ok), nowMs)
     .find((item) => item.id === String(achadoId)) || null;
 }
 

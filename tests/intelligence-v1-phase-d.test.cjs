@@ -123,11 +123,11 @@ test("marketplace e origem continuam obrigatorios no comparativo multicanal", ()
   assert.equal(shadow.projectedDestinationRefs.length, 6);
 });
 
-test("seguranca adulta precede legado, afinidades e todas categorias somente no shadow", () => {
+test("seguranca adulta bloqueia destinos ativos e continua visivel no shadow", () => {
   const offer = withBridge(fixture.adult.offer);
   const result = analisarDestinosOferta("workspace_a", offer, context(fixture.adult.destinations));
-  assert.equal(result.compativeis.length, 2);
-  assert.equal(result.intelligenceRoutingShadow.legacyEligibleCount, 2);
+  assert.equal(result.compativeis.length, 0);
+  assert.equal(result.intelligenceRoutingShadow.legacyEligibleCount, 0);
   assert.equal(result.intelligenceRoutingShadow.projectedEligibleCount, 0);
   assert.equal(result.intelligenceRoutingShadow.securityBlocked, true);
   assert.equal(result.intelligenceRoutingShadow.approvalBlocked, true);

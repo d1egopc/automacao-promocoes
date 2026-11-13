@@ -40,6 +40,8 @@ const {
   extrairProductIdAliExpressManual,
   expandirShortlinkAliExpressSeguro
 } = require("../marketplaces/aliexpress/importar");
+const { importarAliExpressEngine } = require("../modules/engine/importer/adapters/aliexpress.adapter");
+const { normalizarOfertaImportada } = require("../modules/engine/importer/importer.service");
 const { montarOfertaUniversalEngine } = require("../modules/engine/oferta-universal.contract");
 const {
   importarProdutoManual
@@ -176,6 +178,28 @@ async function testarDetalheFuncionando() {
   assert.strictEqual(chamadas[0].method, "aliexpress.affiliate.productdetail.get");
   assert.strictEqual(chamadas[1].method, "aliexpress.affiliate.link.generate");
   assert.strictEqual(chamadas[1].params.source_values, "https://s.click.aliexpress.com/e/_1005001111111111");
+}
+
+async function testarProvaApiChegaAoImportadorUniversal() {
+  const id = "1005001111111111";
+  const titulo = "Barraca de Camping Nautika 4 pessoas";
+  const url = "https://www.aliexpress.com/item/" + id + ".html";
+  const job = { id: 9001, evento_id: 9002, cliente_id: "cliente_ali", marketplace: "aliexpress" };
+  resetar([
+    respostaDetalhe(produtoAli(id, { product_title: titulo })),
+    respostaLink("https://s.click.aliexpress.com/e/_CI111")
+  ]);
+  const resultado = await importarAliExpressEngine({
+    job, evento: { texto_original: "De R$ 199,90 por R$ 89,90\n" + url },
+    links: [{ id: 9003, url_original: url, url_normalizada: url }],
+    deps: { getIntegracaoCliente: () => ({ credenciais: credenciais() }) }
+  });
+  assert.strictEqual(resultado.ok, true, resultado.motivo);
+  const oferta = normalizarOfertaImportada(resultado, job);
+  assert.strictEqual(oferta.metadata.provaTituloTecnicoValidada?.titulo.valor, titulo);
+  assert.strictEqual(oferta.metadata.provaTituloTecnicoValidada?.ocorrenciaLink.id, "9003");
+  assert.strictEqual(oferta.categoria, "Pesca e Camping");
+  assert.strictEqual(chamadas.filter(c => c.method === "aliexpress.affiliate.productdetail.get").length, 1);
 }
 
 async function testarFallbackQueryComMesmoProductId() {
@@ -572,6 +596,7 @@ async function testarClienteSemIntegracaoNaoContaminaOutroCliente() {
 
 (async () => {
   await testarDetalheFuncionando();
+  await testarProvaApiChegaAoImportadorUniversal();
   await testarFallbackQueryComMesmoProductId();
   await testarQueryRejeitaProdutoDiferente();
   await testarShortlinkExpandeExtraiProductIdEImagemChegaOfertaUniversal();

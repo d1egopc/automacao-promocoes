@@ -1,3 +1,4 @@
+const { avaliarSegurancaPublicacao } = require("../inteligencia-universal/foundation-v1.service");
 const fs = require("fs");
 const {
   getClienteJsonPath,
@@ -1181,6 +1182,8 @@ function validarOportunidadeSocialManual(clienteId = "admin", ofertaId = "", opc
 function validarOportunidadeSocialManualDeItem(clienteSeguro, ofertaId, item, opcoes = {}) {
   const id = texto(ofertaId);
   if (!item) return { ok: false, motivo: "oferta_nao_encontrada" };
+  const seguranca = avaliarSegurancaPublicacao(item);
+  if (!seguranca.ok) return { ok: false, motivo: seguranca.motivo };
 
   const statusInvalido = statusOportunidadeInvalido(item);
   if (statusInvalido) return { ok: false, motivo: "oferta_status_invalido", status: statusInvalido };
@@ -1273,6 +1276,7 @@ function listarOportunidadesSocialDeItens(clienteId, limite, itensFonte, fonte =
   const oportunidades = [];
 
   for (const item of itens) {
+    if (!avaliarSegurancaPublicacao(item).ok) continue;
     const v2 = item.inteligenciaUniversalV2 || {};
     const titulo = texto(item.titulo || item.nome);
     const marketplace = texto(item.marketplace);
