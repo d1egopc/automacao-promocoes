@@ -93,7 +93,6 @@ const {
   consultarMlWorkIdentityBestEffort,
   executarOperacaoLocalComTimeout,
   montarMlWorkEnrichmentShadow,
-  mlWorkEnrichmentAtivo,
   clientesCanarioAncoraMl,
   ancoraMlAtiva,
   prepararMlWorkEnrichmentAtivo,
@@ -4751,7 +4750,6 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       ? "URL_http_presente"
       : "ausente_no_importador"
   });
-  const mlWorkAtivoAgora = mlWorkEnrichmentAtivo({ deps });
   const ancoraAtiva = ancoraMlAtiva({ clienteId: job.cliente_id, deps });
   let oferta = normalizarOfertaImportada(ofertaEntrada, job, enriquecimento?.provaValidada, ancoraAtiva);
   if (origemFluxo && !oferta.origemFluxo) oferta = { ...oferta, origemFluxo };
@@ -4941,7 +4939,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   let mlWorkPromocaoAtiva = null;
   let mlWorkImagemBaseline = null;
   if (normalizarMarketplaceMemoria(oferta.marketplace) === "mercadolivre"
-    && (mercadoLivrePrecisaImagem || mlWorkAtivoAgora) && !enriquecimento?.provaValidada) {
+    && (mercadoLivrePrecisaImagem || ancoraAtiva) && !enriquecimento?.provaValidada) {
     const metadataGateMlWorker = objetoSeguro(oferta.metadata);
     const metadataEntradaGateMlWorker = objetoSeguro(ofertaEntrada.metadata);
     const produtoMetadataGateMlWorker = objetoSeguro(metadataGateMlWorker.produto || metadataEntradaGateMlWorker.produto);
@@ -5045,7 +5043,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       sourceUrl: sourceUrlMlWorker
     });
     produtoIdMlWorker = identidadeResolvidaMlWorker.produtoId || "";
-    if (!catalogoMlWorker && (!imagemCanonicaFinal.imagemCanonicaDuravel || mlWorkAtivoAgora)) {
+    if (!catalogoMlWorker && (!imagemCanonicaFinal.imagemCanonicaDuravel || ancoraAtiva)) {
       const depsIdentity = mercadoLivrePrecisaImagem
         ? deps
         : { ...deps, garantirIdentidadeMercadoLivreLocalWorker: null };
@@ -5059,7 +5057,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
         consulta: mlWorkIdentityShadowConsulta,
         expectedMlb: produtoIdMlWorker,
         marketplace: "mercadolivre",
-        ativo: mlWorkAtivoAgora,
+        ativo: ancoraAtiva,
         tituloValido: tituloFactualConfiavelEngine
       });
       if (imagemCanonicaFinal.imagemCanonicaDuravel) {

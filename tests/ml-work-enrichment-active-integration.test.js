@@ -10,7 +10,8 @@ process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-ml-work-ac
 const { writeGlobalJson } = require("../utils/storage");
 writeGlobalJson("usuarios.json", [
   { id: "admin", nome: "Admin", ativo: true, papel: "admin_master" },
-  { id: "workspace_ml", nome: "Workspace ML", ativo: true, plano: "pro" }
+  { id: "user_pss60lus", nome: "Workspace canário", ativo: true, plano: "pro" },
+  { id: "workspace_controle", nome: "Workspace controle", ativo: true, plano: "pro" }
 ]);
 writeGlobalJson("planos.json", {
   pro: { nome: "pro", ativo: true, marketplaces: ["mercadolivre"], recursos: { automacao: true } }
@@ -55,11 +56,11 @@ function identidadeMl() {
   };
 }
 
-function radarMirror() {
+function radarMirror(workspaceId) {
   const produto = "https://produto.mercadolivre.com.br/MLB123456-tenis-nike";
   return {
     versao: 1,
-    origem: { clienteId: "workspace_ml", tipo: "whatsapp" },
+    origem: { clienteId: workspaceId, tipo: "whatsapp" },
     texto: { original: `Título Radar\nDe R$ 2.199 por R$ 1.379\nCupom RADAR100\n${produto}` },
     produto: { tituloCapturado: "Título Radar Comercial" },
     preco: {
@@ -96,7 +97,7 @@ function radarMirror() {
   };
 }
 
-(async () => {
+async function executarImportacao(workspaceId) {
   let metadataInserida = null;
   let metadataPersistida = null;
   mockModulo("../modules/engine/database", {
@@ -120,12 +121,13 @@ function radarMirror() {
   const logOriginal = console.log;
   console.log = (...args) => logs.push(args);
   let resultado;
+  let consultasIdentidade = 0;
   try {
     resultado = await importer.gravarOfertaEngine(
       {
         id: 9301,
         evento_id: 9201,
-        cliente_id: "workspace_ml",
+        cliente_id: workspaceId,
         marketplace: "mercadolivre",
         metadata: { origemFluxo: "optimus", metadataEvento: { origemFluxo: "optimus" } }
       },
@@ -135,7 +137,7 @@ function radarMirror() {
         origem_tipo: "whatsapp",
         grupo_id: "grupo@g.us",
         texto_original: "Título Radar Comercial De R$ 2.199 por R$ 1.379 Cupom RADAR100",
-        metadata: { origemFluxo: "optimus", radarMirror: radarMirror() },
+        metadata: { origemFluxo: "optimus", radarMirror: radarMirror(workspaceId) },
         links_extraidos: ["https://meli.la/produto"]
       },
       {
@@ -161,7 +163,7 @@ function radarMirror() {
         cupom: "IMPORTADOR",
         metadata: {
           adapter: "mercadolivre",
-          clienteId: "workspace_ml",
+          clienteId: workspaceId,
           jobId: "9301",
           eventoId: "9201",
           linkOriginalEngine: "https://meli.la/produto",
@@ -189,8 +191,10 @@ function radarMirror() {
         }
       },
       {
-        mlWorkEnrichmentAtivo: true,
-        obterIdentidadeMercadoLivreLocalWorker: async () => identidadeMl(),
+        obterIdentidadeMercadoLivreLocalWorker: async () => {
+          consultasIdentidade++;
+          return identidadeMl();
+        },
         garantirIdentidadeMercadoLivreLocalWorker: async () => { throw new Error("nao_deveria_criar_task_em_cache_hit"); }
       }
     );
@@ -198,6 +202,47 @@ function radarMirror() {
     console.log = logOriginal;
   }
 
+  return { resultado, metadataInserida, metadataPersistida, consultasIdentidade, logs };
+}
+
+(async () => {
+  const canario = "user_pss60lus";
+  const controle = "workspace_controle";
+  process.env.ML_WORK_ENRICHMENT_ACTIVE = "0";
+  process.env.ML_WORK_ENRICHMENT_CANARY_CLIENTES = canario;
+  const legadoCanario = await executarImportacao(canario);
+  const legadoControle = await executarImportacao(controle);
+
+  function ofertaSemTimestamps(oferta) {
+    if (!oferta) return oferta;
+    const { criadoEm, atualizadoEm, ...restante } = oferta;
+    return restante;
+  }
+
+  function compararComLegado(atual, legado, cenario) {
+    assert.strictEqual(atual.consultasIdentidade, 0, cenario);
+    for (const campo of ["ok", "status", "motivo", "motivoDetalhe", "retriavel"]) {
+      assert.strictEqual(atual.resultado[campo], legado.resultado[campo], cenario);
+    }
+    for (const campo of ["metadataInserida", "metadataPersistida"]) {
+      assert.strictEqual(Boolean(atual[campo]), Boolean(legado[campo]), cenario);
+      assert.deepStrictEqual(ofertaSemTimestamps(atual[campo]?.ofertaUniversal),
+        ofertaSemTimestamps(legado[campo]?.ofertaUniversal), cenario);
+      assert.deepStrictEqual(atual[campo]?.provaTituloTecnicoValidada, legado[campo]?.provaTituloTecnicoValidada, cenario);
+    }
+    assert(!atual.logs.some(args => args[0] === "[ML_WORK_ENRICHMENT_ACTIVE]"), cenario);
+  }
+
+  process.env.ML_WORK_ENRICHMENT_ACTIVE = "1";
+  delete process.env.ML_WORK_ENRICHMENT_CANARY_CLIENTES;
+  compararComLegado(await executarImportacao(canario), legadoCanario, "ON sem allowlist");
+  process.env.ML_WORK_ENRICHMENT_CANARY_CLIENTES = "";
+  compararComLegado(await executarImportacao(canario), legadoCanario, "ON com allowlist vazia");
+  process.env.ML_WORK_ENRICHMENT_CANARY_CLIENTES = canario;
+  compararComLegado(await executarImportacao(controle), legadoControle, "ON fora da allowlist");
+
+  const { resultado, metadataInserida, metadataPersistida, consultasIdentidade, logs } = await executarImportacao(canario);
+  assert.strictEqual(consultasIdentidade, 1);
   assert.strictEqual(resultado.ok, true);
   assert(metadataInserida && metadataPersistida);
   const universal = metadataPersistida.ofertaUniversal;
@@ -210,7 +255,7 @@ function radarMirror() {
   assert.strictEqual(metadataPersistida.mlWorkEnrichmentActive.tituloWorkAplicado, true);
   assert.strictEqual(metadataPersistida.provaTituloTecnicoValidada?.titulo.valor, "Tênis Nike Air Max Excee Masculino");
   assert.strictEqual(metadataPersistida.provaTituloTecnicoValidada?.produto.produtoIdCanonico, "MLB123456");
-  assert.strictEqual(metadataPersistida.provaTituloTecnicoValidada?.workspaceId, "workspace_ml");
+  assert.strictEqual(metadataPersistida.provaTituloTecnicoValidada?.workspaceId, canario);
   assert.strictEqual(metadataPersistida.mlWorkEnrichmentActive.imagemWorkAplicada, false);
   assert.strictEqual(metadataPersistida.mlWorkEnrichmentActive.comercialAlterado, false);
   assert.strictEqual(metadataPersistida.mlWorkEnrichmentActive.linksAlterados, false);
