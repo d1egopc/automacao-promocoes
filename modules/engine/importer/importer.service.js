@@ -1498,7 +1498,7 @@ function normalizarOfertaImportada(resultado = {}, job = {}, provaAncorada = nul
   }, resultado.metadata || {}, job) : { titulo: "" };
   const tituloCapturado = provaTituloValidada && tituloSeguro &&
     (marketplaceTitulo.toLowerCase() === "mercadolivre"
-      ? tituloFactualConfiavelEngine(tituloSeguro, marketplaceTitulo)
+      ? capturaMlAncorada && tituloFactualConfiavelEngine(tituloSeguro, marketplaceTitulo)
       : tituloCapturadoCompativel(tituloSeguro, provaTituloValidada.titulo?.valor)) ? tituloSeguro : "";
   const tituloFinal = tituloCapturado || tituloTecnico || tituloFallback;
   const tituloFactual = resultado.metadata?.adapter ? { titulo: tituloTecnico || tituloFinal } : tituloFactualAnterior;
@@ -5493,8 +5493,13 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       const tituloMlWork = aplicarTituloMlWork({ oferta, metadataFinal, promocao: mlWorkPromocaoAtiva });
       oferta = tituloMlWork.oferta;
       const tituloCapturado = normalizarTexto(radarMirrorComparado?.produto?.tituloCapturado || "");
+      const capturaFactualAncorada = validarCapturaFactualMercadoLivre({
+        ...oferta,
+        titulo: tituloCapturado,
+        nome: tituloCapturado
+      }, metadataFinal, job);
       if (tituloComercialUniversalValido(tituloCapturado, { marketplace: oferta.marketplace }) &&
-          tituloFactualConfiavelEngine(tituloCapturado, "mercadolivre")) {
+          tituloFactualConfiavelEngine(tituloCapturado, "mercadolivre") && capturaFactualAncorada) {
         oferta = { ...oferta, titulo: tituloCapturado, nome: tituloCapturado };
       }
       metadataFinal = {
