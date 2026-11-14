@@ -4674,10 +4674,28 @@ async function enriquecerTituloMlPorOcorrencia({ job, evento, link, oferta, deps
       deps.linksEventoPersistidos.filter(item => item.url_original === ancora.urlOriginal).length !== 1 ||
       !deps.linksEventoPersistidos.some(item => item === link && String(item.evento_id) === ancora.eventoId) ||
       !verificarCapturaIngressReal(evento.capturado_em).ok) return null;
-  const identidade = metadata.identidadeCanonicaMl || {};
+  const provaResolver = metadata.resolucaoProduto?.provaTransporteShowProduct;
+  const ancoraResolver = provaResolver?.imagemCandidataAnchor;
+  const provaResolverDaOcorrencia = provaResolver?.ok === true &&
+    provaResolver.actionId === "show_product" && provaResolver.ctaPrincipalUnico === true &&
+    provaResolver.linkResolvidoTecnico === oferta.linkExpandido &&
+    String(ancoraResolver?.eventoId || "") === ancora.eventoId &&
+    ancoraResolver?.linkOriginalRadar === ancora.urlOriginal;
+  let selecaoResolver = null;
+  if (provaResolverDaOcorrencia) try { selecaoResolver = urlCatalogo(provaResolver.linkResolvidoTecnico); } catch (_) {}
+  const idsProduto = [metadata.produto?.produtoId, metadata.produto?.produtoIdDetectado, metadata.produto?.itemId]
+    .map(id => normalizarTexto(id).toUpperCase()).filter(id => /^MLB\d+$/.test(id));
+  if (selecaoResolver && idsProduto.some(id => ![selecaoResolver.catalogId, selecaoResolver.listingId].includes(id))) return null;
+  const identidade = metadata.identidadeCanonicaMl?.status ? metadata.identidadeCanonicaMl :
+    selecaoResolver ? {
+      status: "transporte_confirmado", urlOriginal: ancora.urlOriginal,
+      urlCanonicaRevalidada: selecaoResolver.url, mlbProduto: selecaoResolver.listingId,
+      mlbRevalidado: selecaoResolver.listingId, transporteShowProductConfirmado: true
+    } : {};
   if (!["consistente", "transporte_confirmado"].includes(identidade.status) ||
       identidade.urlOriginal !== ancora.urlOriginal) return null;
-  const transporte = metadata.resolucaoRadar?.provaTransporteShowProduct;
+  const transporte = metadata.resolucaoRadar?.provaTransporteShowProduct ||
+    (provaResolverDaOcorrencia ? provaResolver : null);
   let selecao, direta;
   try {
     selecao = urlCatalogo(identidade.urlCanonicaRevalidada);
@@ -4693,7 +4711,8 @@ async function enriquecerTituloMlPorOcorrencia({ job, evento, link, oferta, deps
   if (!selecao || !(direta ? mesmaSelecaoCatalogo(direta, selecao) :
       (transporte?.ok === true && identidade.transporteShowProductConfirmado === true &&
         transporte.linkResolvidoTecnico === selecao.url &&
-        metadata.transporteTecnicoMl?.linkOriginalRadar === ancora.urlOriginal) || redirectConfirmado)) return null;
+        (metadata.transporteTecnicoMl?.linkOriginalRadar === ancora.urlOriginal ||
+          provaResolverDaOcorrencia)) || redirectConfirmado)) return null;
   if ([identidade.mlbProduto, identidade.mlbRevalidado].some(id =>
       id && ![selecao.catalogId, selecao.listingId].includes(id))) return null;
   const variationId = normalizarTexto(metadata.produto?.variationId || metadata.produto?.variantId || "");

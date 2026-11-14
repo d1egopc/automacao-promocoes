@@ -96,6 +96,17 @@ test("old ML offer with footer title is terminal before transport, without an AC
     ready: false, reason: "ml_titulo_nao_produto", terminalNoSend: true
   });
   assert.equal(rendered, false);
+  for (const titulo of [
+    "Para meli+",
+    "Lançamento, muito agradável, aquático com frutado da carambola."
+  ]) {
+    const ofertaAntiga = fixture();
+    ofertaAntiga.item_payload.titulo = titulo;
+    assert.deepEqual(await preflight(ofertaAntiga), {
+      ready: false, reason: "ml_titulo_nao_produto", terminalNoSend: true
+    });
+  }
+  assert.equal(rendered, false);
   const valid = fixture();
   valid.item_payload.titulo = "Carretilha Maruri Black Tamba BG";
   assert.equal((await preflight(valid)).ready, true);

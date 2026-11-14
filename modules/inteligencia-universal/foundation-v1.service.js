@@ -144,22 +144,24 @@ function resolverIdentidadeIntelligenceV1(oferta = {}) {
   });
 }
 
-function linhaPromocional(valor = "") {
+function linhaPromocional(valor = "", marketplace = "") {
   const linha = normalizarComparacao(valor);
   if (!linha) return true;
   return /(?:^|\b)(?:trouxe pra voce|corre que|imperdivel|oferta do dia|promocao|aproveita(?: e)?|aproveite|so hoje|baratinho|olha isso|todo mundo vai perguntar)(?:\b|$)/.test(linha) ||
+    (normalizarMarketplace(marketplace) === "mercadolivre" &&
+      (/^para (?:meli|mercado livre)$/.test(linha) || /^lancamento (?:muito |bem |super )/.test(linha))) ||
     /\b(?:cupom|cupons|desconto|frete gratis|por apenas|convida(?:r)? .* grupo .* link|garanta .* enquanto .* ativo)\b/.test(linha) ||
     /(?:https?:\/\/|www\.|\br\$\s*\d)/i.test(valor);
 }
 
-function limparTituloFactual(valor = "") {
+function limparTituloFactual(valor = "", marketplace = "") {
   const semPrefixo = texto(valor)
     .replace(/^.*?\btrouxe\s+pra\s+voc[eê]\s*[:\-–—|]*\s*/i, "")
     .replace(/[\u{1F300}-\u{1FAFF}\u2600-\u27BF]/gu, " ");
   const linhas = semPrefixo
     .split(/[\r\n]+/)
     .map(item => item.replace(/^[\s*#✅🔥⚡➡️👉]+|[\s*#]+$/gu, "").replace(/\s+/g, " ").trim())
-    .filter(item => item && !linhaPromocional(item));
+    .filter(item => item && !linhaPromocional(item, marketplace));
   const titulo = texto(linhas[0] || "").slice(0, 180).trim();
   if (!/[a-z\u00c0-\u024f]/i.test(titulo) || normalizarComparacao(titulo).split(" ").length < 2) return "";
   return titulo;
@@ -203,7 +205,7 @@ function resolverTituloFactualIntelligenceV1(oferta = {}, identidade = resolverI
   }
 
   for (const [fonte, candidato] of candidatos) {
-    const titulo = limparTituloFactual(candidato);
+    const titulo = limparTituloFactual(candidato, oferta.marketplace);
     if (!titulo) continue;
     return Object.freeze({
       title: titulo,

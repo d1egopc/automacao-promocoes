@@ -9,6 +9,8 @@ const {
 const { construirMetadataIntelligenceV1 } = require("../modules/inteligencia-universal/foundation-v1.service");
 
 const CASOS = [
+  "Para meli+",
+  "Lançamento, muito agradável, aquático com frutado da carambola.",
   "Aproveita e convida os amigos pro grupo enviando o link abaixo:",
   "TODO MUNDO VAI PERGUNTAR QUAL É O SEU PERFUME",
   "Cupons costumam esgotar rápido, garanta o seu enquanto está ativo"

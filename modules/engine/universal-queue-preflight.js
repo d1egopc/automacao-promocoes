@@ -97,7 +97,7 @@ function criarPreflightFilaUniversal({ pool, getPool = null, configGlobal = {},
     const seguranca = avaliarSegurancaPublicacao(oferta);
     if (!seguranca.ok) return { ready: false, reason: seguranca.motivo, terminalNoSend: true };
     if (String(oferta.marketplace || "").toLowerCase() === "mercadolivre" &&
-        tituloPublicitarioOuInstrucao(oferta.titulo || oferta.nome || "")) {
+        tituloPublicitarioOuInstrucao(oferta.titulo || oferta.nome || "", "mercadolivre")) {
       return { ready: false, reason: "ml_titulo_nao_produto", terminalNoSend: true };
     }
     const { turbo, freshness } = await executarEtapaPreflight("commercial_freshness", () => ({
