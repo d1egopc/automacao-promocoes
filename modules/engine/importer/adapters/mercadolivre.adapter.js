@@ -395,9 +395,9 @@ function transporteSelecionadoMercadoLivre({ urlOriginalEngine = "", urlImportad
   return null;
 }
 
-function metadataTransporteTituloPendente(transporte, urlOriginalEngine, resolucaoProduto) {
+function metadataTransporteTituloPendente(transporte, urlOriginalEngine, resolucaoProduto, aguardaTitulo = true) {
   if (!transporte) return {};
-  return { aguardaTituloMl: true,
+  return { aguardaTituloMl: aguardaTitulo,
     identidadeCanonicaMl: { status: "transporte_confirmado", urlOriginal: urlOriginalEngine,
       urlCanonicaRevalidada: transporte.selecao.url,
       mlbProduto: transporte.selecao.catalogId, mlbRevalidado: transporte.selecao.catalogId,
@@ -965,8 +965,9 @@ async function montarFallbackClonadorMercadoLivre({
   const beneficioTexto = extrairBeneficioClonadorMercadoLivre(evento, job);
   const temTitulo = Boolean(titulo && !tituloTecnicoBloqueadoMercadoLivre(titulo) &&
     tituloComercialUniversalValido(titulo, { marketplace: "mercadolivre" }));
-  const transportePendente = !temTitulo && ancoraMlAtiva({ clienteId, deps })
+  const transporteSelecionado = ancoraMlAtiva({ clienteId, deps })
     ? transporteSelecionadoMercadoLivre({ urlOriginalEngine, urlImportador, resolucaoProduto }) : null;
+  const transportePendente = !temTitulo ? transporteSelecionado : null;
   const temPreco = Number.isFinite(preco) && preco > 0;
   const temUrl = Boolean(urlImportador || linkExpandidoEngine || urlOriginalEngine);
   const urlProduto = urlImportador || linkExpandidoEngine || urlOriginalEngine;
@@ -1114,7 +1115,7 @@ async function montarFallbackClonadorMercadoLivre({
       linkExpandidoEngine: linkExpandidoEngine || urlImportador,
       expandiuMeliLa,
       resolucaoProduto: resolucaoProduto.resolucaoRadar || null,
-      ...metadataTransporteTituloPendente(transportePendente, urlOriginalEngine, resolucaoProduto),
+      ...metadataTransporteTituloPendente(transporteSelecionado, urlOriginalEngine, resolucaoProduto, !temTitulo),
       linksClassificados: resumoLinksClassificados(linksConvertidosMercadoLivre, evento, "mercadolivre"),
       linksComerciais: linksConvertidosMercadoLivre,
       comercialCapturado: contrato,
@@ -1163,8 +1164,9 @@ async function montarFallbackRadarMercadoLivre({
   const beneficioTexto = extrairBeneficioRadarMercadoLivre(evento);
   const temTitulo = Boolean(titulo && !tituloTecnicoBloqueadoMercadoLivre(titulo) &&
     tituloComercialUniversalValido(titulo, { marketplace: "mercadolivre" }));
-  const transportePendente = !temTitulo && ancoraMlAtiva({ clienteId, deps })
+  const transporteSelecionado = ancoraMlAtiva({ clienteId, deps })
     ? transporteSelecionadoMercadoLivre({ urlOriginalEngine, urlImportador, resolucaoProduto }) : null;
+  const transportePendente = !temTitulo ? transporteSelecionado : null;
   const temPreco = Number.isFinite(preco) && preco > 0;
   const temUrl = Boolean(urlImportador || linkExpandidoEngine || urlOriginalEngine);
   const urlProduto = urlImportador || linkExpandidoEngine || urlOriginalEngine;
@@ -1302,7 +1304,7 @@ async function montarFallbackRadarMercadoLivre({
       linkExpandidoEngine: linkExpandidoEngine || urlImportador,
       expandiuMeliLa,
       resolucaoRadar: resolucaoProduto.resolucaoRadar || null,
-      ...metadataTransporteTituloPendente(transportePendente, urlOriginalEngine, resolucaoProduto),
+      ...metadataTransporteTituloPendente(transporteSelecionado, urlOriginalEngine, resolucaoProduto, !temTitulo),
       linksClassificados: resumoLinksClassificados(linksConvertidosMercadoLivre, evento, "mercadolivre"),
       linksComerciais: linksConvertidosMercadoLivre,
       radarMirror: objetoSeguro(objetoSeguro(evento.metadata).radarMirror),
