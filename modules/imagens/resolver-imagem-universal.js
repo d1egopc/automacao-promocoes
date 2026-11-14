@@ -144,6 +144,101 @@ function urlMlstaticOficial(valor = "") {
   }
 }
 
+function normalizarMlbImagemMl(valor = "") {
+  const match = String(valor || "").trim().toUpperCase().match(/^MLB-?(\d{6,})$/);
+  return match ? `MLB${match[1]}` : "";
+}
+
+function urlCatalogoAnuncioMlCompativel(valor = "", catalogId = "", listingId = "", variationId = "") {
+  const catalog = normalizarMlbImagemMl(catalogId);
+  const listing = normalizarMlbImagemMl(listingId);
+  if (!catalog || !listing) return false;
+  try {
+    const url = new URL(String(valor || ""));
+    if (url.protocol !== "https:" || !(url.hostname === "mercadolivre.com.br" || url.hostname.endsWith(".mercadolivre.com.br")) ||
+        url.username || url.password) return false;
+    const segmentos = decodeURIComponent(url.pathname).split("/").filter(Boolean);
+    const catalogPathOk = segmentos.some((segmento, index) =>
+      segmento.toLowerCase() === "p" && normalizarMlbImagemMl(segmentos[index + 1]) === catalog);
+    const itemIds = url.searchParams.getAll("pdp_filters")
+      .flatMap((filtro) => String(filtro || "").split(/[|,]/))
+      .map((filtro) => filtro.match(/(?:^|\b)item_id\s*:\s*(MLB-?\d{6,})\b/i)?.[1])
+      .filter(Boolean)
+      .map(normalizarMlbImagemMl);
+    if (!catalog || !listing || !catalogPathOk || !itemIds.length || itemIds.some((id) => id !== listing)) return false;
+
+    const variante = String(variationId || "").trim();
+    if (variante) {
+      if (!/^\d{1,30}$/.test(variante)) return false;
+      const variantesUrl = ["searchVariation", "variation_id", "variationId", "variant_id"]
+        .flatMap((nome) => url.searchParams.getAll(nome))
+        .map((id) => String(id || "").trim())
+        .filter(Boolean);
+      if (!variantesUrl.length || variantesUrl.some((id) => id !== variante)) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function imagemPolycardMlVinculadaAoAnuncio(item = {}, metadata = {}, cache = {}) {
+  const identity = metadata.identidadeCanonicaMl || metadata.revalidacaoMeliLa || {};
+  const marketplace = String(item.marketplace || metadata.marketplace || "").toLowerCase().replace(/[^a-z]/g, "");
+  const origemPolycard = [item.imagemOrigem, metadata.imagemOrigem, metadata.imagemOrigemImportador,
+    cache.origem, metadata.produto?.imagemOrigem].some((origem) => String(origem || "").trim() === "polycard.picture_template");
+  if (marketplace !== "mercadolivre" || metadata.adapter !== "mercadolivre" || !origemPolycard) return false;
+  const jobId = String(item.job_id ?? item.jobId ?? item.engineJobId ?? "").trim();
+  const workspaceId = String(item.cliente_id ?? item.clienteId ?? item.workspaceId ?? "").trim();
+  const jobMetadataId = String(metadata.jobId ?? "").trim();
+  const workspaceMetadataId = String(metadata.clienteId ?? "").trim();
+  const eventId = String(metadata.eventoId ?? "").trim();
+  const originalUrl = String(metadata.linkOriginalEngine || "").trim();
+  const identityOriginalUrl = String(identity.urlOriginal || "").trim();
+  const offerOriginalUrl = String(item.link_original || item.linkOriginal || "").trim();
+  const selectedLinks = Array.isArray(metadata.linksClassificados)
+    ? metadata.linksClassificados.filter((link) =>
+      String(link?.urlOriginal || link?.url_original || "").trim() === originalUrl &&
+      String(link?.papelLink || "").trim() === "produto" && Boolean(link?.id || link?.ocorrenciaId))
+    : [];
+  const catalogId = normalizarMlbImagemMl(identity.catalogId);
+  const listingId = normalizarMlbImagemMl(identity.mlbProduto);
+  const revalidatedId = normalizarMlbImagemMl(identity.mlbRevalidado);
+  const variantIds = [identity.variationId, identity.variantId, metadata.produto?.variationId,
+    metadata.produto?.variantId].map((value) => String(value || "").trim()).filter(Boolean);
+  const variationId = variantIds[0] || "";
+  const canonicalUrl = String(identity.urlCanonicaRevalidada || "").trim();
+  const expandedUrl = String(metadata.linkExpandidoEngine || "").trim();
+  const transportConfirmed = identity.transporteShowProductConfirmado === true || identity.transporteRedirectConfirmado === true;
+  const captchaSignal = [metadata.motivoFalhaImportador, metadata.falhaImportador, metadata.falhaImportador?.motivo,
+    metadata.falhaImportadorMercadoLivre?.motivo, metadata.bloqueioOperacionalMercadoLivre?.motivo,
+    metadata.imagemAusenteMotivo, metadata.tituloPagina, metadata.pageTitle]
+    .some((value) => /captcha|security|seguran[cç]a|verifica[cç][aã]o|access.denied/i.test(String(value || "")));
+  const imageUrls = [item.imagem, item.imagemUrl, cache.imagemCanonicaDuravel,
+    metadata.ofcV24?.imagemComercial?.urlSelecionada].filter(Boolean);
+  const imageIsHttpsMlstatic = imageUrls.length > 0 && imageUrls.every((value) => {
+    try {
+      const url = new URL(String(value));
+      return url.protocol === "https:" && !url.username && !url.password && urlMlstaticOficial(url.href);
+    } catch { return false; }
+  }) && new Set(imageUrls.map((value) => String(value).trim())).size === 1;
+  const pictureId = String(metadata.pictureId || metadata.imagemPictureId ||
+    metadata.produto?.pictureId || cache.pictureId || "").trim();
+  const pictureIdMatches = !pictureId || imageUrls.some((url) => String(url).includes(pictureId));
+  const variationMatches = !variationId || urlCatalogoAnuncioMlCompativel(canonicalUrl, catalogId, listingId, variationId);
+  const eventIdOnItem = String(item.event_id ?? item.evento_id ?? item.eventId ?? item.engineEventoId ?? "").trim();
+
+  const resultado = !captchaSignal && jobId && jobId === jobMetadataId && workspaceId && workspaceId === workspaceMetadataId &&
+    (!eventIdOnItem || eventIdOnItem === eventId) &&
+    eventId && originalUrl && identityOriginalUrl === originalUrl && offerOriginalUrl === originalUrl &&
+    selectedLinks.length === 1 && identity.status === "consistente" && identity.mlbForteConfirmado === true &&
+    catalogId && listingId && listingId === revalidatedId &&
+    urlCatalogoAnuncioMlCompativel(canonicalUrl, catalogId, listingId, variationId) &&
+    (!expandedUrl || urlCatalogoAnuncioMlCompativel(expandedUrl, catalogId, listingId, variationId)) &&
+    transportConfirmed && new Set(variantIds).size <= 1 && variationMatches && imageIsHttpsMlstatic && pictureIdMatches;
+  return Boolean(resultado);
+}
+
 function temProvaImagemOficialMercadoLivre(valor = {}) {
   const item = valor && typeof valor === "object" ? valor : {};
   const metadata = item.metadata && typeof item.metadata === "object" ? item.metadata : {};
@@ -180,6 +275,7 @@ function temProvaImagemOficialMercadoLivre(valor = {}) {
     && metadata.localWorkerImageProof?.provenance === "local_worker.ml_image_v1"
     && metadata.localWorkerImageProof?.sameProductObject === true
     && String(metadata.localWorkerImageProof?.productIdObserved || "").trim() !== "";
+  const imagemPolycardAncorada = imagemPolycardMlVinculadaAoAnuncio(item, metadata, cache);
   const semProvenienciaRadar = !/radar|mirror|mensagem|grupo|whatsapp|telegram|clonador/i.test(origens);
   const urlOficial = urls.some(urlMlstaticOficial);
   const pictureIdCompativel = !pictureId || urls.some((url) => String(url).includes(pictureId));
@@ -216,7 +312,10 @@ function temProvaImagemOficialMercadoLivre(valor = {}) {
   }
 
   // An invalid identity receipt cannot be rescued by a conflicting legacy label.
-  const provaReconhecida = /local_worker\.ml_identity_v1/i.test(origens) ? localWorkerIdentity : (origemOficial || localWorkerMl);
+  const possuiProvaWorkerIdentity = /local_worker\.ml_identity_v1/i.test(origens);
+  const provaReconhecida = possuiProvaWorkerIdentity
+    ? localWorkerIdentity
+    : (origemOficial || localWorkerMl || imagemPolycardAncorada);
   return provaReconhecida && urlOficial && pictureIdCompativel && semProvenienciaRadar && ofcImagem.possuiMarcaFonte !== true;
 }
 
@@ -313,6 +412,7 @@ function avaliarPublicabilidadeImagemUniversal(valor = {}, candidato = {}) {
     ? "imagem_radar_nao_publicavel"
     : "";
   const motivoCandidato = url ? motivoNaoPublicavelDaImagem({
+    ...((valor && typeof valor === "object") ? valor : {}),
     imagem: url,
     imagemUrl: url,
     imagemOrigem: origem,
