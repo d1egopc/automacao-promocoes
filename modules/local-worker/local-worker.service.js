@@ -14,6 +14,7 @@ const {
   ML_IDENTITY_CONTRACT_VERSION,
   ML_IDENTITY_RESULT_TTL_MS,
   sanitizarUrlMercadoLivre,
+  urlSelecaoMlbu,
   sanitizarUrlMlstatic,
   validarResultadoMlIdentity,
   criarReciboImagemMlIdentity
@@ -351,7 +352,7 @@ function criarLocalWorkerService(opcoes = {}) {
         const recibo = criarReciboImagemMlIdentity(validado, validado.provaTecnica, { agoraMs: agora().getTime() });
         if (recibo) validado.provaTecnica.reciboImagem = recibo;
       }
-      if (validado.provaTecnica.catalogId) {
+      if (validado.provaTecnica.catalogId || (validado.associacaoPagina && urlSelecaoMlbu(task.sourceUrl))) {
         return repo.completarTecnica({ taskId, workerId: worker.workerId, leaseToken, metadata: validado, exigirTtl: true });
       }
       return repo.completarIdentidade({
@@ -507,7 +508,7 @@ function criarLocalWorkerService(opcoes = {}) {
 
   async function garantirIdentidadeMercadoLivre({ productId, sourceUrl = "", vinculo, taskId } = {}) {
     const pid = texto(productId).toUpperCase();
-    let catalogo;
+    let selecao;
     // Only the occurrence-bound path is new. Unbound calls retain legacy URL handling.
     if (vinculo) {
       const { urlCatalogo } = require("../../optimus-capture/local-worker/mercadolivre-identity");
@@ -515,29 +516,30 @@ function criarLocalWorkerService(opcoes = {}) {
       if (!ancoraMlAtiva({ clienteId: vinculo.workspaceId, deps: opcoes })) {
         return { ok: false, motivo: "task_ml_identity_workspace_fora_canario" };
       }
-      try { catalogo = urlCatalogo(sourceUrl); } catch (_) { /* reject below */ }
-      if (!catalogo) return { ok: false, motivo: "task_ml_identity_invalida" };
+      try { selecao = urlCatalogo(sourceUrl) || urlSelecaoMlbu(sourceUrl); } catch (_) { /* reject below */ }
+      if (!selecao) return { ok: false, motivo: "task_ml_identity_invalida" };
     }
-    if (catalogo) {
+    if (selecao) {
       const agoraMs = agora().getTime();
       const ttlMs = Math.min(15 * 60_000, Number(vinculo?.deadline) - agoraMs);
       const chave = texto(vinculo?.chave);
-      const variante = texto(vinculo?.variationId);
-      if (catalogo.listingId !== pid || !/^[a-f0-9]{64}$/.test(chave) ||
+      const variante = texto(vinculo?.variationId) || selecao.variationId || "";
+      if (selecao.listingId !== pid || !/^[a-f0-9]{64}$/.test(chave) ||
+          (selecao.variationId && selecao.variationId !== variante) ||
           (variante && !/^\d{1,30}$/.test(variante)) || !Number.isFinite(ttlMs) || ttlMs < 1000) {
         return { ok: false, motivo: "task_ml_identity_invalida" };
       }
       const epoch = vinculo.epoch || "";
-      const chaveTecnica = createHash("sha256").update(JSON.stringify([catalogo.url, variante, epoch])).digest("hex");
+      const chaveTecnica = createHash("sha256").update(JSON.stringify([selecao.url, variante, epoch])).digest("hex");
       const technicalSlug = chaveTecnica + ":" + variante;
       if (taskId) {
         const task = await repo.obterTask(taskId);
-        return task?.technicalSlug === technicalSlug && task?.sourceUrl === catalogo.url &&
+        return task?.technicalSlug === technicalSlug && task?.sourceUrl === selecao.url &&
           task?.capability === ML_IDENTITY_CAPABILITY && task?.productId === pid
           ? { ok: true, criada: false, task } : { ok: false, motivo: "task_ml_identity_vinculo_divergente" };
       }
       return repo.garantirTask({ type: ML_IDENTITY_TASK_TYPE, marketplace: "mercadolivre", productId: pid,
-        sourceUrl: catalogo.url, technicalSlug, capability: ML_IDENTITY_CAPABILITY,
+        sourceUrl: selecao.url, technicalSlug, capability: ML_IDENTITY_CAPABILITY,
         idempotencyKey: "mercadolivre:ocorrencia:" + chaveTecnica, ttlMs, deadline: Number(vinculo.deadline), vincularIdempotencia: true });
     }
     const sourceUrlSanitizada = sanitizarUrlMercadoLivre(sourceUrl);
