@@ -5,6 +5,7 @@ on:
     branches:
       - validation/guardian-v1-*
       - codex/ml-anchor-fast-local
+      - validation/ml-factual-capture-p0-20261114
       - validation/commercial-recovery-p0-20261110
       - validation/ml-identity-propagation-p0-20261110
       - validation/universal-commercial-recovery-p0-20261110
@@ -199,6 +200,12 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: ML factual capture and proven listing anchor
+        if: github.ref == 'refs/heads/validation/ml-factual-capture-p0-20261114'
+        run: |
+          set -euo pipefail
+          node --test tests/ml-captura-factual-ancorada-p0.test.cjs tests/ml-catalogo-tecnico-ancora.test.cjs tests/mercadolivre-identidade-promocional-focal.test.cjs
+          node tests/mercadolivre-radar-fallback.test.js
       - name: AliExpress Radar shortlink candidate - isolated importer and workspace proof
         if: github.ref == 'refs/heads/validation/guardian-v1-ali-magalu-recovery-20261031'
         shell: bash
@@ -838,7 +845,7 @@ jobs:
           node --test tests/mensageiro-v4-credit-scope.postgres.test.cjs
 
   universal-offer-anchor-postgres:
-    if: github.ref == 'refs/heads/validation/guardian-v1-universal-offer-anchor' || github.ref == 'refs/heads/validation/universal-closure-p0-20261112' || github.ref == 'refs/heads/validation/guardian-v1-anchor-release-gates-20261112' || github.ref == 'refs/heads/validation/guardian-v1-ml-recovery-p0-20261113' || github.ref == 'refs/heads/codex/ml-anchor-fast-local'
+    if: github.ref == 'refs/heads/validation/guardian-v1-universal-offer-anchor' || github.ref == 'refs/heads/validation/universal-closure-p0-20261112' || github.ref == 'refs/heads/validation/guardian-v1-anchor-release-gates-20261112' || github.ref == 'refs/heads/validation/guardian-v1-ml-recovery-p0-20261113' || github.ref == 'refs/heads/codex/ml-anchor-fast-local' || github.ref == 'refs/heads/validation/ml-factual-capture-p0-20261114'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -868,7 +875,7 @@ jobs:
           GIT_CONFIG_VALUE_0: ssh://git@github.com/
         run: npm ci
       - name: Anchor, worker, commercial links, memory and concurrent PostgreSQL claims
-        if: github.ref != 'refs/heads/codex/ml-anchor-fast-local'
+        if: github.ref != 'refs/heads/codex/ml-anchor-fast-local' && github.ref != 'refs/heads/validation/ml-factual-capture-p0-20261114'
         env:
           OPTIMUS_TEST_PG17: '1'
         run: |
@@ -895,7 +902,7 @@ jobs:
               tests/ofertas-v2-achados-dedupe-memoria.test.js
           fi
       - name: ML fast anchor and pre-send focal gates with disposable PostgreSQL 17
-        if: github.ref == 'refs/heads/codex/ml-anchor-fast-local'
+        if: github.ref == 'refs/heads/codex/ml-anchor-fast-local' || github.ref == 'refs/heads/validation/ml-factual-capture-p0-20261114'
         env:
           OPTIMUS_TEST_PG17: '1'
         run: |
@@ -903,6 +910,7 @@ jobs:
           test "$RUNNER_ENVIRONMENT" = github-hosted
           test -z "${DATABASE_URL:-}"
           node --test --test-reporter=tap \
+            tests/ml-captura-factual-ancorada-p0.test.cjs \
             tests/universal-offer-anchor-local.test.cjs \
             tests/mercadolivre-identidade-promocional-focal.test.cjs \
             tests/universal-flow-queue-preflight.test.js \
