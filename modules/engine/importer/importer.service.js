@@ -189,6 +189,9 @@ function tituloGenericoMarketplaceEngine(titulo = "", marketplace = "") {
     return ["produtoaliexpress", "ofertaaliexpress", "aliexpress"].includes(chaveTitulo);
   }
   if (chaveMarketplace === "mercadolivre") {
+    const palavras = tituloLimpo.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    if (/\b(?:entre|acesse|participe|venha|clique)\b.*\b(?:grupo|canal)\b/.test(palavras) ||
+        /^(?:loja|vendedor)(?:\s+oficial)?(?:\s+mercado\s+livre)?$/.test(palavras)) return true;
     return [
       "produtomercadolivre",
       "mercadolivre",
@@ -311,7 +314,7 @@ function reclassificarCategoriaFinalEngine(oferta = {}, metadataFinal = {}, job 
 
   const provaTitulo = metadataFinal.provaTituloTecnicoValidada;
   const tituloFactual = provaTitulo?.validacao === "confirmada_pelo_importador" &&
-    tituloCapturadoCompativel(oferta.titulo, provaTitulo.titulo?.valor)
+    (marketplaceChave === "mercadolivre" || tituloCapturadoCompativel(oferta.titulo, provaTitulo.titulo?.valor))
     ? { titulo: provaTitulo.titulo.valor, origem: provaTitulo.titulo.fonte }
     : resolverTituloFactualEngine(oferta, metadataFinal, job);
   if (!tituloFactual.titulo) {
@@ -1458,6 +1461,7 @@ function normalizarOfertaImportada(resultado = {}, job = {}, provaAncorada = nul
   const marketplaceTitulo = normalizarTexto(resultado.marketplace || job.marketplace || job.marketplace_detectado);
   const tituloSeguro = tituloComercialUniversalValido(tituloImportado, { marketplace: marketplaceTitulo }) ? tituloImportado : "";
   const provaTituloValidada = provaAncorada || validarProvaTituloTecnico(resultado, produtoMetadata, job, ancoraAtiva);
+  const capturaMlAncorada = validarCapturaFactualMercadoLivre(resultado, resultado.metadata, job);
   const tituloMetadata = normalizarTexto(produtoMetadata.titulo || produtoMetadata.nome || produtoMetadata.title || "");
   const identidadeTecnica = comprovarTituloTecnicoDoLink(resultado, produtoMetadata, provaTituloValidada);
   const tituloTecnico = (provaAncorada || identidadeTecnica.confirmada) &&
@@ -1466,7 +1470,7 @@ function normalizarOfertaImportada(resultado = {}, job = {}, provaAncorada = nul
   // Um título proveniente do Radar só serve de descrição do produto se passar
   // pelo filtro factual. Ele nunca substitui um título oficial ancorado.
   const tituloFallback = tituloSeguro && tituloFactualConfiavelEngine(tituloSeguro, marketplaceTitulo) &&
-    (!resultado.metadata?.adapter || identidadeTecnica.fallbackRadar === true)
+    (!resultado.metadata?.adapter || identidadeTecnica.fallbackRadar === true || capturaMlAncorada)
     ? tituloSeguro : "";
   const categoriaOficialMl = ancoraAtiva && marketplaceTitulo.toLowerCase() === "mercadolivre" && provaTituloValidada
     ? categoriaMlOficialComprovada(produtoMetadata, provaTituloValidada.produto?.produtoIdCanonico) : "";
@@ -1493,7 +1497,9 @@ function normalizarOfertaImportada(resultado = {}, job = {}, provaAncorada = nul
     linkExpandido: resultado.linkExpandido || resultado.urlFinal || ""
   }, resultado.metadata || {}, job) : { titulo: "" };
   const tituloCapturado = provaTituloValidada && tituloSeguro &&
-    tituloCapturadoCompativel(tituloSeguro, provaTituloValidada.titulo?.valor) ? tituloSeguro : "";
+    (marketplaceTitulo.toLowerCase() === "mercadolivre"
+      ? tituloFactualConfiavelEngine(tituloSeguro, marketplaceTitulo)
+      : tituloCapturadoCompativel(tituloSeguro, provaTituloValidada.titulo?.valor)) ? tituloSeguro : "";
   const tituloFinal = tituloCapturado || tituloTecnico || tituloFallback;
   const tituloFactual = resultado.metadata?.adapter ? { titulo: tituloTecnico || tituloFinal } : tituloFactualAnterior;
   const origemFluxo = resolverOrigemFluxo(resultado, job);
@@ -4153,7 +4159,41 @@ function avaliarGateQualidadeAliExpressImagem(oferta = {}, metadata = {}) {
   };
 }
 
-function avaliarGateIdentidadeMercadoLivre(oferta = {}, metadata = {}, ancoraAtiva = false) {
+function validarCapturaFactualMercadoLivre(oferta = {}, metadata = {}, job = null) {
+  const prova = objetoSeguro(metadata.tituloCapturadoAncorado);
+  const identidade = objetoSeguro(metadata.identidadeCanonicaMl);
+  let selecao;
+  try { selecao = urlCatalogo(prova.urlTecnica); } catch (_) { return false; }
+  const vinculo = Array.isArray(metadata.linksClassificados) && metadata.linksClassificados.some(item =>
+    String(item?.id || item?.ocorrenciaId || "") === String(prova.ocorrenciaId || "") &&
+    normalizarTexto(item?.urlOriginal || item?.url_original || "") === prova.urlOriginal);
+  return prova.versao === 1 && prova.validacao === "captura_factual_vinculada" &&
+    Boolean(prova.jobId && prova.eventoId && prova.workspaceId && prova.ocorrenciaId) &&
+    String(prova.jobId) === String(metadata.jobId || "") &&
+    String(prova.eventoId) === String(metadata.eventoId || "") &&
+    String(prova.workspaceId) === String(metadata.clienteId || "") && vinculo &&
+    (!job || (String(prova.jobId) === String(job.id || "") &&
+      String(prova.eventoId) === String(job.evento_id || "") &&
+      String(prova.workspaceId) === String(job.cliente_id || ""))) &&
+    (metadata.fallbackMercadoLivreRadar === true || metadata.fallbackMercadoLivreClonador === true) &&
+    metadata.aguardaTituloMl === false &&
+    prova.urlOriginal === normalizarTexto(metadata.linkOriginalEngine || "") &&
+    prova.urlTecnica === normalizarTexto(metadata.linkExpandidoEngine || "") &&
+    prova.urlTecnica === normalizarTexto(oferta.linkExpandido || "") &&
+    prova.titulo === normalizarTexto(oferta.titulo || oferta.nome || "") &&
+    !prova.variationId && !metadata.produto?.variationId && !metadata.produto?.variantId &&
+    !identidade.variationId && Boolean(selecao) &&
+    selecao.catalogId === prova.catalogId && selecao.listingId === prova.listingId &&
+    identidade.status === "consistente" && identidade.mlbForteConfirmado === true &&
+    identidade.catalogId === prova.catalogId &&
+    identidade.mlbProduto === prova.listingId && identidade.mlbRevalidado === prova.listingId &&
+    identidade.urlOriginal === prova.urlOriginal &&
+    identidade.urlCanonicaRevalidada === prova.urlTecnica &&
+    tituloFactualConfiavelEngine(prova.titulo, "mercadolivre") &&
+    tituloComercialUniversalValido(prova.titulo, { marketplace: "mercadolivre" });
+}
+
+function avaliarGateIdentidadeMercadoLivre(oferta = {}, metadata = {}, ancoraAtiva = false, job = null) {
   const marketplace = normalizarMarketplaceMemoria(oferta.marketplace || metadata.marketplace || "");
   if (marketplace !== "mercadolivre") {
     return { retida: false, motivo: "" };
@@ -4189,15 +4229,16 @@ function avaliarGateIdentidadeMercadoLivre(oferta = {}, metadata = {}, ancoraAti
     provaTitulo.marketplace === "mercadolivre" &&
     normalizarTexto(provaTitulo.produto?.produtoIdCanonico || "").toUpperCase() ===
       normalizarTexto(identidade.mlbRevalidado || identidade.mlbProduto || "").toUpperCase() &&
-    tituloCapturadoCompativel(oferta.titulo || oferta.nome || "", provaTitulo.titulo?.valor || "");
+    tituloFactualConfiavelEngine(provaTitulo.titulo?.valor || "", "mercadolivre");
+  const tituloFactualAncorado = ancoraAtiva && validarCapturaFactualMercadoLivre(oferta, metadata, job);
   let catalogo = false;
   if (ancoraAtiva) try { catalogo = Boolean(urlCatalogo(identidade.urlCanonicaRevalidada)); } catch (_) { catalogo = true; }
-  if (catalogo && !provaOficialCorrespondente) {
+  if (catalogo && !provaOficialCorrespondente && !tituloFactualAncorado) {
     return { retida: true, status: "retida_v2", motivo: "mercadolivre_titulo_tecnico_nao_confirmado", reprocessavel: true };
   }
   if (identidade.status === "consistente" && identidade.mlbForteConfirmado === true &&
       metadata.fallbackMercadoLivreRadar !== true && metadata.fallbackMercadoLivreClonador !== true &&
-      !provaOficialCorrespondente) {
+      !provaOficialCorrespondente && !tituloFactualAncorado) {
     return {
       retida: true,
       status: "retida_v2",
@@ -4667,7 +4708,6 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
 async function enriquecerTituloMlPorOcorrencia({ job, evento, link, oferta, deps, agoraMs = Date.now() }) {
   const metadata = oferta.metadata || {};
   if (metadata.adapter !== "mercadolivre" || !ancoraMlAtiva({ clienteId: job.cliente_id, deps }) ||
-      typeof deps.garantirIdentidadeMercadoLivreLocalWorker !== "function" ||
       validarProvaTituloTecnico(oferta, metadata.produto, job, true)) return null;
   const ancora = vincularOcorrenciaProduto({ job, evento, link, marketplace: "mercadolivre", urlOriginal: metadata.linkOriginalEngine });
   if (!ancora || !Array.isArray(deps.linksEventoPersistidos) ||
@@ -4720,6 +4760,33 @@ async function enriquecerTituloMlPorOcorrencia({ job, evento, link, oferta, deps
   const frescor = avaliarFrescorPreImporter({ ...job, evento_capturado_em: evento.capturado_em }, { agoraMs });
   const deadline = Date.parse(frescor.expiraEmComercial);
   if (frescor.expirada || !Number.isFinite(deadline) || deadline <= agoraMs) return null;
+  const tituloCapturado = normalizarTexto(oferta.titulo || oferta.nome || "");
+  if (metadata.aguardaTituloMl === false &&
+      (metadata.fallbackMercadoLivreRadar === true || metadata.fallbackMercadoLivreClonador === true) &&
+      !variationId && tituloFactualConfiavelEngine(tituloCapturado, "mercadolivre") &&
+      tituloComercialUniversalValido(tituloCapturado, { marketplace: "mercadolivre" })) {
+    const provaCaptura = {
+      versao: 1, validacao: "captura_factual_vinculada", ...ancora,
+      catalogId: selecao.catalogId, listingId: selecao.listingId,
+      urlTecnica: selecao.url, variationId: "", titulo: tituloCapturado
+    };
+    const identidadeAncorada = {
+      ...identidade, status: "consistente", mlbForteConfirmado: true,
+      catalogId: selecao.catalogId, mlbProduto: selecao.listingId,
+      mlbRevalidado: selecao.listingId, urlOriginal: ancora.urlOriginal,
+      urlCanonicaRevalidada: selecao.url
+    };
+    return { capturadoAncorado: true, oferta: {
+      ...oferta, produtoId: selecao.listingId, produtoIdDetectado: selecao.listingId,
+      metadata: {
+        ...metadata, clienteId: ancora.workspaceId, aguardaTituloMl: false,
+        tituloCapturadoAncorado: provaCaptura, identidadeCanonicaMl: identidadeAncorada,
+        produto: { ...objetoSeguro(metadata.produto), produtoId: selecao.listingId,
+          produtoIdDetectado: selecao.listingId }
+      }
+    } };
+  }
+  if (typeof deps.garantirIdentidadeMercadoLivreLocalWorker !== "function") return null;
   const epoch = epochIngressReal();
   const chave = createHash("sha256").update(JSON.stringify([ancora, selecao.url, variationId, deadline, epoch])).digest("hex");
   const anterior = job.metadata?.localWorkerImageRetry?.vinculo;
@@ -4776,7 +4843,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   if (enriquecimento?.pendente) return { ok: false, retriavel: true,
     motivo: "mercadolivre_titulo_tecnico_nao_confirmado", motivoDetalhe: "aguardando_enriquecimento_local",
     localWorker: { capability: "ml_identity_v1", vinculo: enriquecimento.vinculo } };
-  if (ofertaEntrada.metadata?.aguardaTituloMl && !enriquecimento?.provaValidada) {
+  if (ofertaEntrada.metadata?.aguardaTituloMl && !enriquecimento?.provaValidada && !enriquecimento?.capturadoAncorado) {
     return { ok: false, motivo: "mercadolivre_titulo_tecnico_nao_confirmado" };
   }
   if (enriquecimento?.oferta) ofertaEntrada = enriquecimento.oferta;
@@ -5427,7 +5494,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       oferta = tituloMlWork.oferta;
       const tituloCapturado = normalizarTexto(radarMirrorComparado?.produto?.tituloCapturado || "");
       if (tituloComercialUniversalValido(tituloCapturado, { marketplace: oferta.marketplace }) &&
-          tituloCapturadoCompativel(tituloCapturado, provaMlWork.validada.titulo.valor)) {
+          tituloFactualConfiavelEngine(tituloCapturado, "mercadolivre")) {
         oferta = { ...oferta, titulo: tituloCapturado, nome: tituloCapturado };
       }
       metadataFinal = {
@@ -5487,7 +5554,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   }
   const inteligenciaV2 = objetoSeguro(metadataFinal.inteligenciaUniversalV2);
   const gateQualidadeAliExpressImagem = avaliarGateQualidadeAliExpressImagem(oferta, metadataFinal);
-  const gateIdentidadeMercadoLivre = avaliarGateIdentidadeMercadoLivre(oferta, metadataFinal, ancoraAtiva);
+  const gateIdentidadeMercadoLivre = avaliarGateIdentidadeMercadoLivre(oferta, metadataFinal, ancoraAtiva, job);
   if (gateQualidadeAliExpressImagem.retida) {
     metadataFinal = {
       ...metadataFinal,
@@ -6319,6 +6386,7 @@ module.exports = {
   enriquecerTituloMlPorOcorrencia,
   avaliarGateQualidadeAliExpressImagem,
   avaliarGateIdentidadeMercadoLivre,
+  validarCapturaFactualMercadoLivre,
   resolverCategoriaEngine,
   reclassificarCategoriaFinalEngine,
   resolverTituloFactualEngine,
