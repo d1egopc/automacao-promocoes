@@ -31,9 +31,13 @@ function normalizarPapelComercial(valor = "") {
 // Instruções de resgate e slogans publicitários não identificam o produto.
 // A lista é deliberadamente pequena para não rejeitar títulos técnicos que
 // apenas carregam preço, cupom ou uma categoria comercial válida.
-function tituloPublicitarioOuInstrucao(titulo = "") {
+function tituloPublicitarioOuInstrucao(titulo = "", marketplace = "") {
   const normalizado = normalizarPapelComercial(titulo);
   if (!normalizado) return false;
+  const tituloSemAcentos = String(titulo).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  if (["mercadolivre", "mercado livre"].includes(normalizarPapelComercial(marketplace)) &&
+      (/^para (?:meli|mercado livre)$/.test(normalizado) ||
+        /^lancamento\s*[,!:]/.test(tituloSemAcentos))) return true;
   if (/^(?:bot de alertas?\b|grupo de ofertas?\b|grupos? (?:de )?(?:ofertas?|promocoes?)\b)/.test(normalizado)) return true;
   if (/^(?:no|na) (?:app|aplicativo)\b.*\b(?:abrir|abre|pagina|moedas)\b/.test(normalizado)) return true;
   if (/^(?:use|utilize|aplique|resgate|clique|acesse|toque|selecione|va|siga)\b/.test(normalizado)) return true;
@@ -51,7 +55,8 @@ function tituloPublicitarioOuInstrucao(titulo = "") {
 function tituloComercialUniversalValido(titulo = "", contexto = {}) {
   const limpo = texto(titulo);
   if (!limpo) return false;
-  if (tituloPublicitarioOuInstrucao(limpo)) return false;
+  const marketplaceTitulo = typeof contexto === "string" ? contexto : (contexto.marketplace || "");
+  if (tituloPublicitarioOuInstrucao(limpo, marketplaceTitulo)) return false;
   if (/^\d{1,3}\s*%$/.test(limpo)) return false;
   const n = normalizarPapelComercial(limpo);
   if (!n) return false;

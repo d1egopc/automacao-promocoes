@@ -76,6 +76,55 @@ function proof(t, url = sourceUrl, options = {}) {
   return workerMl.resolver({ productId: ids.listingId, sourceUrl: url, variationId: "4567" });
 }
 
+test("show_product da mesma ocorrência seleciona o anúncio sem confundir catálogo", async t => {
+  const f = fixture();
+  delete f.oferta.metadata.identidadeCanonicaMl;
+  delete f.oferta.metadata.resolucaoRadar;
+  delete f.oferta.metadata.transporteTecnicoMl;
+  f.oferta.metadata.resolucaoProduto = { provaTransporteShowProduct: {
+    ok: true, actionId: "show_product", ctaPrincipalUnico: true,
+    linkResolvidoTecnico: sourceUrl,
+    imagemCandidataAnchor: { eventoId: String(f.evento.id), linkOriginalRadar: original }
+  } };
+  let chamadas = 0;
+  f.deps.garantirIdentidadeMercadoLivreLocalWorker = async args => {
+    chamadas++;
+    assert.equal(args.productId, listingId);
+    assert.equal(args.sourceUrl, sourceUrl);
+    return { ok: true, task: { id: "fixture-task", status: "pending" } };
+  };
+  const pendente = await enriquecerTituloMlPorOcorrencia(f);
+  assert.equal(pendente?.pendente, true);
+  assert.equal(pendente.vinculo.listingId, listingId);
+  assert.equal(pendente.vinculo.catalogId, catalogId);
+  assert.equal(chamadas, 1);
+
+  const resultadoOficial = await proof(t);
+  const agora = Date.now();
+  f.job.metadata = { localWorkerImageRetry: { vinculo: pendente.vinculo } };
+  f.deps.garantirIdentidadeMercadoLivreLocalWorker = async () => ({ ok: true, task: {
+    id: "fixture-task", status: "completed", createdAt: iso(agora - 1000),
+    completedAt: iso(agora), expiresAt: iso(agora + 60_000), resultMetadata: resultadoOficial
+  } });
+  const comprovada = await enriquecerTituloMlPorOcorrencia(f);
+  assert.equal(comprovada?.oferta.titulo, titulo);
+  const normalizada = normalizarOfertaImportada(comprovada.oferta, f.job, comprovada.provaValidada, true);
+  assert.equal(normalizada.categoria, "Pesca e Camping");
+  assert.equal(normalizada.preco, 90);
+  assert.equal(normalizada.cupom, "FIX10");
+  assert.equal(normalizada.linkOriginal, original);
+  assert.equal(normalizada.linkExpandido, sourceUrl);
+
+  f.oferta.metadata.resolucaoProduto.provaTransporteShowProduct.imagemCandidataAnchor.eventoId = "outro-evento";
+  assert.equal(await enriquecerTituloMlPorOcorrencia(f), null);
+  assert.equal(chamadas, 1);
+  f.oferta.metadata.resolucaoProduto.provaTransporteShowProduct.imagemCandidataAnchor.eventoId = String(f.evento.id);
+  f.oferta.metadata.resolucaoProduto.provaTransporteShowProduct.linkResolvidoTecnico =
+    sourceUrl.replace(listingId, "MLB9999999999");
+  assert.equal(await enriquecerTituloMlPorOcorrencia(f), null);
+  assert.equal(chamadas, 1);
+});
+
 test("worker real do checkout, com fetch stub, enriquece somente a ocorrência e preserva o envelope comercial", async t => {
   const f = fixture();
   const antes = normalizarOfertaImportada(f.oferta, f.job);

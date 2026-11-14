@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - validation/guardian-v1-*
+      - codex/ml-anchor-fast-local
       - validation/commercial-recovery-p0-20261110
       - validation/ml-identity-propagation-p0-20261110
       - validation/universal-commercial-recovery-p0-20261110
@@ -599,6 +600,7 @@ jobs:
           base="$(git merge-base origin/main HEAD)"
           case "$GITHUB_REF" in
             refs/heads/validation/guardian-v1-inteligencia-universal-p0) base=757d6258e4baf3a57903c20af2b8637568606c3a ;;
+            refs/heads/codex/ml-anchor-fast-local) base=f7a559c5a124ddd54521085e661d8452c6ff8d66 ;;
             refs/heads/validation/guardian-v1-saas-fix1-*) base=1eaf582b68c333773a5882bcb8962ffcac7b9bef ;;
             refs/heads/validation/guardian-v1-baileys-balanced-buffer-20261029) base=cecd2e6acdf5df274d19ee87f029389078f141dc ;;
             refs/heads/validation/guardian-v1-diversos-integracao-20261029) base=5dd99da80233ab9a49162e02e215b75982e3da28 ;;
@@ -836,7 +838,7 @@ jobs:
           node --test tests/mensageiro-v4-credit-scope.postgres.test.cjs
 
   universal-offer-anchor-postgres:
-    if: github.ref == 'refs/heads/validation/guardian-v1-universal-offer-anchor' || github.ref == 'refs/heads/validation/universal-closure-p0-20261112' || github.ref == 'refs/heads/validation/guardian-v1-anchor-release-gates-20261112' || github.ref == 'refs/heads/validation/guardian-v1-ml-recovery-p0-20261113'
+    if: github.ref == 'refs/heads/validation/guardian-v1-universal-offer-anchor' || github.ref == 'refs/heads/validation/universal-closure-p0-20261112' || github.ref == 'refs/heads/validation/guardian-v1-anchor-release-gates-20261112' || github.ref == 'refs/heads/validation/guardian-v1-ml-recovery-p0-20261113' || github.ref == 'refs/heads/codex/ml-anchor-fast-local'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -866,6 +868,7 @@ jobs:
           GIT_CONFIG_VALUE_0: ssh://git@github.com/
         run: npm ci
       - name: Anchor, worker, commercial links, memory and concurrent PostgreSQL claims
+        if: github.ref != 'refs/heads/codex/ml-anchor-fast-local'
         env:
           OPTIMUS_TEST_PG17: '1'
         run: |
@@ -891,6 +894,77 @@ jobs:
               tests/universal-flow-social-opportunities.test.js \
               tests/ofertas-v2-achados-dedupe-memoria.test.js
           fi
+      - name: ML fast anchor and pre-send focal gates with disposable PostgreSQL 17
+        if: github.ref == 'refs/heads/codex/ml-anchor-fast-local'
+        env:
+          OPTIMUS_TEST_PG17: '1'
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node --test --test-reporter=tap \
+            tests/universal-offer-anchor-local.test.cjs \
+            tests/mercadolivre-identidade-promocional-focal.test.cjs \
+            tests/universal-flow-queue-preflight.test.js \
+            tests/mercadolivre-local-worker-gate-observability.test.js \
+            tests/mercadolivre-radar-fallback.test.js
+      - name: ML fast anchor official overlay build and smoke
+        if: github.ref == 'refs/heads/codex/ml-anchor-fast-local'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          base=f7a559c5a124ddd54521085e661d8452c6ff8d66
+          base_tag="local/optimus-deploy-base:ml-fast-$GITHUB_RUN_ID"
+          candidate="local/optimus-ml-fast:ci-$GITHUB_RUN_ID"
+          fixture="$(mktemp -d)"
+          mkdir -p "$fixture/base"
+          git cat-file -e "${base}^{commit}"
+          git archive "$base" | tar -x -C "$fixture/base"
+          test -f "$fixture/base/Dockerfile"
+          node scripts/guardian-v1.cjs prepare --base "$base" --source "$GITHUB_SHA" --release-mode overlay > "$fixture/plan.json"
+          node - "$fixture/plan.json" <<'NODE'
+          const assert = require("node:assert/strict");
+          const fs = require("node:fs");
+          const plan = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+          assert.equal(plan.validation, "PASS");
+          assert.deepEqual(plan.runtimeFiles, [
+            "modules/engine/importer/importer.service.js",
+            "modules/engine/universal-queue-preflight.js",
+            "modules/inteligencia-universal/foundation-v1.service.js",
+            "modules/radar/comercial-precedencia.js"
+          ]);
+          NODE
+          node scripts/guardian-v1.cjs build-dockerfile --base "$base" --source "$GITHUB_SHA" --base-tag "$base_tag" > "$fixture/Dockerfile"
+          docker build -t "$base_tag" "$fixture/base"
+          docker build --pull=false --network=none -f "$fixture/Dockerfile" -t "$candidate" .
+          for path in \
+            modules/engine/importer/importer.service.js \
+            modules/engine/universal-queue-preflight.js \
+            modules/inteligencia-universal/foundation-v1.service.js \
+            modules/radar/comercial-precedencia.js; do
+            expected="$(git show "$GITHUB_SHA:$path" | sha256sum | cut -d' ' -f1)"
+            actual="$(docker run --rm --network=none "$candidate" sha256sum "/app/$path" | cut -d' ' -f1)"
+            test "$expected" = "$actual"
+            echo "RUNTIME_HASH_OK $path $actual"
+          done
+          docker run --rm --network=none "$candidate" node -e '
+            const assert = require("node:assert/strict");
+            assert.match(process.version, /^v24\./);
+            const importer = require("/app/modules/engine/importer/importer.service.js");
+            const parser = require("/app/optimus-capture/local-worker/mercadolivre-identity.js");
+            const { tituloPublicitarioOuInstrucao } = require("/app/modules/radar/comercial-precedencia.js");
+            const { criarPreflightFilaUniversal } = require("/app/modules/engine/universal-queue-preflight.js");
+            assert.equal(typeof importer.enriquecerTituloMlPorOcorrencia, "function");
+            assert.equal(typeof criarPreflightFilaUniversal, "function");
+            const ids = parser.urlCatalogo("https://www.mercadolivre.com.br/carretilha/p/MLB22147432?pdp_filters=item_id%3AMLB4772233032");
+            assert.equal(ids.catalogId, "MLB22147432");
+            assert.equal(ids.listingId, "MLB4772233032");
+            assert.equal(tituloPublicitarioOuInstrucao("Para meli+", "mercadolivre"), true);
+            assert.equal(tituloPublicitarioOuInstrucao("Carretilha Maruri Black Tamba BG", "mercadolivre"), false);
+            console.log("ML_FAST_OVERLAY_SMOKE=PASS");
+          '
 
       - name: Legacy ML enrichment and overlay guardrails
         if: github.ref == 'refs/heads/validation/guardian-v1-anchor-release-gates-20261112'
