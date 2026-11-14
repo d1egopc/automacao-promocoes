@@ -645,6 +645,14 @@ jobs:
             guardian_args+=(--release-mode overlay)
           fi
           node scripts/guardian-v1.cjs "${guardian_args[@]}"
+      - name: ML Polycard anchored image queue regression
+        if: github.ref == 'refs/heads/validation/guardian-v1-universal-offer-anchor'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node --test --test-reporter=tap tests/ml-anchored-polycard-image-queue.test.cjs
       - name: Radar formatter and presentation regressions
         if: github.ref == 'refs/heads/validation/guardian-v1-radar-formatador-20261111' || github.ref == 'refs/heads/validation/guardian-v1-radar-formatador-composicao-20261111'
         run: |
