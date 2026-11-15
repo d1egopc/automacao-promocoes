@@ -853,7 +853,7 @@ jobs:
           node --test tests/mensageiro-v4-credit-scope.postgres.test.cjs
 
   universal-offer-anchor-postgres:
-    if: github.ref == 'refs/heads/validation/guardian-v1-universal-offer-anchor' || github.ref == 'refs/heads/validation/universal-closure-p0-20261112' || github.ref == 'refs/heads/validation/guardian-v1-anchor-release-gates-20261112' || github.ref == 'refs/heads/validation/guardian-v1-ml-recovery-p0-20261113' || github.ref == 'refs/heads/codex/ml-anchor-fast-local' || github.ref == 'refs/heads/validation/ml-factual-capture-p0-20261114'
+    if: github.ref == 'refs/heads/validation/guardian-v1-universal-offer-anchor' || github.ref == 'refs/heads/validation/universal-closure-p0-20261112' || github.ref == 'refs/heads/validation/guardian-v1-anchor-release-gates-20261112' || github.ref == 'refs/heads/validation/guardian-v1-ml-recovery-p0-20261113' || github.ref == 'refs/heads/codex/ml-anchor-fast-local' || github.ref == 'refs/heads/validation/ml-factual-capture-p0-20261114' || github.ref == 'refs/heads/validation/guardian-v1-ml-mlbu-identity-p0'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -883,7 +883,7 @@ jobs:
           GIT_CONFIG_VALUE_0: ssh://git@github.com/
         run: npm ci
       - name: Anchor, worker, commercial links, memory and concurrent PostgreSQL claims
-        if: github.ref != 'refs/heads/codex/ml-anchor-fast-local' && github.ref != 'refs/heads/validation/ml-factual-capture-p0-20261114'
+        if: github.ref != 'refs/heads/codex/ml-anchor-fast-local' && github.ref != 'refs/heads/validation/ml-factual-capture-p0-20261114' && github.ref != 'refs/heads/validation/guardian-v1-ml-mlbu-identity-p0'
         env:
           OPTIMUS_TEST_PG17: '1'
         run: |
@@ -910,7 +910,7 @@ jobs:
               tests/ofertas-v2-achados-dedupe-memoria.test.js
           fi
       - name: ML fast anchor and pre-send focal gates with disposable PostgreSQL 17
-        if: github.ref == 'refs/heads/codex/ml-anchor-fast-local' || github.ref == 'refs/heads/validation/ml-factual-capture-p0-20261114'
+        if: github.ref == 'refs/heads/codex/ml-anchor-fast-local' || github.ref == 'refs/heads/validation/ml-factual-capture-p0-20261114' || github.ref == 'refs/heads/validation/guardian-v1-ml-mlbu-identity-p0'
         env:
           OPTIMUS_TEST_PG17: '1'
         run: |

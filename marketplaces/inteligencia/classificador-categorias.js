@@ -952,6 +952,8 @@ function avaliarEvidenciaCategoria(oferta = {}, termo = "") {
       /\blinha shimano kairiki\b|\bvara lori rampage\b/.test(titulo) ||
       (/\blinha\b/.test(titulo) && /\b(?:pesca|fluorocarbono|multifilamento|monofilamento)\b/.test(titulo)) ||
       /\bvara (?:de |para )?pesca\b/.test(titulo) ||
+      (oferta.marketplace === "mercadolivre" &&
+        /\b(?:sacola|tapete)(?: tapete)? (?:de|para) (?:pesar peixes?|pesagem (?:de peixes?|para pesca))\b/.test(titulo)) ||
       (/\bgarateias?\b/.test(titulo) && /\b(?:rapala|fish fighter|pesca|tripla|anzol|isca artificial)\b/.test(titulo)) ||
       (/\bregua\b/.test(titulo) && /\bmedir\b/.test(titulo) && /\bpeixes?\b/.test(titulo)) ||
       (/\b(?:graxa|oleo)\b/.test(titulo) && /\b(?:carretilhas?|molinetes?)\b/.test(titulo))) {

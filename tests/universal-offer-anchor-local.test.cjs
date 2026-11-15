@@ -34,6 +34,8 @@ const { criarLocalWorkerService } = require("../modules/local-worker/local-worke
 const { criarLocalWorkerRepository } = require("../modules/local-worker/local-worker.repository");
 const { montarOfertaUniversalEngine, validarContratoOfertaUniversal } = require("../modules/engine/oferta-universal.contract");
 const { avaliarMemoriaUniversal, detectarIdentidadeProdutoUniversal } = require("../modules/inteligencia-universal/memoria.service");
+const { validarResultadoMlIdentity } = require("../modules/local-worker/ml-identity.contract");
+const { classificarCategoriaOferta } = require("../marketplaces/inteligencia/classificador-categorias");
 const workerMl = require("../optimus-capture/local-worker/mercadolivre-identity");
 
 const listingId = "MLB9876500001";
@@ -75,6 +77,172 @@ function proof(t, url = sourceUrl, options = {}) {
     text: async () => '<link rel="canonical" href="' + url + '"><script type="application/ld+json">' + JSON.stringify(data) + "</script>" }));
   return workerMl.resolver({ productId: ids.listingId, sourceUrl: url, variationId: "4567" });
 }
+
+const pageMlbu = "MLBU3053774837";
+const listingMlbu = "MLB3996712963";
+const paginaMlbu = `https://www.mercadolivre.com.br/sacola-tapete-de-pesar-peixe/up/${pageMlbu}`;
+const selecaoMlbu = `${paginaMlbu}?pdp_filters=item_id%3A${listingMlbu}`;
+
+function fixtureMlbu() {
+  const f = fixture({ id: 121, eventoId: 221, linkId: 321 });
+  const { metadata } = f.oferta;
+  delete metadata.identidadeCanonicaMl;
+  delete metadata.resolucaoRadar;
+  delete metadata.transporteTecnicoMl;
+  metadata.produto = {};
+  metadata.fallbackMercadoLivreClonador = true;
+  metadata.linkExpandidoEngine = selecaoMlbu;
+  metadata.resolucaoProduto = { ok: true, statusHttp: 200, urlCapturada: original,
+    linkOriginalRadar: original, metodoResolucaoMeli: "social_action_links_show_product",
+    provaTransporteShowProduct: {
+      ok: true, actionId: "show_product", ctaPrincipalUnico: true, linkResolvidoTecnico: selecaoMlbu,
+      imagemCandidataAnchor: { eventoId: String(f.evento.id), linkOriginalRadar: original }
+    }
+  };
+  Object.assign(f.oferta, {
+    titulo: "Sacola Tapete De Pesar Peixe Pesca Pesqueiro Top Fish Preto",
+    linkExpandido: selecaoMlbu, imagem, imagemOrigem: "og:image.picture_id"
+  });
+  return f;
+}
+
+function provaMlbu(t, { url = selecaoMlbu, item = listingMlbu, variante, htmlOverride } = {}) {
+  const nome = "Tapete de pesagem para pesca Top Fish";
+  const dadosItem = { item_id: item, pid: pageMlbu, user_product_id: pageMlbu };
+  const track = { melidata_event: { event_data: dadosItem } };
+  const initialState = { id: pageMlbu, components: {
+    header: { title: nome }, bookmark: { item_id: item, add: { track } }, track
+  } };
+  const produto = { "@type": "Product", productID: pageMlbu, name: nome, offers: { url: paginaMlbu },
+    variationId: variante };
+  const html = `<link rel="canonical" href="${paginaMlbu}">
+    <script type="application/ld+json">${JSON.stringify(produto)}</script>
+    <script id="__NORDIC_RENDERING_CTX__">_n.ctx.r=${JSON.stringify({ appProps: { pageProps: { initialState } } })};</script>`;
+  t.mock.method(globalThis, "fetch", async consultada => {
+    assert.equal(consultada, url);
+    return { ok: true, url, text: async () => htmlOverride ?? html };
+  });
+  return workerMl.resolver({ productId: listingMlbu, sourceUrl: url });
+}
+
+test("MLBU preserva item_id e searchVariation e exige ambos no produto servido", async t => {
+  const url = selecaoMlbu + "&searchVariation=123";
+  await t.test("variante correta", async mt => {
+    const prova = await provaMlbu(mt, { url, variante: "123" });
+    assert.equal(prova.finalUrl, url);
+    assert.equal(validarResultadoMlIdentity(prova, { sourceUrl: url, expectedMlb: listingMlbu }).variationId, "123");
+  });
+  await t.test("variante divergente", async mt => {
+    await assert.rejects(provaMlbu(mt, { url, variante: "124" }), /ml_identity_variacao_conflitante/);
+  });
+  await t.test("anúncio divergente", async mt => {
+    await assert.rejects(provaMlbu(mt, { item: "MLB9999999999" }), /ml_identity_final_url_invalida/);
+  });
+  await t.test("CAPTCHA com status 200", async mt => {
+    await assert.rejects(provaMlbu(mt, { htmlOverride: "<title>Segurança — Mercado Livre</title>" }),
+      /ml_identity_contexto_ausente_ou_ambiguo/);
+  });
+});
+
+test("MLBU selecionado pelo Clonador chega ao worker antes de liberar título e imagem", async t => {
+  const f = fixtureMlbu();
+  const semProva = normalizarOfertaImportada(f.oferta, f.job, null, true);
+  assert.equal(semProva.titulo, "");
+  assert.equal(avaliarGateIdentidadeMercadoLivre(semProva, semProva.metadata, true, f.job).retida, true);
+  let chamadaWorker;
+  f.deps.garantirIdentidadeMercadoLivreLocalWorker = async args => {
+    chamadaWorker = args;
+    return { ok: true, task: { id: "51", status: "pending" } };
+  };
+  const espera = await enriquecerTituloMlPorOcorrencia(f);
+  assert.equal(espera?.pendente, true);
+  assert.equal(chamadaWorker.sourceUrl, selecaoMlbu);
+  assert.equal(chamadaWorker.productId, listingMlbu);
+  assert.equal(espera.vinculo.pageMlbu, pageMlbu);
+  assert.equal(espera.vinculo.catalogId, undefined);
+  assert.equal(espera.vinculo.ocorrenciaId, String(f.link.id));
+  const prova = await provaMlbu(t);
+  const agora = Date.now();
+  f.job.metadata = { localWorkerImageRetry: { vinculo: espera.vinculo } };
+  f.deps.garantirIdentidadeMercadoLivreLocalWorker = async () => ({ ok: true, task: {
+    id: "51", status: "completed", createdAt: iso(agora - 1000), completedAt: iso(agora),
+    expiresAt: iso(agora + 60_000), resultMetadata: prova
+  } });
+  const enriquecida = await enriquecerTituloMlPorOcorrencia(f);
+  assert.equal(enriquecida?.provaValidada?.workspaceId, f.job.cliente_id);
+  assert.equal(enriquecida.provaValidada.ocorrenciaLink.id, String(f.link.id));
+  assert.equal(enriquecida.oferta.metadata.identidadeCanonicaMl.pageMlbu, pageMlbu);
+  const normalizada = normalizarOfertaImportada(enriquecida.oferta, f.job, enriquecida.provaValidada, true);
+  assert.equal(normalizada.titulo, f.oferta.titulo);
+  assert.equal(normalizada.categoria, "Pesca e Camping");
+  assert.equal(classificarCategoriaOferta({ marketplace: "mercadolivre", titulo: "Tapete felpudo de sala" }),
+    "Casa, Móveis e Decoração");
+  assert.equal(avaliarGateIdentidadeMercadoLivre(normalizada, normalizada.metadata, true, f.job).retida, false);
+  for (const campo of ["imagem", "preco", "precoOriginal", "cupom", "linkOriginal", "linkExpandido", "linkAfiliado"]) {
+    assert.equal(normalizada[campo], f.oferta[campo], campo);
+  }
+  assert.equal(enriquecida.oferta.instrucaoCupom, f.oferta.instrucaoCupom);
+  const universal = montarOfertaUniversalEngine({ oferta: normalizada, ofertaEntrada: enriquecida.oferta,
+    job: f.job, evento: f.evento, link: f.link, metadata: normalizada.metadata });
+  assert.equal(validarContratoOfertaUniversal(universal).ok, true);
+  assert.equal(universal.produto.idExterno, listingMlbu);
+  assert.equal(universal.produto.urlOriginal, f.oferta.linkOriginal);
+  assert.equal(universal.midia.imagemPrincipal, f.oferta.imagem);
+  const slogan = await enriquecerTituloMlPorOcorrencia({ ...f, oferta: { ...f.oferta, titulo: "Confira agora" } });
+  assert.equal(slogan?.oferta.titulo, prova.tituloOficial);
+
+  const divergente = structuredClone(prova);
+  divergente.observedMlb = "MLB9999999999";
+  assert.throws(() => validarResultadoMlIdentity(divergente, {
+    expectedMlb: listingMlbu, sourceUrl: selecaoMlbu
+  }), /ml_identity_mlb_divergente/);
+  assert.throws(() => validarResultadoMlIdentity(prova, {
+    expectedMlb: listingMlbu, sourceUrl: selecaoMlbu, variationId: "123"
+  }), /ml_identity_variacao_conflitante/);
+  assert.throws(() => validarResultadoMlIdentity(prova, {
+    expectedMlb: listingMlbu, sourceUrl: selecaoMlbu.replace(pageMlbu, "MLBU9999999999")
+  }), /ml_identity_mlbu_vinculo_divergente/);
+  prova.finalUrl = selecaoMlbu.replace(listingMlbu, "MLB9999999999");
+  assert.equal(await enriquecerTituloMlPorOcorrencia(f), null);
+  prova.finalUrl = "https://www.mercadolivre.com.br/captcha";
+  assert.equal(await enriquecerTituloMlPorOcorrencia(f), null);
+});
+
+test("MLBU sem CTA vinculado, com seletor ambíguo ou anúncio conflitante não cria tarefa", async () => {
+  for (const alterar of [
+    f => { f.oferta.metadata.resolucaoProduto.provaTransporteShowProduct.imagemCandidataAnchor.eventoId = "222"; },
+    f => { f.oferta.metadata.produto.itemId = "MLB9999999999"; },
+    f => { f.oferta.linkOriginal = "https://meli.la/outra-captura"; },
+    f => { f.job.cliente_id = "workspace-fora-do-canario"; },
+    f => {
+      const url = selecaoMlbu + "&pdp_filters=item_id%3AMLB9999999999";
+      f.oferta.linkExpandido = url;
+      f.oferta.metadata.resolucaoProduto.provaTransporteShowProduct.linkResolvidoTecnico = url;
+    }
+  ]) {
+    const f = fixtureMlbu();
+    alterar(f);
+    let chamadas = 0;
+    f.deps.garantirIdentidadeMercadoLivreLocalWorker = async () => { chamadas++; };
+    assert.equal(await enriquecerTituloMlPorOcorrencia(f), null);
+    assert.equal(chamadas, 0);
+  }
+});
+
+test("MLBU direto solicita prova somente para a seleção capturada", async () => {
+  const f = fixtureMlbu();
+  f.link.url_original = f.oferta.linkOriginal = f.oferta.metadata.linkOriginalEngine = selecaoMlbu;
+  f.evento.links_extraidos[0] = selecaoMlbu;
+  delete f.oferta.metadata.resolucaoProduto;
+  f.deps.garantirIdentidadeMercadoLivreLocalWorker = async ({ sourceUrl, productId }) => {
+    assert.equal(sourceUrl, selecaoMlbu);
+    assert.equal(productId, listingMlbu);
+    return { ok: true, task: { id: "52", status: "pending" } };
+  };
+  assert.equal((await enriquecerTituloMlPorOcorrencia(f))?.pendente, true);
+  f.oferta.linkExpandido = selecaoMlbu.replace(listingMlbu, "MLB9999999999");
+  assert.equal(await enriquecerTituloMlPorOcorrencia(f), null);
+});
 
 test("show_product da mesma ocorrência seleciona o anúncio sem confundir catálogo", async t => {
   const f = fixture();
@@ -504,6 +672,35 @@ test("PG17, repositório real e UPDATE de retomada real, em esquema descartável
     const frescor = avaliarFrescorPreImporter({ ...f.job, evento_capturado_em: f.evento.capturado_em });
     assert.equal(a.vinculo.deadline, Date.parse(frescor.expiraEmComercial));
     assert.equal((await pool.query("SELECT COUNT(*)::int AS n FROM local_worker_identity_cache")).rows[0].n, 0);
+
+    await t.test("MLBU retoma uma vez após conclusão vinculada do worker", async mt => {
+      const mlbu = fixtureMlbu();
+      await inserir(mlbu);
+      mlbu.deps.garantirIdentidadeMercadoLivreLocalWorker = svc.garantirIdentidadeMercadoLivre;
+      const espera = await enriquecerTituloMlPorOcorrencia(mlbu);
+      assert.equal(espera?.pendente, true);
+      const vinculo = espera.vinculo;
+      const retryMlbu = { ...final.estadoRetry, vinculo, proximaTentativaEmMs: vinculo.deadline };
+      await prepararEspera(mlbu.job.id, retryMlbu);
+      assert.equal((await tentarMarcarImportando(mlbu.job.id, pool)).ok, false);
+      const lease = await repo.claim({ workerId: "fixture-worker", capabilities: ["ml_identity_v1"] });
+      assert.equal(lease.task.id, vinculo.taskId);
+      assert.equal(lease.task.sourceUrl, selecaoMlbu);
+      const resultado = await provaMlbu(mt);
+      const conclusao = await svc.resultado({ ...resultado, taskId: lease.task.id, leaseToken: lease.task.leaseToken,
+        worker: { ok: true, workerType: "dedicated", ownerId: "fixture-owner", workerId: "fixture-worker",
+          capabilities: ["ml_identity_v1"] } });
+      assert.equal(conclusao.ok, true);
+      assert.equal((await pool.query("SELECT COUNT(*)::int AS n FROM local_worker_identity_cache")).rows[0].n, 0);
+      await prepararEspera(mlbu.job.id, { ...retryMlbu, vinculo: { ...vinculo, pageMlbu: "MLBU9999999999" } });
+      assert.equal((await tentarMarcarImportando(mlbu.job.id, pool)).ok, false);
+      await prepararEspera(mlbu.job.id, retryMlbu);
+      const claims = await Promise.all([tentarMarcarImportando(mlbu.job.id, pool), tentarMarcarImportando(mlbu.job.id, pool)]);
+      assert.equal(claims.filter(c => c.ok).length, 1);
+      mlbu.job.metadata = await leitura(mlbu.job.id);
+      assert.equal(mlbu.job.metadata.localWorkerImageRetry.conclusaoConsumida, true);
+      assert.equal((await enriquecerTituloMlPorOcorrencia(mlbu))?.provaValidada?.produto.produtoIdCanonico, listingMlbu);
+    });
     const provaExpirada = await proof(t, outroAnuncio.oferta.linkExpandido);
     await pool.query("UPDATE local_worker_tasks SET expires_at=NOW()-INTERVAL '1 second' WHERE id=$1", [outraLease.task.id]);
     const resultadoExpirado = await svc.resultado({ ...provaExpirada,

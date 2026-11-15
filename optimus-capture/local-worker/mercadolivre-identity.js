@@ -150,6 +150,25 @@
     const url = urlMercadoLivre(valor);
     return url?.pathname.match(/\/up\/(MLBU\d{6,})\/?$/i)?.[1]?.toUpperCase() || "";
   }
+  function urlSelecaoMlbu(valor = "", { exigirSeletor = true } = {}) {
+    try {
+      const url = new URL(texto(valor));
+      if (url.protocol !== "https:" ||
+          !["www.mercadolivre.com.br", "mercadolivre.com.br"].includes(url.hostname) ||
+          url.username || url.password || url.port || url.hash ||
+          !/^\/(?:[a-z0-9-]+\/)?up\/MLBU\d{6,}\/?$/i.test(url.pathname)) return null;
+      const filtros = url.searchParams.getAll("pdp_filters");
+      const variacoes = url.searchParams.getAll("searchVariation");
+      const seletor = filtros[0]?.match(/^item_id:(MLB-?\d{6,})$/i)?.[1];
+      if (filtros.length > 1 || (filtros.length && !seletor) || (exigirSeletor && !seletor) ||
+          variacoes.length > 1 || (variacoes.length && !/^\d{1,30}$/.test(variacoes[0])) ||
+          [...url.searchParams.keys()].some(param => !["pdp_filters", "searchVariation"].includes(param))) return null;
+      return { url: url.toString(), pageMlbu: pageMlbu(url.toString()), listingId: normalizarMlb(seletor),
+        variationId: variacoes[0] || "" };
+    } catch (_) {
+      return null;
+    }
+  }
   function contextoNordic(html = "") {
     const fontes = [];
     const re = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
@@ -307,6 +326,7 @@
     const variationIds = [...new Set([
       candidato.produto.variationId,
       candidato.produto.variantId,
+      candidato.produto.variation_id,
       candidato.produto.offers?.sku
     ].map(texto).filter(valor => /^\d{1,30}$/.test(valor)))];
     if (variationIds.length > 1) throw new Error("ml_identity_variacao_conflitante");
@@ -356,20 +376,32 @@
   async function resolver({ productId, sourceUrl, variationId }) {
     const esperado = normalizarMlb(productId);
     const catalogo = urlCatalogo(sourceUrl);
+    const mlbu = urlSelecaoMlbu(sourceUrl);
     const origem = urlMercadoLivre(sourceUrl);
-    const variacaoEsperada = texto(variationId);
+    const variacaoEsperada = texto(variationId) || mlbu?.variationId || "";
+    if ((mlbu && (mlbu.listingId !== esperado ||
+        (mlbu.variationId && mlbu.variationId !== variacaoEsperada))) ||
+        (!mlbu && pageMlbu(sourceUrl) && /[?&](?:pdp_filters|searchVariation)=/i.test(sourceUrl))) {
+      throw new Error("ml_identity_entrada_invalida");
+    }
     if (!origem || (catalogo
       ? !/^MLB-?\d{6,}$/i.test(texto(productId)) || esperado !== catalogo.listingId ||
         (variacaoEsperada && !/^\d{1,30}$/.test(variacaoEsperada))
       : !pageMlbu(origem.toString()) && (!esperado || normalizarMlb(origem.pathname) !== esperado))) {
       throw new Error("ml_identity_entrada_invalida");
     }
-    const urlConsulta = catalogo?.url || origem.toString();
-    const leitura = await fetchTexto(urlConsulta, TIMEOUT_MS, catalogo ? "error" : "follow");
-    const finalUrl = leitura.response?.url || (catalogo ? "" : urlConsulta);
+    const urlConsulta = catalogo?.url || mlbu?.url || origem.toString();
+    const leitura = await fetchTexto(urlConsulta, TIMEOUT_MS, catalogo || mlbu ? "error" : "follow");
+    const finalUrl = leitura.response?.url || (catalogo || mlbu ? "" : urlConsulta);
     if (!leitura.response?.ok) throw new Error(`ml_identity_http_${leitura.response?.status || 0}`);
     const catalogoFinal = catalogo ? urlCatalogo(finalUrl) : null;
     if (catalogo && (leitura.response.redirected || !mesmaSelecaoCatalogo(catalogo, catalogoFinal))) {
+      throw new Error("ml_identity_redirect_produto_divergente");
+    }
+    const mlbuFinal = mlbu && urlSelecaoMlbu(finalUrl, { exigirSeletor: false });
+    if (mlbu && (leitura.response.redirected || mlbuFinal?.pageMlbu !== mlbu.pageMlbu ||
+        (mlbuFinal.listingId && mlbuFinal.listingId !== esperado) ||
+        (mlbuFinal.variationId && variacaoEsperada && mlbuFinal.variationId !== variacaoEsperada))) {
       throw new Error("ml_identity_redirect_produto_divergente");
     }
     const finalLegado = catalogo ? null : urlMercadoLivre(finalUrl);
@@ -380,6 +412,13 @@
     const resultado = catalogo
       ? extrairCatalogo(leitura.html, catalogoFinal, variacaoEsperada)
       : extrair(leitura.html, esperado, finalLegado.toString());
+    if (mlbu) {
+      if ((variacaoEsperada && resultado.variationId !== variacaoEsperada) ||
+          (mlbuFinal.variationId && resultado.variationId !== mlbuFinal.variationId)) {
+        throw new Error("ml_identity_variacao_conflitante");
+      }
+      resultado.finalUrl = mlbuFinal.url;
+    }
     if (resultado.imagemOficial) resultado.imagemOficial = await validarImagem(resultado.imagemOficial);
     const collectedAt = new Date().toISOString();
     return {
@@ -414,6 +453,7 @@
     extrair,
     associacaoMlbu,
     urlCatalogo,
+    urlSelecaoMlbu,
     mesmaSelecaoCatalogo,
     pageMlbu,
     tituloFactual,

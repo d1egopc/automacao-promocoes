@@ -18,7 +18,7 @@ const { ancoraMlAtiva } = require("../ml-work-enrichment-shadow");
 const { urlCatalogoTecnicoMercadoLivre, urlRedirectDiretoCatalogoMl } = require("../../../../marketplaces/mercadolivre/utils");
 const { resolverPrecoSemantico } = require("../../../radar/preco-semantico");
 const { tituloComercialUniversalValido } = require("../../../radar/comercial-precedencia");
-const { urlCatalogo } = require("../../../../optimus-capture/local-worker/mercadolivre-identity");
+const { urlCatalogo, urlSelecaoMlbu } = require("../../../../optimus-capture/local-worker/mercadolivre-identity");
 
 function resumoTemplateInputAuditoria(templateInput = {}) {
   return {
@@ -377,7 +377,10 @@ function tituloTecnicoBloqueadoMercadoLivre(titulo = "") {
 
 function transporteSelecionadoMercadoLivre({ urlOriginalEngine = "", urlImportador = "", resolucaoProduto = {} } = {}) {
   let selecao, direta;
-  try { selecao = urlCatalogo(urlImportador); direta = urlCatalogo(urlOriginalEngine); }
+  try {
+    selecao = urlCatalogo(urlImportador) || urlSelecaoMlbu(urlImportador);
+    direta = urlCatalogo(urlOriginalEngine) || urlSelecaoMlbu(urlOriginalEngine);
+  }
   catch { return null; }
   if (!selecao) return null;
   if (direta && direta.url === selecao.url) return { selecao, tipo: "url_direta" };
@@ -386,6 +389,7 @@ function transporteSelecionadoMercadoLivre({ urlOriginalEngine = "", urlImportad
   if (showProduct?.linkResolvidoTecnico === selecao.url && radar.linkOriginalRadar === urlOriginalEngine) {
     return { selecao, tipo: "show_product" };
   }
+  if (selecao.pageMlbu) return null;
   if (isMeliLa(urlOriginalEngine) && radar.ok === true &&
       radar.urlCapturada === urlOriginalEngine && radar.linkOriginalRadar === urlOriginalEngine &&
       radar.urlResolvida === selecao.url && radar.tipoLinkRadar === "shortlink_meli" &&
@@ -400,7 +404,8 @@ function metadataTransporteTituloPendente(transporte, urlOriginalEngine, resoluc
   return { aguardaTituloMl: aguardaTitulo,
     identidadeCanonicaMl: { status: "transporte_confirmado", urlOriginal: urlOriginalEngine,
       urlCanonicaRevalidada: transporte.selecao.url,
-      mlbProduto: transporte.selecao.catalogId, mlbRevalidado: transporte.selecao.catalogId,
+      mlbProduto: transporte.selecao.catalogId || transporte.selecao.listingId,
+      mlbRevalidado: transporte.selecao.catalogId || transporte.selecao.listingId,
       transporteShowProductConfirmado: transporte.tipo === "show_product",
       transporteRedirectConfirmado: transporte.tipo === "redirect_direto" },
     transporteTecnicoMl: { linkOriginalRadar: urlOriginalEngine },

@@ -1,6 +1,6 @@
 "use strict";
 const crypto = require("crypto");
-const { pageMlbu, urlCatalogo, mesmaSelecaoCatalogo } = require("../../optimus-capture/local-worker/mercadolivre-identity");
+const { pageMlbu, urlCatalogo, mesmaSelecaoCatalogo, urlSelecaoMlbu } = require("../../optimus-capture/local-worker/mercadolivre-identity");
 
 const ML_IDENTITY_CAPABILITY = "ml_identity_v1";
 const ML_IDENTITY_CONTRACT_VERSION = 1;
@@ -127,6 +127,19 @@ function validarResultadoMlIdentity(payload = {}, opcoes = {}) {
     ? pageMlbu(canonicalUrl) !== associacao.pageMlbu
     : !urlMercadoLivreCompativel(canonicalUrl, expectedMlb, { exigirMlb: false })))) throw erroContrato("ml_identity_canonical_invalida");
 
+  const selecaoMlbu = urlSelecaoMlbu(opcoes.sourceUrl);
+  if (selecaoMlbu) {
+    const paginas = [payload.finalUrl || prova.finalUrl, canonicalInformada, prova.finalUrl, prova.canonicalUrl]
+      .map(url => urlSelecaoMlbu(url, { exigirSeletor: false }));
+    if (!bindingValido || selecaoMlbu.listingId !== expectedMlb ||
+        selecaoMlbu.pageMlbu !== associacao.pageMlbu ||
+        paginas.some(pagina => pagina?.pageMlbu !== selecaoMlbu.pageMlbu ||
+          (pagina.listingId && pagina.listingId !== expectedMlb) ||
+          (pagina.variationId && pagina.variationId !== texto(payload.variationId)))) {
+      throw erroContrato("ml_identity_mlbu_vinculo_divergente");
+    }
+  }
+
   const tituloInformado = texto(payload.tituloOficial).replace(/\s+/g, " ");
   const tituloOficial = tituloFactualMercadoLivreValido(tituloInformado) ? tituloInformado : "";
   const imagemInformada = texto(payload.imagemOficial || payload.imagemOficialUrl);
@@ -138,14 +151,16 @@ function validarResultadoMlIdentity(payload = {}, opcoes = {}) {
   if (tituloOficial && !ML_IDENTITY_TITLE_ORIGINS.has(origemTitulo)) throw erroContrato("ml_identity_origem_titulo_invalida");
   if (imagemOficial && !ML_IDENTITY_IMAGE_ORIGINS.has(origemImagem)) throw erroContrato("ml_identity_origem_imagem_invalida");
   if (catalogoValido && !tituloOficial) throw erroContrato("ml_identity_catalogo_sem_titulo_oficial");
+  if (selecaoMlbu && !tituloOficial) throw erroContrato("ml_identity_mlbu_sem_titulo_oficial");
   if (!tituloOficial && !imagemOficial) throw erroContrato("ml_identity_sem_identidade_factual");
 
   const variationId = /^\d{1,30}$/.test(texto(payload.variationId || prova.variationId))
     ? texto(payload.variationId || prova.variationId)
     : "";
 
-  if (catalogoValido && ((texto(payload.variationId) && !variationId) ||
+  if ((catalogoValido || selecaoMlbu) && ((texto(payload.variationId) && !variationId) ||
       texto(payload.variationId) !== texto(prova.variationId) ||
+      (selecaoMlbu?.variationId && variationId !== selecaoMlbu.variationId) ||
       (opcoes.variationId && variationId !== opcoes.variationId))) throw erroContrato("ml_identity_variacao_conflitante");
 
   return {
@@ -255,6 +270,7 @@ module.exports = {
   ML_IDENTITY_IMAGE_TTL_MS,
   normalizarMlb,
   sanitizarUrlMercadoLivre,
+  urlSelecaoMlbu,
   urlMercadoLivreCompativel,
   sanitizarUrlMlstatic,
   urlMlstaticValida,
