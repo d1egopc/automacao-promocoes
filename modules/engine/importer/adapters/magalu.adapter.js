@@ -434,7 +434,18 @@ function montarDiagnosticoAfiliacaoMagalu({ job = {}, clienteId = "", promoterId
   };
 }
 
-function avisosProdutoBloqueiamFallbackRadarMagalu(avisos = []) {
+function lojaDivergenteRevalidadaNoWorkspaceMagalu(produto = {}) {
+  const productId = texto(produto.produtoId || produto.codigo);
+  const urlAfiliavel = texto(produto.urlAfiliavelComprovada);
+  return Boolean(
+    productId &&
+    produto.magaluWorkspaceValidado === true &&
+    urlAfiliavel &&
+    produtoIdPorUrl(urlAfiliavel) === productId
+  );
+}
+
+function avisosProdutoBloqueiamFallbackRadarMagalu(avisos = [], produto = {}) {
   const bloqueadores = [
     "magalu_canonica_produto_divergente_ignorada",
     "magalu_og_url_produto_divergente_ignorada",
@@ -445,7 +456,9 @@ function avisosProdutoBloqueiamFallbackRadarMagalu(avisos = []) {
     "magalu_link_loja_divergente"
   ];
 
-  return bloqueadores.some(aviso => avisos.includes(aviso));
+  return bloqueadores.some(aviso => avisos.includes(aviso) && !(
+    aviso === "magalu_link_loja_divergente" && lojaDivergenteRevalidadaNoWorkspaceMagalu(produto)
+  ));
 }
 
 function falhaLeituraPermiteAfiliacaoDeterministicaMagalu(produto = {}) {
@@ -751,7 +764,7 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
     adicionarAvisoMagalu(avisosProduto, produto?.motivo || "parser_sem_retorno");
   }
 
-  const identidadeOrigemSegura = !avisosProdutoBloqueiamFallbackRadarMagalu(avisosProduto);
+  const identidadeOrigemSegura = !avisosProdutoBloqueiamFallbackRadarMagalu(avisosProduto, produto);
   const paginaValidada = Boolean(
     identidadeOrigemSegura &&
     produto.magaluWorkspaceValidado === true &&
@@ -910,7 +923,7 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
     camposRetorno: Object.keys(produto || {})
   };
 
-  if (avisosProdutoBloqueiamFallbackRadarMagalu(avisosProduto)) {
+  if (avisosProdutoBloqueiamFallbackRadarMagalu(avisosProduto, produto)) {
     logMagaluAdapter("[ENGINE-MAGALU-AFILIACAO-DIAGNOSTICO]", diagnosticoAfiliacao);
     return {
       ok: false,

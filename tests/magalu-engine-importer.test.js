@@ -15,6 +15,7 @@ const {
   montarOfertaUniversalEngine,
   validarContratoOfertaUniversal
 } = require("../modules/engine/oferta-universal.contract");
+const { criarPreflightFilaUniversal } = require("../modules/engine/universal-queue-preflight");
 
 process.env.JWT_SECRET = process.env.JWT_SECRET || "magalu-engine-importer-test-secret";
 
@@ -829,6 +830,134 @@ async function testarDivulgadorOfertaNaoFalhaPorLinkProduto() {
   assert.strictEqual(resultado.linkOriginal, urlDivulgadorOferta);
 }
 
+async function testarLojaOrigemDivergenteRevalidadaNoWorkspace() {
+  const original = "https://www.magazinevoce.com.br/magazineiskandarsouza/smartphone-samsung-galaxy-a57-128gb/p/239224800/te/ga57/";
+  const comprovada = "https://www.magazinevoce.com.br/magazined1egopc/smartphone-samsung-galaxy-a57-128gb/p/239224800/te/ga57/";
+  const pacote = deps({
+    resolverFatosMagalu: async () => ({
+      ok: true,
+      produtoId: "239224800",
+      sellerIdOriginal: "",
+      fonteUsada: "magazinevoce_magazine_promoter",
+      fatos: {
+        urlOriginal: original,
+        urlCanonica: comprovada,
+        urlAfiliavelComprovada: comprovada,
+        magaluWorkspaceValidado: true,
+        produtoId: "239224800",
+        codigo: "239224800",
+        titulo: "Smartphone Samsung Galaxy A57 128GB Azul Escuro",
+        imagem: "https://a-static.mlcdn.com.br/800x560/smartphone-samsung-galaxy-a57-128gb.jpg",
+        categoria: "Celulares e Smartphones",
+        avisos: ["magalu_link_loja_divergente"],
+        metadata: {
+          fontes: { urlCanonica: "canonical" },
+          imagemOficial: { dimensoes: { largura: 800, altura: 560 } }
+        }
+      },
+      avisos: ["magalu_link_loja_divergente"]
+    })
+  });
+  const resultado = await importarProdutoMagaluEngine({
+    job: { id: 1161695, evento_id: 237721, cliente_id: "user_pss60lus", marketplace: "magalu" },
+    evento: {
+      texto_original: "Galaxy A57 128GB + Fit3\nPor R$ 1.645,00\nCupom INFLU200\n" + original,
+      links_extraidos: [original],
+      codigoCupom: "INFLU200"
+    },
+    links: [linkRow(237721, original)],
+    deps: pacote.deps
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.produtoId, "239224800");
+  assert.strictEqual(resultado.linkOriginal, original);
+  assert.strictEqual(resultado.linkAfiliado, comprovada);
+  assert.strictEqual(resultado.precoAtual, 1645);
+  assert.strictEqual(resultado.cupom, "INFLU200");
+
+  const ofertaUniversal = montarOfertaUniversalEngine({
+    oferta: resultado,
+    ofertaEntrada: resultado,
+    job: { id: 1161695, evento_id: 237721, cliente_id: "user_pss60lus", marketplace: "magalu" },
+    evento: { id: 237721, texto_original: "Galaxy A57 128GB + Fit3\nPor R$ 1.645,00\nCupom INFLU200\n" + original },
+    link: linkRow(237721, original),
+    metadata: resultado.metadata
+  });
+  assert.strictEqual(validarContratoOfertaUniversal(ofertaUniversal).ok, true);
+  assert.strictEqual(ofertaUniversal.produto.idExterno, "239224800");
+  assert.strictEqual(ofertaUniversal.comercial.precoAtual, 1645);
+  assert.strictEqual(ofertaUniversal.comercial.cupom, "INFLU200");
+  assert.strictEqual(ofertaUniversal.afiliacao.urlAfiliada, comprovada);
+
+  const agora = Date.parse("2026-11-15T14:20:00Z");
+  const itemPayload = {
+    ...ofertaUniversal,
+    clienteId: "user_pss60lus",
+    engineOfertaId: "215999",
+    capturadoEm: "2026-11-15T14:18:06Z"
+  };
+  const passou = () => ({ ok: true });
+  const preflight = criarPreflightFilaUniversal({
+    pool: { connect() {} },
+    now: () => agora,
+    readClock: async () => null,
+    resolveDestination: () => ({ ok: true, destination: { id: "destino-magalu", tipo: "whatsapp", intervaloMinutos: 2.5 } }),
+    checkWindow: passou,
+    checkDailyLimit: passou,
+    checkSession: passou,
+    checkCredits: passou,
+    checkMedia: ({ oferta }) => ({ ok: oferta.midia?.imagemPrincipal === resultado.imagem }),
+    checkLinks: ({ oferta }) => ({ ok: oferta.afiliacao?.urlAfiliada === comprovada }),
+    checkDedup: passou,
+    renderMessage: ({ oferta }) => ({ ok: true, message: `${oferta.titulo}\n${oferta.afiliacao?.urlAfiliada}` })
+  });
+  const preparado = await preflight({
+    workspace_id: "user_pss60lus",
+    destination_id: "destino-magalu",
+    oferta_id: 215999,
+    evento_id: 237721,
+    origem_fluxo: "optimus",
+    capturado_em: "2026-11-15T14:18:06Z",
+    operationEpochStartedAt: "2026-11-15T14:00:00Z",
+    item_payload: itemPayload
+  });
+  assert.strictEqual(preparado.ready, true, JSON.stringify(preparado));
+  assert.strictEqual(preparado.oferta.comercial.precoAtual, 1645);
+  assert.strictEqual(preparado.oferta.comercial.cupom, "INFLU200");
+
+  const divergente = await importarProdutoMagaluEngine({
+    job: { id: 1161696, evento_id: 237722, cliente_id: "user_pss60lus", marketplace: "magalu" },
+    evento: {
+      texto_original: "Galaxy A57 128GB\nPor R$ 1.645,00\n" + original,
+      links_extraidos: [original]
+    },
+    links: [linkRow(237722, original)],
+    deps: {
+      ...pacote.deps,
+      resolverFatosMagalu: async () => ({
+        ok: true,
+        produtoId: "239224800",
+        fonteUsada: "magazinevoce_magazine_promoter",
+        fatos: {
+          urlOriginal: original,
+          urlCanonica: comprovada.replace("239224800", "240144700"),
+          urlAfiliavelComprovada: comprovada.replace("239224800", "240144700"),
+          magaluWorkspaceValidado: true,
+          produtoId: "239224800",
+          codigo: "239224800",
+          titulo: "Smartphone Samsung Galaxy A57 128GB Azul Escuro",
+          imagem: "https://a-static.mlcdn.com.br/800x560/smartphone-samsung-galaxy-a57-128gb.jpg",
+          avisos: ["magalu_link_loja_divergente"]
+        },
+        avisos: ["magalu_link_loja_divergente"]
+      })
+    }
+  });
+  assert.strictEqual(divergente.ok, false);
+  assert.strictEqual(divergente.motivo, "identidade_produto_insegura");
+}
+
 async function testarFormatosComerciaisRadarDePor() {
   const casos = [
     { texto: "DE 2.811,00 | POR 2.069,10", atual: 2069.1, anterior: "2.811,00" },
@@ -1115,6 +1244,7 @@ function testarRegistriesPipelineUnico() {
   await testarDeepLinkOutraLojaNaoContinuaPipeline();
   await testarOfertaUniversalValida();
   await testarDivulgadorOfertaNaoFalhaPorLinkProduto();
+  await testarLojaOrigemDivergenteRevalidadaNoWorkspace();
   await testarFormatosComerciaisRadarDePor();
   await testarDivulgadorPdpPublicaNaoProvaAfiliacaoWorkspace();
   await testarEngineUsaPoliticaRapidaNoResolver();
