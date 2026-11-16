@@ -11,6 +11,7 @@ permissions:
 
 env:
   BASE_SHA: 3fd2dc35b9c3987dd0a5ff2c04464ba929f0e95c
+  CANDIDATE_RUNTIME_SHA: f304746b8d045953c22107f1924e5f4955703f78
 
 jobs:
   validate:
@@ -82,9 +83,11 @@ jobs:
         run: |
           set -euo pipefail
           git cat-file -e "${BASE_SHA}^{commit}"
+          git cat-file -e "${CANDIDATE_RUNTIME_SHA}^{commit}"
           git merge-base --is-ancestor "$BASE_SHA" "$GITHUB_SHA"
+          git merge-base --is-ancestor "$CANDIDATE_RUNTIME_SHA" "$GITHUB_SHA"
           git worktree add --detach "$RUNNER_TEMP/fairness-base" "$BASE_SHA"
-          git worktree add --detach "$RUNNER_TEMP/fairness-candidate" "$GITHUB_SHA"
+          git worktree add --detach "$RUNNER_TEMP/fairness-candidate" "$CANDIDATE_RUNTIME_SHA"
           (cd "$RUNNER_TEMP/fairness-base" && npm ci)
           (cd "$RUNNER_TEMP/fairness-candidate" && npm ci)
           base_test_hash="$(sha256sum "$RUNNER_TEMP/fairness-base/tests/universal-flow-fairness-real-transitions.postgres.js" | cut -d' ' -f1)"
