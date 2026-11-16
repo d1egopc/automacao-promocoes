@@ -108,7 +108,7 @@ const {
 const { createHash } = require("node:crypto");
 const { urlCatalogo, mesmaSelecaoCatalogo } = require("../../../optimus-capture/local-worker/mercadolivre-identity");
 const { urlCatalogoTecnicoMercadoLivre } = require("../../../marketplaces/mercadolivre/utils");
-const { validarResultadoMlIdentity, ML_IDENTITY_RESULT_TTL_MS } = require("../../local-worker/ml-identity.contract");
+const { validarResultadoMlIdentity, tituloFactualMercadoLivreValido, urlSelecaoMlbu, ML_IDENTITY_RESULT_TTL_MS } = require("../../local-worker/ml-identity.contract");
 const { montarProvaTituloTecnico, vincularOcorrenciaProduto } = require("./adapters/prova-identidade-tecnica");
 const {
   criarMedidorEngineMemoryStage,
@@ -189,6 +189,9 @@ function tituloGenericoMarketplaceEngine(titulo = "", marketplace = "") {
     return ["produtoaliexpress", "ofertaaliexpress", "aliexpress"].includes(chaveTitulo);
   }
   if (chaveMarketplace === "mercadolivre") {
+    const palavras = tituloLimpo.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    if (/\b(?:entre|acesse|participe|venha|clique)\b.*\b(?:grupo|canal)\b/.test(palavras) ||
+        /^(?:loja|vendedor)(?:\s+oficial)?(?:\s+mercado\s+livre)?$/.test(palavras)) return true;
     return [
       "produtomercadolivre",
       "mercadolivre",
@@ -311,7 +314,7 @@ function reclassificarCategoriaFinalEngine(oferta = {}, metadataFinal = {}, job 
 
   const provaTitulo = metadataFinal.provaTituloTecnicoValidada;
   const tituloFactual = provaTitulo?.validacao === "confirmada_pelo_importador" &&
-    tituloCapturadoCompativel(oferta.titulo, provaTitulo.titulo?.valor)
+    (marketplaceChave === "mercadolivre" || tituloCapturadoCompativel(oferta.titulo, provaTitulo.titulo?.valor))
     ? { titulo: provaTitulo.titulo.valor, origem: provaTitulo.titulo.fonte }
     : resolverTituloFactualEngine(oferta, metadataFinal, job);
   if (!tituloFactual.titulo) {
@@ -636,8 +639,15 @@ function sqlConclusaoIdentidadeMl(j) {
       AND t.technical_slug=${v}->>'technicalSlug'
       AND t.completed_at>=t.created_at AND t.completed_at<t.expires_at
       AND t.completed_at<to_timestamp((${v}->>'deadline')::double precision / 1000)
-      AND t.result_metadata #>> '{provaTecnica,catalogId}' = ${v}->>'catalogId'
-      AND t.result_metadata #>> '{provaTecnica,listingId}' = ${v}->>'listingId'
+       AND (
+         (${v}->>'pageMlbu' IS NULL
+           AND t.result_metadata #>> '{provaTecnica,catalogId}' = ${v}->>'catalogId'
+           AND t.result_metadata #>> '{provaTecnica,listingId}' = ${v}->>'listingId')
+         OR (${v}->>'catalogId' IS NULL
+           AND t.result_metadata #>> '{provaTecnica,associacaoPagina,pageMlbu}' = ${v}->>'pageMlbu'
+           AND t.result_metadata #>> '{provaTecnica,associacaoPagina,mlb}' = ${v}->>'listingId'
+           AND t.result_metadata #>> '{provaTecnica,associacaoPagina,source}' = 'nordic_current_product')
+       )
       AND (${v}->>'variationId'='' OR t.result_metadata->>'variationId'=${v}->>'variationId')
       AND t.result_metadata->>'capability'='ml_identity_v1'
       AND t.result_metadata #>> '{provaTecnica,source}'='local_first_party'
@@ -1175,6 +1185,25 @@ function validarProvaTituloTecnico(resultado = {}, produto = {}, job = {}, ancor
   const productTitle = normalizarTexto(produto.titulo || produto.nome || produto.title || "");
   const metadataOriginal = normalizarTexto(metadata.linkOriginalEngine || "");
   const resultOriginal = normalizarTexto(resultado.linkOriginal || "");
+  const linksComerciais = Array.isArray(metadata.linksComerciais) ? metadata.linksComerciais :
+    adapter === "aliexpress" && Array.isArray(metadata.linksClassificados) ? metadata.linksClassificados : [];
+  const linkTransporteKabum = adapter === "awin_kabum" ? linksComerciais.find((link, index) => {
+    const linkUrl = normalizarTexto(link?.urlOriginal || link?.url_original || link?.original || link?.url || "");
+    if (linkUrl !== anchorUrl) return false;
+    const actualId = normalizarTexto(link?.ocorrenciaId || link?.idOcorrencia || link?.ocorrencia_id ||
+      link?.id || link?.link_id || "");
+    const actualOrder = Number(link?.ordemCaptura || link?.ordem_captura || link?.ordem || index + 1) || 0;
+    return (linkId ? actualId === linkId : order > 0 && actualOrder === order) && (!order || actualOrder === order);
+  }) : null;
+  const urlExpandidaKabum = normalizarTexto(linkTransporteKabum?.urlExpandida || linkTransporteKabum?.url_expandida || "");
+  const transporteKabumValido = Boolean(linkTransporteKabum &&
+    linkTransporteKabum.redirectOk === true &&
+    normalizarTexto(linkTransporteKabum.motivoRedirect || linkTransporteKabum.motivo_redirect || "") === "resolvido" &&
+    normalizarTexto(linkTransporteKabum.marketplace || "").toLowerCase() === "kabum" &&
+    normalizarTexto(linkTransporteKabum.dominioFinal || linkTransporteKabum.dominio_final || "")
+      .toLowerCase().replace(/^www\./, "") === "kabum.com.br" &&
+    extrairSkuUrlOficialKabum(urlExpandidaKabum) === productId &&
+    extrairSkuUrlOficialKabum(linkTransporteKabum.urlProduto || "") === productId);
 
   if (!jobId || !eventoId || !workspaceId ||
       String(prova.jobId || "") !== jobId || String(prova.eventoId || "") !== eventoId ||
@@ -1183,14 +1212,14 @@ function validarProvaTituloTecnico(resultado = {}, produto = {}, job = {}, ancor
       String(metadata.clienteId || "") !== workspaceId ||
       (!linkId && order < 1) || !anchorUrl || !canonicalUrl || !productId || !title || !source ||
       !metadataOriginal || !resultOriginal ||
-      (adapter === "awin_kabum" ? !["awin", "kabum"].includes(marketplaceAncora) : marketplaceAncora !== adapter) ||
+      (adapter === "awin_kabum"
+        ? !["awin", "kabum"].includes(marketplaceAncora) && !transporteKabumValido
+        : marketplaceAncora !== adapter) ||
       !adapterCanonicalUrl || title !== productTitle ||
       !tituloComercialUniversalValido(title, { marketplace: adapter })) {
     return null;
   }
 
-  const linksComerciais = Array.isArray(metadata.linksComerciais) ? metadata.linksComerciais :
-    adapter === "aliexpress" && Array.isArray(metadata.linksClassificados) ? metadata.linksClassificados : [];
   const occurrenceBound = linksComerciais.some((link, index) => {
     const linkUrl = normalizarTexto(link?.urlOriginal || link?.url_original || link?.original || link?.url || "");
     if (linkUrl !== anchorUrl) return false;
@@ -1289,11 +1318,12 @@ function validarProvaTituloTecnico(resultado = {}, produto = {}, job = {}, ancor
         [anchorUrl, metadataOriginal, resultOriginal].map(extrairProductIdAliExpressManual).some(id => id && id !== productId)) return null;
   } else if (adapter === "awin_kabum") {
     const skuAncora = extrairSkuUrlOficialKabum(extrairUrlKabumDeAwin(anchorUrl) || anchorUrl);
-    if (!urlDaFonteTecnica(anchorUrl, "awin", "kabum") || skuAncora !== productId ||
+    const ancoraDiretaValida = urlDaFonteTecnica(anchorUrl, "awin", "kabum") && skuAncora === productId;
+    if ((!ancoraDiretaValida && !transporteKabumValido) ||
         source !== "kabum_html.title" || produto.tituloFonteOficial !== source ||
         produto.produtoIdCanonico !== productId ||
         ![canonicalUrl, adapterCanonicalUrl, metadataOriginal].every(url => extrairSkuUrlOficialKabum(url) === productId) ||
-        [anchorUrl, resultOriginal].map(extrairSkuUrlOficialKabum).some(id => id && id !== productId)) return null;
+        [anchorUrl, resultOriginal, urlExpandidaKabum].map(extrairSkuUrlOficialKabum).some(id => id && id !== productId)) return null;
   } else {
     return null;
   }
@@ -1458,6 +1488,10 @@ function normalizarOfertaImportada(resultado = {}, job = {}, provaAncorada = nul
   const marketplaceTitulo = normalizarTexto(resultado.marketplace || job.marketplace || job.marketplace_detectado);
   const tituloSeguro = tituloComercialUniversalValido(tituloImportado, { marketplace: marketplaceTitulo }) ? tituloImportado : "";
   const provaTituloValidada = provaAncorada || validarProvaTituloTecnico(resultado, produtoMetadata, job, ancoraAtiva);
+  const capturaMlAncorada = validarCapturaFactualMercadoLivre(resultado, resultado.metadata, job);
+  const capturaMlbuComprovada = ancoraAtiva && provaAncorada &&
+    resultado.metadata?.identidadeCanonicaMl?.pageMlbu && tituloFactualMercadoLivreValido(tituloSeguro) &&
+    tituloFactualConfiavelEngine(tituloSeguro, "mercadolivre");
   const tituloMetadata = normalizarTexto(produtoMetadata.titulo || produtoMetadata.nome || produtoMetadata.title || "");
   const identidadeTecnica = comprovarTituloTecnicoDoLink(resultado, produtoMetadata, provaTituloValidada);
   const tituloTecnico = (provaAncorada || identidadeTecnica.confirmada) &&
@@ -1466,7 +1500,7 @@ function normalizarOfertaImportada(resultado = {}, job = {}, provaAncorada = nul
   // Um título proveniente do Radar só serve de descrição do produto se passar
   // pelo filtro factual. Ele nunca substitui um título oficial ancorado.
   const tituloFallback = tituloSeguro && tituloFactualConfiavelEngine(tituloSeguro, marketplaceTitulo) &&
-    (!resultado.metadata?.adapter || identidadeTecnica.fallbackRadar === true)
+    (!resultado.metadata?.adapter || identidadeTecnica.fallbackRadar === true || capturaMlAncorada)
     ? tituloSeguro : "";
   const categoriaOficialMl = ancoraAtiva && marketplaceTitulo.toLowerCase() === "mercadolivre" && provaTituloValidada
     ? categoriaMlOficialComprovada(produtoMetadata, provaTituloValidada.produto?.produtoIdCanonico) : "";
@@ -1493,7 +1527,9 @@ function normalizarOfertaImportada(resultado = {}, job = {}, provaAncorada = nul
     linkExpandido: resultado.linkExpandido || resultado.urlFinal || ""
   }, resultado.metadata || {}, job) : { titulo: "" };
   const tituloCapturado = provaTituloValidada && tituloSeguro &&
-    tituloCapturadoCompativel(tituloSeguro, provaTituloValidada.titulo?.valor) ? tituloSeguro : "";
+    (marketplaceTitulo.toLowerCase() === "mercadolivre"
+      ? capturaMlbuComprovada || (capturaMlAncorada && tituloFactualConfiavelEngine(tituloSeguro, marketplaceTitulo))
+      : tituloCapturadoCompativel(tituloSeguro, provaTituloValidada.titulo?.valor)) ? tituloSeguro : "";
   const tituloFinal = tituloCapturado || tituloTecnico || tituloFallback;
   const tituloFactual = resultado.metadata?.adapter ? { titulo: tituloTecnico || tituloFinal } : tituloFactualAnterior;
   const origemFluxo = resolverOrigemFluxo(resultado, job);
@@ -4153,7 +4189,41 @@ function avaliarGateQualidadeAliExpressImagem(oferta = {}, metadata = {}) {
   };
 }
 
-function avaliarGateIdentidadeMercadoLivre(oferta = {}, metadata = {}, ancoraAtiva = false) {
+function validarCapturaFactualMercadoLivre(oferta = {}, metadata = {}, job = null) {
+  const prova = objetoSeguro(metadata.tituloCapturadoAncorado);
+  const identidade = objetoSeguro(metadata.identidadeCanonicaMl);
+  let selecao;
+  try { selecao = urlCatalogo(prova.urlTecnica); } catch (_) { return false; }
+  const vinculo = Array.isArray(metadata.linksClassificados) && metadata.linksClassificados.some(item =>
+    String(item?.id || item?.ocorrenciaId || "") === String(prova.ocorrenciaId || "") &&
+    normalizarTexto(item?.urlOriginal || item?.url_original || "") === prova.urlOriginal);
+  return prova.versao === 1 && prova.validacao === "captura_factual_vinculada" &&
+    Boolean(prova.jobId && prova.eventoId && prova.workspaceId && prova.ocorrenciaId) &&
+    String(prova.jobId) === String(metadata.jobId || "") &&
+    String(prova.eventoId) === String(metadata.eventoId || "") &&
+    String(prova.workspaceId) === String(metadata.clienteId || "") && vinculo &&
+    (!job || (String(prova.jobId) === String(job.id || "") &&
+      String(prova.eventoId) === String(job.evento_id || "") &&
+      String(prova.workspaceId) === String(job.cliente_id || ""))) &&
+    (metadata.fallbackMercadoLivreRadar === true || metadata.fallbackMercadoLivreClonador === true) &&
+    metadata.aguardaTituloMl === false &&
+    prova.urlOriginal === normalizarTexto(metadata.linkOriginalEngine || "") &&
+    prova.urlTecnica === normalizarTexto(metadata.linkExpandidoEngine || "") &&
+    prova.urlTecnica === normalizarTexto(oferta.linkExpandido || "") &&
+    prova.titulo === normalizarTexto(oferta.titulo || oferta.nome || "") &&
+    !prova.variationId && !metadata.produto?.variationId && !metadata.produto?.variantId &&
+    !identidade.variationId && Boolean(selecao) &&
+    selecao.catalogId === prova.catalogId && selecao.listingId === prova.listingId &&
+    identidade.status === "consistente" && identidade.mlbForteConfirmado === true &&
+    identidade.catalogId === prova.catalogId &&
+    identidade.mlbProduto === prova.listingId && identidade.mlbRevalidado === prova.listingId &&
+    identidade.urlOriginal === prova.urlOriginal &&
+    identidade.urlCanonicaRevalidada === prova.urlTecnica &&
+    tituloFactualConfiavelEngine(prova.titulo, "mercadolivre") &&
+    tituloComercialUniversalValido(prova.titulo, { marketplace: "mercadolivre" });
+}
+
+function avaliarGateIdentidadeMercadoLivre(oferta = {}, metadata = {}, ancoraAtiva = false, job = null) {
   const marketplace = normalizarMarketplaceMemoria(oferta.marketplace || metadata.marketplace || "");
   if (marketplace !== "mercadolivre") {
     return { retida: false, motivo: "" };
@@ -4189,15 +4259,18 @@ function avaliarGateIdentidadeMercadoLivre(oferta = {}, metadata = {}, ancoraAti
     provaTitulo.marketplace === "mercadolivre" &&
     normalizarTexto(provaTitulo.produto?.produtoIdCanonico || "").toUpperCase() ===
       normalizarTexto(identidade.mlbRevalidado || identidade.mlbProduto || "").toUpperCase() &&
-    tituloCapturadoCompativel(oferta.titulo || oferta.nome || "", provaTitulo.titulo?.valor || "");
+    tituloFactualConfiavelEngine(provaTitulo.titulo?.valor || "", "mercadolivre");
+  const tituloFactualAncorado = ancoraAtiva && validarCapturaFactualMercadoLivre(oferta, metadata, job);
   let catalogo = false;
-  if (ancoraAtiva) try { catalogo = Boolean(urlCatalogo(identidade.urlCanonicaRevalidada)); } catch (_) { catalogo = true; }
-  if (catalogo && !provaOficialCorrespondente) {
+  if (ancoraAtiva) try {
+    catalogo = Boolean(urlCatalogo(identidade.urlCanonicaRevalidada) || urlSelecaoMlbu(oferta.linkExpandido));
+  } catch (_) { catalogo = true; }
+  if (catalogo && !provaOficialCorrespondente && !tituloFactualAncorado) {
     return { retida: true, status: "retida_v2", motivo: "mercadolivre_titulo_tecnico_nao_confirmado", reprocessavel: true };
   }
   if (identidade.status === "consistente" && identidade.mlbForteConfirmado === true &&
       metadata.fallbackMercadoLivreRadar !== true && metadata.fallbackMercadoLivreClonador !== true &&
-      !provaOficialCorrespondente) {
+      !provaOficialCorrespondente && !tituloFactualAncorado) {
     return {
       retida: true,
       status: "retida_v2",
@@ -4667,22 +4740,26 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
 async function enriquecerTituloMlPorOcorrencia({ job, evento, link, oferta, deps, agoraMs = Date.now() }) {
   const metadata = oferta.metadata || {};
   if (metadata.adapter !== "mercadolivre" || !ancoraMlAtiva({ clienteId: job.cliente_id, deps }) ||
-      typeof deps.garantirIdentidadeMercadoLivreLocalWorker !== "function" ||
       validarProvaTituloTecnico(oferta, metadata.produto, job, true)) return null;
   const ancora = vincularOcorrenciaProduto({ job, evento, link, marketplace: "mercadolivre", urlOriginal: metadata.linkOriginalEngine });
   if (!ancora || !Array.isArray(deps.linksEventoPersistidos) ||
       deps.linksEventoPersistidos.filter(item => item.url_original === ancora.urlOriginal).length !== 1 ||
       !deps.linksEventoPersistidos.some(item => item === link && String(item.evento_id) === ancora.eventoId) ||
       !verificarCapturaIngressReal(evento.capturado_em).ok) return null;
-  const provaResolver = metadata.resolucaoProduto?.provaTransporteShowProduct;
+  const resolucao = objetoSeguro(metadata.resolucaoProduto || metadata.resolucaoRadar);
+  const provaResolver = resolucao.provaTransporteShowProduct;
   const ancoraResolver = provaResolver?.imagemCandidataAnchor;
   const provaResolverDaOcorrencia = provaResolver?.ok === true &&
     provaResolver.actionId === "show_product" && provaResolver.ctaPrincipalUnico === true &&
     provaResolver.linkResolvidoTecnico === oferta.linkExpandido &&
     String(ancoraResolver?.eventoId || "") === ancora.eventoId &&
     ancoraResolver?.linkOriginalRadar === ancora.urlOriginal;
-  let selecaoResolver = null;
-  if (provaResolverDaOcorrencia) try { selecaoResolver = urlCatalogo(provaResolver.linkResolvidoTecnico); } catch (_) {}
+  const diretaMlbu = urlSelecaoMlbu(ancora.urlOriginal);
+  const mlbuDaCaptura = diretaMlbu?.url === oferta.linkExpandido ? diretaMlbu : null;
+  let selecaoResolver = mlbuDaCaptura;
+  if (!selecaoResolver && provaResolverDaOcorrencia) try {
+    selecaoResolver = urlCatalogo(provaResolver.linkResolvidoTecnico) || urlSelecaoMlbu(provaResolver.linkResolvidoTecnico);
+  } catch (_) {}
   const idsProduto = [metadata.produto?.produtoId, metadata.produto?.produtoIdDetectado, metadata.produto?.itemId]
     .map(id => normalizarTexto(id).toUpperCase()).filter(id => /^MLB\d+$/.test(id));
   if (selecaoResolver && idsProduto.some(id => ![selecaoResolver.catalogId, selecaoResolver.listingId].includes(id))) return null;
@@ -4698,7 +4775,7 @@ async function enriquecerTituloMlPorOcorrencia({ job, evento, link, oferta, deps
     (provaResolverDaOcorrencia ? provaResolver : null);
   let selecao, direta;
   try {
-    selecao = urlCatalogo(identidade.urlCanonicaRevalidada);
+    selecao = urlCatalogo(identidade.urlCanonicaRevalidada) || urlSelecaoMlbu(identidade.urlCanonicaRevalidada);
     direta = urlCatalogo(ancora.urlOriginal);
   } catch (_) { return null; }
   const redirect = metadata.resolucaoRadar || {};
@@ -4708,25 +4785,73 @@ async function enriquecerTituloMlPorOcorrencia({ job, evento, link, oferta, deps
     redirect.tipoLinkRadar === "shortlink_meli" && !redirect.metodoResolucaoMeli &&
     Number(redirect.statusHttp) === 200 &&
     metadata.transporteTecnicoMl?.linkOriginalRadar === ancora.urlOriginal;
-  if (!selecao || !(direta ? mesmaSelecaoCatalogo(direta, selecao) :
+  const selecaoDiretaMlbu = mlbuDaCaptura && selecao?.url === mlbuDaCaptura.url;
+  if (!selecao || !(selecaoDiretaMlbu || (direta ? mesmaSelecaoCatalogo(direta, selecao) :
       (transporte?.ok === true && identidade.transporteShowProductConfirmado === true &&
         transporte.linkResolvidoTecnico === selecao.url &&
         (metadata.transporteTecnicoMl?.linkOriginalRadar === ancora.urlOriginal ||
-          provaResolverDaOcorrencia)) || redirectConfirmado)) return null;
+           provaResolverDaOcorrencia)) || redirectConfirmado))) return null;
+  // O CTA seleciona o anúncio em /up. Só a resposta da página comprova o vínculo MLBU/MLB.
+  if (selecao.pageMlbu) {
+    const idsInformados = [oferta.produtoId, oferta.produtoIdDetectado, metadata.produto?.produtoId,
+      metadata.produto?.produtoIdDetectado, metadata.produto?.itemId];
+    const idsCompativeis = idsInformados.every(id => !id ||
+      [selecao.pageMlbu, selecao.listingId].includes(normalizarTexto(id).toUpperCase().replace(/^MLB-/, "MLB")));
+    const ctaConfere = provaResolverDaOcorrencia && selecao.url === provaResolver.linkResolvidoTecnico &&
+      resolucao.ok === true && Number(resolucao.statusHttp) === 200 &&
+      resolucao.metodoResolucaoMeli === "social_action_links_show_product" &&
+      resolucao.urlCapturada === ancora.urlOriginal && resolucao.linkOriginalRadar === ancora.urlOriginal;
+    if ((!selecaoDiretaMlbu && !ctaConfere) || oferta.linkOriginal !== ancora.urlOriginal || !idsCompativeis ||
+        (metadata.clienteId && String(metadata.clienteId) !== ancora.workspaceId) ||
+        (metadata.jobId && String(metadata.jobId) !== ancora.jobId) ||
+        (metadata.eventoId && String(metadata.eventoId) !== ancora.eventoId) ||
+        (provaResolver?.mlbItem && provaResolver.mlbItem !== selecao.listingId) ||
+        identidade.catalogId || (identidade.pageMlbu && identidade.pageMlbu !== selecao.pageMlbu) ||
+        (metadata.produto?.pageMlbu && metadata.produto.pageMlbu !== selecao.pageMlbu)) return null;
+  }
   if ([identidade.mlbProduto, identidade.mlbRevalidado].some(id =>
       id && ![selecao.catalogId, selecao.listingId].includes(id))) return null;
-  const variationId = normalizarTexto(metadata.produto?.variationId || metadata.produto?.variantId || "");
+  const variationId = normalizarTexto(metadata.produto?.variationId || metadata.produto?.variantId || selecao.variationId || "");
   if (variationId && !/^\d{1,30}$/.test(variationId)) return null;
+  if (selecao.variationId && selecao.variationId !== variationId) return null;
   const frescor = avaliarFrescorPreImporter({ ...job, evento_capturado_em: evento.capturado_em }, { agoraMs });
   const deadline = Date.parse(frescor.expiraEmComercial);
   if (frescor.expirada || !Number.isFinite(deadline) || deadline <= agoraMs) return null;
+  const tituloCapturado = normalizarTexto(oferta.titulo || oferta.nome || "");
+  if (!selecao.pageMlbu && metadata.aguardaTituloMl === false &&
+      (metadata.fallbackMercadoLivreRadar === true || metadata.fallbackMercadoLivreClonador === true) &&
+      !variationId && tituloFactualConfiavelEngine(tituloCapturado, "mercadolivre") &&
+      tituloComercialUniversalValido(tituloCapturado, { marketplace: "mercadolivre" })) {
+    const provaCaptura = {
+      versao: 1, validacao: "captura_factual_vinculada", ...ancora,
+      catalogId: selecao.catalogId, listingId: selecao.listingId,
+      urlTecnica: selecao.url, variationId: "", titulo: tituloCapturado
+    };
+    const identidadeAncorada = {
+      ...identidade, status: "consistente", mlbForteConfirmado: true,
+      catalogId: selecao.catalogId, mlbProduto: selecao.listingId,
+      mlbRevalidado: selecao.listingId, urlOriginal: ancora.urlOriginal,
+      urlCanonicaRevalidada: selecao.url
+    };
+    return { capturadoAncorado: true, oferta: {
+      ...oferta, produtoId: selecao.listingId, produtoIdDetectado: selecao.listingId,
+      metadata: {
+        ...metadata, clienteId: ancora.workspaceId, aguardaTituloMl: false,
+        tituloCapturadoAncorado: provaCaptura, identidadeCanonicaMl: identidadeAncorada,
+        produto: { ...objetoSeguro(metadata.produto), produtoId: selecao.listingId,
+          produtoIdDetectado: selecao.listingId }
+      }
+    } };
+  }
+  if (typeof deps.garantirIdentidadeMercadoLivreLocalWorker !== "function") return null;
   const epoch = epochIngressReal();
   const chave = createHash("sha256").update(JSON.stringify([ancora, selecao.url, variationId, deadline, epoch])).digest("hex");
   const anterior = job.metadata?.localWorkerImageRetry?.vinculo;
   if (anterior && (anterior.chave !== chave || anterior.epoch !== epoch)) return null;
+  const pagina = selecao.pageMlbu ? { pageMlbu: selecao.pageMlbu } : { catalogId: selecao.catalogId };
   const pendente = (taskId = anterior?.taskId) => ({ pendente: true,
     vinculo: { ...ancora, chave, epoch, ...(taskId ? { taskId: String(taskId) } : {}), deadline,
-      listingId: selecao.listingId, catalogId: selecao.catalogId, urlTecnica: selecao.url, variationId,
+      ...pagina, listingId: selecao.listingId, urlTecnica: selecao.url, variationId,
       technicalSlug: createHash("sha256").update(JSON.stringify([selecao.url, variationId, epoch || ""])).digest("hex") + ":" + variationId } });
   let retorno;
   try {
@@ -4759,12 +4884,16 @@ async function enriquecerTituloMlPorOcorrencia({ job, evento, link, oferta, deps
     titulo, fonteTitulo: resultado.origemTitulo });
   if (!prova) return null;
   const provaValidada = { ...prova, validacao: "confirmada_pelo_importador" };
+  const tituloOferta = selecao.pageMlbu &&
+    (metadata.fallbackMercadoLivreRadar === true || metadata.fallbackMercadoLivreClonador === true) &&
+    tituloFactualMercadoLivreValido(tituloCapturado) &&
+    tituloFactualConfiavelEngine(tituloCapturado, "mercadolivre") ? tituloCapturado : titulo;
   return { provaValidada, oferta: {
-    ...oferta, titulo, nome: titulo, categoria: "", categoriaProduto: "",
+    ...oferta, titulo: tituloOferta, nome: tituloOferta, categoria: "", categoriaProduto: "",
     produtoId: selecao.listingId, produtoIdDetectado: selecao.listingId,
     metadata: { ...metadata, provaTituloTecnico: prova, provaTituloTecnicoValidada: provaValidada,
       identidadeCanonicaMl: { ...identidade, status: "consistente", mlbProduto: selecao.listingId, mlbRevalidado: selecao.listingId,
-        mlbForteConfirmado: true, catalogId: selecao.catalogId, variationId: resultado.variationId },
+        mlbForteConfirmado: true, ...pagina, variationId: resultado.variationId },
       produto: { ...metadata.produto, produtoId: selecao.listingId, produtoIdDetectado: selecao.listingId,
         titulo, tituloFactual: titulo, tituloFonteOficial: resultado.origemTitulo } }
   } };
@@ -4776,7 +4905,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   if (enriquecimento?.pendente) return { ok: false, retriavel: true,
     motivo: "mercadolivre_titulo_tecnico_nao_confirmado", motivoDetalhe: "aguardando_enriquecimento_local",
     localWorker: { capability: "ml_identity_v1", vinculo: enriquecimento.vinculo } };
-  if (ofertaEntrada.metadata?.aguardaTituloMl && !enriquecimento?.provaValidada) {
+  if (ofertaEntrada.metadata?.aguardaTituloMl && !enriquecimento?.provaValidada && !enriquecimento?.capturadoAncorado) {
     return { ok: false, motivo: "mercadolivre_titulo_tecnico_nao_confirmado" };
   }
   if (enriquecimento?.oferta) ofertaEntrada = enriquecimento.oferta;
@@ -5426,8 +5555,13 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       const tituloMlWork = aplicarTituloMlWork({ oferta, metadataFinal, promocao: mlWorkPromocaoAtiva });
       oferta = tituloMlWork.oferta;
       const tituloCapturado = normalizarTexto(radarMirrorComparado?.produto?.tituloCapturado || "");
+      const capturaFactualAncorada = validarCapturaFactualMercadoLivre({
+        ...oferta,
+        titulo: tituloCapturado,
+        nome: tituloCapturado
+      }, metadataFinal, job);
       if (tituloComercialUniversalValido(tituloCapturado, { marketplace: oferta.marketplace }) &&
-          tituloCapturadoCompativel(tituloCapturado, provaMlWork.validada.titulo.valor)) {
+          tituloFactualConfiavelEngine(tituloCapturado, "mercadolivre") && capturaFactualAncorada) {
         oferta = { ...oferta, titulo: tituloCapturado, nome: tituloCapturado };
       }
       metadataFinal = {
@@ -5487,7 +5621,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   }
   const inteligenciaV2 = objetoSeguro(metadataFinal.inteligenciaUniversalV2);
   const gateQualidadeAliExpressImagem = avaliarGateQualidadeAliExpressImagem(oferta, metadataFinal);
-  const gateIdentidadeMercadoLivre = avaliarGateIdentidadeMercadoLivre(oferta, metadataFinal, ancoraAtiva);
+  const gateIdentidadeMercadoLivre = avaliarGateIdentidadeMercadoLivre(oferta, metadataFinal, ancoraAtiva, job);
   if (gateQualidadeAliExpressImagem.retida) {
     metadataFinal = {
       ...metadataFinal,
@@ -6319,6 +6453,7 @@ module.exports = {
   enriquecerTituloMlPorOcorrencia,
   avaliarGateQualidadeAliExpressImagem,
   avaliarGateIdentidadeMercadoLivre,
+  validarCapturaFactualMercadoLivre,
   resolverCategoriaEngine,
   reclassificarCategoriaFinalEngine,
   resolverTituloFactualEngine,

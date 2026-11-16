@@ -18,7 +18,7 @@ const { ancoraMlAtiva } = require("../ml-work-enrichment-shadow");
 const { urlCatalogoTecnicoMercadoLivre, urlRedirectDiretoCatalogoMl } = require("../../../../marketplaces/mercadolivre/utils");
 const { resolverPrecoSemantico } = require("../../../radar/preco-semantico");
 const { tituloComercialUniversalValido } = require("../../../radar/comercial-precedencia");
-const { urlCatalogo } = require("../../../../optimus-capture/local-worker/mercadolivre-identity");
+const { urlCatalogo, urlSelecaoMlbu } = require("../../../../optimus-capture/local-worker/mercadolivre-identity");
 
 function resumoTemplateInputAuditoria(templateInput = {}) {
   return {
@@ -377,7 +377,10 @@ function tituloTecnicoBloqueadoMercadoLivre(titulo = "") {
 
 function transporteSelecionadoMercadoLivre({ urlOriginalEngine = "", urlImportador = "", resolucaoProduto = {} } = {}) {
   let selecao, direta;
-  try { selecao = urlCatalogo(urlImportador); direta = urlCatalogo(urlOriginalEngine); }
+  try {
+    selecao = urlCatalogo(urlImportador) || urlSelecaoMlbu(urlImportador);
+    direta = urlCatalogo(urlOriginalEngine) || urlSelecaoMlbu(urlOriginalEngine);
+  }
   catch { return null; }
   if (!selecao) return null;
   if (direta && direta.url === selecao.url) return { selecao, tipo: "url_direta" };
@@ -386,6 +389,7 @@ function transporteSelecionadoMercadoLivre({ urlOriginalEngine = "", urlImportad
   if (showProduct?.linkResolvidoTecnico === selecao.url && radar.linkOriginalRadar === urlOriginalEngine) {
     return { selecao, tipo: "show_product" };
   }
+  if (selecao.pageMlbu) return null;
   if (isMeliLa(urlOriginalEngine) && radar.ok === true &&
       radar.urlCapturada === urlOriginalEngine && radar.linkOriginalRadar === urlOriginalEngine &&
       radar.urlResolvida === selecao.url && radar.tipoLinkRadar === "shortlink_meli" &&
@@ -395,12 +399,13 @@ function transporteSelecionadoMercadoLivre({ urlOriginalEngine = "", urlImportad
   return null;
 }
 
-function metadataTransporteTituloPendente(transporte, urlOriginalEngine, resolucaoProduto) {
+function metadataTransporteTituloPendente(transporte, urlOriginalEngine, resolucaoProduto, aguardaTitulo = true) {
   if (!transporte) return {};
-  return { aguardaTituloMl: true,
+  return { aguardaTituloMl: aguardaTitulo,
     identidadeCanonicaMl: { status: "transporte_confirmado", urlOriginal: urlOriginalEngine,
       urlCanonicaRevalidada: transporte.selecao.url,
-      mlbProduto: transporte.selecao.catalogId, mlbRevalidado: transporte.selecao.catalogId,
+      mlbProduto: transporte.selecao.catalogId || transporte.selecao.listingId,
+      mlbRevalidado: transporte.selecao.catalogId || transporte.selecao.listingId,
       transporteShowProductConfirmado: transporte.tipo === "show_product",
       transporteRedirectConfirmado: transporte.tipo === "redirect_direto" },
     transporteTecnicoMl: { linkOriginalRadar: urlOriginalEngine },
@@ -965,8 +970,9 @@ async function montarFallbackClonadorMercadoLivre({
   const beneficioTexto = extrairBeneficioClonadorMercadoLivre(evento, job);
   const temTitulo = Boolean(titulo && !tituloTecnicoBloqueadoMercadoLivre(titulo) &&
     tituloComercialUniversalValido(titulo, { marketplace: "mercadolivre" }));
-  const transportePendente = !temTitulo && ancoraMlAtiva({ clienteId, deps })
+  const transporteSelecionado = ancoraMlAtiva({ clienteId, deps })
     ? transporteSelecionadoMercadoLivre({ urlOriginalEngine, urlImportador, resolucaoProduto }) : null;
+  const transportePendente = !temTitulo ? transporteSelecionado : null;
   const temPreco = Number.isFinite(preco) && preco > 0;
   const temUrl = Boolean(urlImportador || linkExpandidoEngine || urlOriginalEngine);
   const urlProduto = urlImportador || linkExpandidoEngine || urlOriginalEngine;
@@ -1114,7 +1120,7 @@ async function montarFallbackClonadorMercadoLivre({
       linkExpandidoEngine: linkExpandidoEngine || urlImportador,
       expandiuMeliLa,
       resolucaoProduto: resolucaoProduto.resolucaoRadar || null,
-      ...metadataTransporteTituloPendente(transportePendente, urlOriginalEngine, resolucaoProduto),
+      ...metadataTransporteTituloPendente(transporteSelecionado, urlOriginalEngine, resolucaoProduto, !temTitulo),
       linksClassificados: resumoLinksClassificados(linksConvertidosMercadoLivre, evento, "mercadolivre"),
       linksComerciais: linksConvertidosMercadoLivre,
       comercialCapturado: contrato,
@@ -1163,8 +1169,9 @@ async function montarFallbackRadarMercadoLivre({
   const beneficioTexto = extrairBeneficioRadarMercadoLivre(evento);
   const temTitulo = Boolean(titulo && !tituloTecnicoBloqueadoMercadoLivre(titulo) &&
     tituloComercialUniversalValido(titulo, { marketplace: "mercadolivre" }));
-  const transportePendente = !temTitulo && ancoraMlAtiva({ clienteId, deps })
+  const transporteSelecionado = ancoraMlAtiva({ clienteId, deps })
     ? transporteSelecionadoMercadoLivre({ urlOriginalEngine, urlImportador, resolucaoProduto }) : null;
+  const transportePendente = !temTitulo ? transporteSelecionado : null;
   const temPreco = Number.isFinite(preco) && preco > 0;
   const temUrl = Boolean(urlImportador || linkExpandidoEngine || urlOriginalEngine);
   const urlProduto = urlImportador || linkExpandidoEngine || urlOriginalEngine;
@@ -1302,7 +1309,7 @@ async function montarFallbackRadarMercadoLivre({
       linkExpandidoEngine: linkExpandidoEngine || urlImportador,
       expandiuMeliLa,
       resolucaoRadar: resolucaoProduto.resolucaoRadar || null,
-      ...metadataTransporteTituloPendente(transportePendente, urlOriginalEngine, resolucaoProduto),
+      ...metadataTransporteTituloPendente(transporteSelecionado, urlOriginalEngine, resolucaoProduto, !temTitulo),
       linksClassificados: resumoLinksClassificados(linksConvertidosMercadoLivre, evento, "mercadolivre"),
       linksComerciais: linksConvertidosMercadoLivre,
       radarMirror: objetoSeguro(objetoSeguro(evento.metadata).radarMirror),

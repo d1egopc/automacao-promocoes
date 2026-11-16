@@ -547,6 +547,20 @@ async function testarRedirectSelecionadoAguardaProvaOficial() {
     assert.equal(resultado.metadata.identidadeCanonicaMl.status, "transporte_confirmado");
     assert.equal(resultado.metadata.identidadeCanonicaMl.mlbProduto, "MLB22147432");
     assert.equal(resultado.metadata.identidadeCanonicaMl.urlCanonicaRevalidada, selecionada);
+    const mlbu = "https://www.mercadolivre.com.br/tapete-pesagem/up/MLBU3053774837?pdp_filters=item_id%3AMLB3996712963";
+    const social = "https://www.mercadolivre.com.br/social/fixture";
+    contexto.deps.resolverLinkOriginalRadar = async () => ({ ok: true, urlCapturada: original,
+      linkOriginalRadar: original, linkOriginalLimpo: mlbu, linkResolvido: mlbu, urlResolvida: social,
+      tipoLinkRadar: "shortlink_meli", statusHttp: 200, metodoResolucaoMeli: "social_action_links_show_product",
+      provaTransporteShowProduct: { ok: true, actionId: "show_product", ctaPrincipalUnico: true,
+        linkResolvidoTecnico: mlbu, imagemCandidataAnchor: { eventoId: evento.id, linkOriginalRadar: original } }
+    });
+    const esperaMlbu = await importarMercadoLivreEngine({ job: job(), evento, links: [link], deps: contexto.deps });
+    assert.equal(esperaMlbu.ok, true);
+    assert.equal(esperaMlbu.linkExpandido, mlbu);
+    assert.equal(esperaMlbu.titulo, "");
+    assert.equal(esperaMlbu.metadata.aguardaTituloMl, true);
+    assert.equal(esperaMlbu.metadata.identidadeCanonicaMl.mlbProduto, "MLB3996712963");
     contexto.deps.resolverLinkOriginalRadar = async () => ({ ok: true, urlCapturada: original,
       linkOriginalRadar: original, linkOriginalLimpo: catalogo, linkResolvido: catalogo,
       urlResolvida: selecionada, tipoLinkRadar: "shortlink_meli", statusHttp: 302 });

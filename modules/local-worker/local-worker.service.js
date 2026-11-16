@@ -14,6 +14,7 @@ const {
   ML_IDENTITY_CONTRACT_VERSION,
   ML_IDENTITY_RESULT_TTL_MS,
   sanitizarUrlMercadoLivre,
+  urlSelecaoMlbu,
   sanitizarUrlMlstatic,
   validarResultadoMlIdentity,
   criarReciboImagemMlIdentity
@@ -255,7 +256,7 @@ function criarLocalWorkerService(opcoes = {}) {
     }
   }
 
-  async function validarImagemMercadoLivreHttp(url = "") {
+  async function validarImagemMercadoLivreHttp(url = "", { identidade = false } = {}) {
     if (typeof fetchFn !== "function") throw erro("ml_imagem_fetch_indisponivel");
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), imageTimeoutMs);
@@ -264,8 +265,22 @@ function criarLocalWorkerService(opcoes = {}) {
       response = await fetchFn(url, { redirect: "follow", signal: controller.signal });
       const finalUrl = new URL(response.url || url);
       const contentType = texto(response.headers?.get?.("content-type") || "").toLowerCase().split(";", 1)[0];
-      if (!response.ok || !urlMlstaticValida(finalUrl.toString()) || !contentType.startsWith("image/")) throw erro("ml_imagem_http_nao_confirmada");
+      if (!response.ok || !urlMlstaticValida(finalUrl.toString()) || !contentType.startsWith("image/")) {
+        const rejeicao = erro("ml_imagem_http_nao_confirmada");
+        rejeicao.etapa = "imagem_oficial";
+        rejeicao.campo = "imagemOficial";
+        throw rejeicao;
+      }
       return { urlFinal: finalUrl.toString(), statusHttp: response.status, contentType };
+    } catch (falha) {
+      if (falha?.codigo) throw falha;
+      const codigo = identidade
+        ? (falha?.name === "AbortError" ? "ml_identity_imagem_fetch_timeout" : "ml_identity_imagem_fetch_sem_resposta")
+        : (falha?.name === "AbortError" ? "ml_imagem_fetch_timeout" : "ml_imagem_fetch_sem_resposta");
+      const rejeicao = erro(codigo, 503);
+      rejeicao.etapa = "imagem_oficial";
+      rejeicao.campo = "imagemOficial";
+      throw rejeicao;
     } finally {
       clearTimeout(timer);
       try { await response?.body?.cancel?.(); } catch (_) {}
@@ -340,7 +355,7 @@ function criarLocalWorkerService(opcoes = {}) {
         provaTecnica
       });
       if (validado.imagemOficial) {
-        const http = await validarImagemMercadoLivreHttp(validado.imagemOficial);
+        const http = await validarImagemMercadoLivreHttp(validado.imagemOficial, { identidade: true });
         const imagemFinalSanitizada = sanitizarUrlMlstatic(http.urlFinal);
         if (!imagemFinalSanitizada) throw erro("ml_identity_imagem_http_invalida");
         validado.imagemOficial = imagemFinalSanitizada;
@@ -351,7 +366,7 @@ function criarLocalWorkerService(opcoes = {}) {
         const recibo = criarReciboImagemMlIdentity(validado, validado.provaTecnica, { agoraMs: agora().getTime() });
         if (recibo) validado.provaTecnica.reciboImagem = recibo;
       }
-      if (validado.provaTecnica.catalogId) {
+      if (validado.provaTecnica.catalogId || (validado.associacaoPagina && urlSelecaoMlbu(task.sourceUrl))) {
         return repo.completarTecnica({ taskId, workerId: worker.workerId, leaseToken, metadata: validado, exigirTtl: true });
       }
       return repo.completarIdentidade({
@@ -507,7 +522,7 @@ function criarLocalWorkerService(opcoes = {}) {
 
   async function garantirIdentidadeMercadoLivre({ productId, sourceUrl = "", vinculo, taskId } = {}) {
     const pid = texto(productId).toUpperCase();
-    let catalogo;
+    let selecao;
     // Only the occurrence-bound path is new. Unbound calls retain legacy URL handling.
     if (vinculo) {
       const { urlCatalogo } = require("../../optimus-capture/local-worker/mercadolivre-identity");
@@ -515,29 +530,30 @@ function criarLocalWorkerService(opcoes = {}) {
       if (!ancoraMlAtiva({ clienteId: vinculo.workspaceId, deps: opcoes })) {
         return { ok: false, motivo: "task_ml_identity_workspace_fora_canario" };
       }
-      try { catalogo = urlCatalogo(sourceUrl); } catch (_) { /* reject below */ }
-      if (!catalogo) return { ok: false, motivo: "task_ml_identity_invalida" };
+      try { selecao = urlCatalogo(sourceUrl) || urlSelecaoMlbu(sourceUrl); } catch (_) { /* reject below */ }
+      if (!selecao) return { ok: false, motivo: "task_ml_identity_invalida" };
     }
-    if (catalogo) {
+    if (selecao) {
       const agoraMs = agora().getTime();
       const ttlMs = Math.min(15 * 60_000, Number(vinculo?.deadline) - agoraMs);
       const chave = texto(vinculo?.chave);
-      const variante = texto(vinculo?.variationId);
-      if (catalogo.listingId !== pid || !/^[a-f0-9]{64}$/.test(chave) ||
+      const variante = texto(vinculo?.variationId) || selecao.variationId || "";
+      if (selecao.listingId !== pid || !/^[a-f0-9]{64}$/.test(chave) ||
+          (selecao.variationId && selecao.variationId !== variante) ||
           (variante && !/^\d{1,30}$/.test(variante)) || !Number.isFinite(ttlMs) || ttlMs < 1000) {
         return { ok: false, motivo: "task_ml_identity_invalida" };
       }
       const epoch = vinculo.epoch || "";
-      const chaveTecnica = createHash("sha256").update(JSON.stringify([catalogo.url, variante, epoch])).digest("hex");
+      const chaveTecnica = createHash("sha256").update(JSON.stringify([selecao.url, variante, epoch])).digest("hex");
       const technicalSlug = chaveTecnica + ":" + variante;
       if (taskId) {
         const task = await repo.obterTask(taskId);
-        return task?.technicalSlug === technicalSlug && task?.sourceUrl === catalogo.url &&
+        return task?.technicalSlug === technicalSlug && task?.sourceUrl === selecao.url &&
           task?.capability === ML_IDENTITY_CAPABILITY && task?.productId === pid
           ? { ok: true, criada: false, task } : { ok: false, motivo: "task_ml_identity_vinculo_divergente" };
       }
       return repo.garantirTask({ type: ML_IDENTITY_TASK_TYPE, marketplace: "mercadolivre", productId: pid,
-        sourceUrl: catalogo.url, technicalSlug, capability: ML_IDENTITY_CAPABILITY,
+        sourceUrl: selecao.url, technicalSlug, capability: ML_IDENTITY_CAPABILITY,
         idempotencyKey: "mercadolivre:ocorrencia:" + chaveTecnica, ttlMs, deadline: Number(vinculo.deadline), vincularIdempotencia: true });
     }
     const sourceUrlSanitizada = sanitizarUrlMercadoLivre(sourceUrl);
