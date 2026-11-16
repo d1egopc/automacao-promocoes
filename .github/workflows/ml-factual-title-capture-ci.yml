@@ -1,0 +1,187 @@
+name: ML factual title capture CI only
+
+on:
+  push:
+    branches:
+      - validation/guardian-v1-ml-factual-title-capture-p0-20261116
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  BASE_SHA: 3fd2dc35b9c3987dd0a5ff2c04464ba929f0e95c
+
+jobs:
+  validate:
+    name: Node 24 + Guardian + factual title contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install declared dependencies
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: ssh://git@github.com/
+        run: npm ci
+      - name: Exact scope, syntax and factual ML contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git merge-base --is-ancestor "$BASE_SHA" HEAD
+          actual="$(git diff --name-only "$BASE_SHA" HEAD | sort)"
+          expected=$'.github/workflows/ml-factual-title-capture-ci.yml\nmodules/radar/extrator-local.js\ntests/ml-backend-first-title-capture.test.cjs'
+          test "$actual" = "$expected"
+          node --version
+          node --check modules/radar/extrator-local.js
+          node tests/ml-backend-first-title-capture.test.cjs
+          node tests/mercadolivre-identidade-canonica.test.js
+          node tests/mercadolivre-imagem-oficial-fallback.test.js
+          node tests/ml-anchored-polycard-image-queue.test.cjs
+          node tests/mercadolivre-identidade-promocional-focal.test.cjs
+          node tests/radar-commercial-fidelity.test.cjs
+      - name: Guardian exact candidate validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/guardian-v1.cjs validate \
+            --base "$BASE_SHA" \
+            --source "$GITHUB_SHA" \
+            --report "$RUNNER_TEMP/guardian-v1-report.json"
+          cat "$RUNNER_TEMP/guardian-v1-report.json"
+
+  postgres17:
+    name: PostgreSQL 17 queue and persistence gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: optimus_universal_fixture
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 127.0.0.1:55433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d optimus_universal_fixture"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install declared dependencies
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: ssh://git@github.com/
+        run: npm ci
+      - name: PostgreSQL 17 queue, dedup, fanout and workspace isolation
+        shell: bash
+        env:
+          UF_TEST_PG_PORT: '55433'
+          UF_TEST_PG_EXPECTED_SERVER_PORT: '5432'
+          UF_TEST_PG_EXPECTED_DATA_DIR: /var/lib/postgresql/data
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node tests/universal-flow-queue-epoch.postgres.js
+          node tests/universal-flow-fanout-owner.postgres.js
+          node tests/universal-flow-fairness-real-transitions.postgres.js
+          node tests/ofertas-v2-dedup-ancora-historica.test.cjs
+
+  docker-overlay:
+    name: Linux Docker overlay and official image smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Build base and candidate overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          base="$BASE_SHA"
+          base_tag="local/optimus-deploy-base:ml-title-$GITHUB_RUN_ID"
+          candidate="local/optimus-ml-title-overlay:ci-$GITHUB_RUN_ID"
+          fixture="$(mktemp -d)"
+          mkdir -p "$fixture/base"
+          git cat-file -e "${base}^{commit}"
+          git merge-base --is-ancestor "$base" HEAD
+          git archive "$base" | tar -x -C "$fixture/base"
+          test -f "$fixture/base/Dockerfile"
+          sed \
+            -e 's|apt-get install -y --no-install-recommends fontconfig fonts-dejavu-core|apt-get install -y --no-install-recommends fontconfig fonts-dejavu-core git ca-certificates|' \
+            -e 's|^RUN npm ci --omit=dev$|RUN GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf GIT_CONFIG_VALUE_0=ssh://git@github.com/ npm ci --omit=dev|' \
+            "$fixture/base/Dockerfile" > "$fixture/base.Dockerfile"
+          docker build -f "$fixture/base.Dockerfile" -t "$base_tag" "$fixture/base"
+          node scripts/guardian-v1.cjs prepare --base "$base" --source "$GITHUB_SHA" --release-mode overlay > "$fixture/plan.json"
+          node - "$fixture/plan.json" <<'NODE'
+          const assert = require("node:assert/strict");
+          const fs = require("node:fs");
+          const plan = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+          assert.equal(plan.validation, "PASS");
+          assert.deepEqual(plan.runtimeFiles, ["modules/radar/extrator-local.js"]);
+          assert.deepEqual(plan.blocked, []);
+          console.log("OVERLAY_RUNTIME_EXACT=" + plan.runtimeFiles.join(","));
+          NODE
+          node scripts/guardian-v1.cjs build-dockerfile --base "$base" --source "$GITHUB_SHA" --base-tag "$base_tag" > "$fixture/overlay.Dockerfile"
+          grep -Fx 'COPY --chown=node:node modules/radar/extrator-local.js /app/modules/radar/extrator-local.js' "$fixture/overlay.Dockerfile"
+          if grep -Fq '/app/optimus-capture/' "$fixture/overlay.Dockerfile"; then
+            echo 'overlay must not replace Chrome extension files' >&2
+            exit 1
+          fi
+          docker build --pull=false --network=none -f "$fixture/overlay.Dockerfile" -t "$candidate" .
+          expected="$(git show "$GITHUB_SHA:modules/radar/extrator-local.js" | sha256sum | cut -d' ' -f1)"
+          actual="$(docker run --rm --network=none "$candidate" sha256sum /app/modules/radar/extrator-local.js | cut -d' ' -f1)"
+          test "$expected" = "$actual"
+          echo "RUNTIME_HASH_OK modules/radar/extrator-local.js $actual"
+          docker run --rm --network=none "$base_tag" sh -c 'cd /app && find optimus-capture -type f -print | LC_ALL=C sort | xargs -r sha256sum' > "$fixture/extension-base.sha"
+          docker run --rm --network=none "$candidate" sh -c 'cd /app && find optimus-capture -type f -print | LC_ALL=C sort | xargs -r sha256sum' > "$fixture/extension-candidate.sha"
+          diff -u "$fixture/extension-base.sha" "$fixture/extension-candidate.sha"
+          echo "EXTENSION_TREE_UNCHANGED=PASS"
+          echo "OVERLAY_IMAGE_ID=$(docker image inspect "$candidate" --format '{{.Id}}')"
+          docker run --rm --network=none "$candidate" node -e '
+            const assert = require("node:assert/strict");
+            assert.match(process.version, /^v24\./);
+            const radar = require("/app/modules/radar/extrator-local.js");
+            const image = require("/app/modules/imagens/resolver-imagem-universal.js");
+            assert.equal(typeof radar.extrairEvidenciasRadarLocal, "function");
+            assert.equal(typeof image, "object");
+            const link = "https://meli.la/1wteTwg";
+            const result = radar.extrairEvidenciasRadarLocal({
+              textoOriginal: "Kit 4 Cuecas Lupo Am Boxer Masculina\nR$ 35,00\n" + link,
+              links: [link], marketplaceDetectado: "mercadolivre"
+            });
+            assert.equal(result.titulo.valor, "Kit 4 Cuecas Lupo Am Boxer Masculina");
+            const rejected = radar.extrairEvidenciasRadarLocal({
+              textoOriginal: "Grupo de ofertas Gerais\nR$ 35,00\n" + link,
+              links: [link], marketplaceDetectado: "mercadolivre"
+            });
+            assert.equal(rejected.titulo.valor, null);
+            console.log("DOCKER_SMOKE=PASS node=" + process.version + " factual-title footer image-resolver-loaded");
+          '

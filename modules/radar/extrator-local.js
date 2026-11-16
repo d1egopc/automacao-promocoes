@@ -177,19 +177,21 @@ function criarBase({ texto, links, marketplaceDetectado, origemTipo, grupoId, gr
   };
 }
 
-function extrairLinhasCandidatasTitulo(texto = "", links = []) {
+function extrairLinhasCandidatasTitulo(texto = "", links = [], contexto = {}) {
   const linksSet = new Set(links);
+  const marketplace = String(contexto.marketplaceDetectado || "").toLowerCase().replace(/[\s_-]+/g, "");
+  const mercadoLivre = marketplace === "mercadolivre" || marketplace === "meli";
   return normalizarTexto(texto)
     .split("\n")
     .map(linha => linha.trim())
     .map(limparMarcadoresTitulo)
     .filter(Boolean)
     .filter(linha => !linhaPromocionalCupomSemProduto(linha))
-    .filter(linha => !linhaComercialNaoTitulo(linha))
+    .filter(linha => (mercadoLivre && pontuarLinhaTituloProduto(linha) >= 6 && !tituloPublicitarioOuInstrucao(linha)) || !linhaComercialNaoTitulo(linha))
     .filter(linha => !linksSet.has(linha))
     .filter(linha => !/(?:https?:\/\/|www\.)/i.test(linha))
     .filter(linha => !/^\s*[0-5](?:[,.]\d)?\s*\(\d{2,6}\)/.test(linha))
-    .filter(linha => pontuarLinhaTituloProduto(linha) >= 6 || !/(?:^|\s)(?:r\$|\d+[,.]\d{2}|\d+\s*x\s*de|cupom|codigo|c[oó]digo|frete|economize|desconto|pix|pre[cç]o|cart[aã]o|boleto)(?:\s|:|$)/i.test(linha))
+    .filter(linha => pontuarLinhaTituloProduto(linha) >= 6 || (mercadoLivre && linhaFactualMercadoLivre(linha)) || !/(?:^|\s)(?:r\$|\d+[,.]\d{2}|\d+\s*x\s*de|cupom|codigo|c[oó]digo|frete|economize|desconto|pix|pre[cç]o|cart[aã]o|boleto)(?:\s|:|$)/i.test(linha))
     .filter(linha => !/^(?:use|aplique|resgate|compre|garanta|corre|aproveite)\b/i.test(linha))
     .filter(linha => !/^[@#]/.test(linha));
 }
@@ -225,6 +227,22 @@ function linhaComercialNaoTitulo(linha = "") {
   return false;
 }
 
+// Títulos factuais de ML podem não conter um termo da lista de categorias
+// (por exemplo, isca, smartband ou kit). Aceite-os apenas quando a linha não
+// for preço, instrução, slogan ou rodapé. A exceção é restrita ao ML para
+// preservar o filtro estrito dos demais marketplaces.
+function linhaFactualMercadoLivre(linha = "") {
+  const limpa = removerMarcadoresFormatacaoComercial(linha).trim();
+  if (!limpa || linhaComercialNaoTitulo(limpa)) return false;
+  if (!/[\p{L}]/u.test(limpa)) return false;
+  const normalizada = textoSemAcentos(limpa).replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  if (normalizada.split(/\s+/).filter(Boolean).length < 2) return false;
+  if (/^\s*(?:r\$|de|era|por|agora|pre[cç]o|pix|frete|cupom|c[oó]digo|codigo|desconto|economize|boleto|parcelamento)\b/i.test(limpa)) return false;
+  if (/^\s*(?:mercado\s*livre|grupo(?:s)?|canal|oferta(?:s)?|an[uú]ncio)\s*[:!\-–—]?\s*$/i.test(limpa)) return false;
+  if (/^\s*[0-5](?:[,.]\d)?\s*\(\d{2,6}\)/.test(limpa)) return false;
+  return true;
+}
+
 function pontuarLinhaTituloProduto(linha = "") {
   const limpa = limparMarcadoresTitulo(linha);
   const normalizada = textoSemAcentos(limpa).replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
@@ -247,8 +265,8 @@ function pontuarLinhaTituloProduto(linha = "") {
   return pontos;
 }
 
-function extrairTitulo(texto = "", links = []) {
-  const linhas = extrairLinhasCandidatasTitulo(texto, links);
+function extrairTitulo(texto = "", links = [], contexto = {}) {
+  const linhas = extrairLinhasCandidatasTitulo(texto, links, contexto);
   let melhor = null;
   for (const linha of linhas) {
     const normalizada = textoSemAcentos(linha).replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
@@ -586,7 +604,7 @@ function extrairEvidenciasRadarLocal(entrada = {}, deps = {}) {
     links: resultado.links,
     marketplaceDetectado
   });
-  resultado.titulo = extrairTitulo(texto, resultado.links);
+  resultado.titulo = extrairTitulo(texto, resultado.links, { marketplaceDetectado });
   const precos = extrairPrecos(texto);
   resultado.precoAtual = precos.precoAtual;
   resultado.precoAnterior = precos.precoAnterior;
