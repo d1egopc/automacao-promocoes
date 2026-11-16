@@ -85,9 +85,12 @@ jobs:
         run: |
           set -euo pipefail
           docker rm -f ci-postgres17 >/dev/null 2>&1 || true
+          mkdir -p "$GITHUB_WORKSPACE/.local-postgres/data"
           docker run -d --name ci-postgres17 --network host \
             -e POSTGRES_DB=optimus_universal_fixture \
             -e POSTGRES_HOST_AUTH_METHOD=trust \
+            -e PGDATA="$GITHUB_WORKSPACE/.local-postgres/data" \
+            -v "$GITHUB_WORKSPACE/.local-postgres/data:$GITHUB_WORKSPACE/.local-postgres/data" \
             postgres:17 -p 55433
           for attempt in $(seq 1 30); do
             if docker exec ci-postgres17 pg_isready -h 127.0.0.1 -p 55433 -U postgres -d optimus_universal_fixture; then
@@ -103,7 +106,7 @@ jobs:
           UF_TEST_PG_PORT: '55433'
           UF_TEST_PG_EXPECTED_SERVER_HOST: 127.0.0.1
           UF_TEST_PG_EXPECTED_SERVER_PORT: '55433'
-          UF_TEST_PG_EXPECTED_DATA_DIR: /var/lib/postgresql/data
+          UF_TEST_PG_EXPECTED_DATA_DIR: ${{ github.workspace }}/.local-postgres/data
         run: |
           set -euo pipefail
           test "$RUNNER_ENVIRONMENT" = github-hosted
