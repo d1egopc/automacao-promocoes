@@ -89,7 +89,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node --test --test-reporter=tap \
+          node --test --test-concurrency=1 --test-reporter=tap \
             tests/kabum-shortlink-proof.postgres.cjs \
             tests/kabum-anchor-queue.postgres.cjs | tee "$RUNNER_TEMP/pg17.log"
           grep -Eq '^# pass 2$' "$RUNNER_TEMP/pg17.log"
