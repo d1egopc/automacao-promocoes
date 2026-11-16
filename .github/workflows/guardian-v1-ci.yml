@@ -1021,7 +1021,7 @@ jobs:
           set -euo pipefail
           test "$RUNNER_ENVIRONMENT" = github-hosted
           test -z "${DATABASE_URL:-}"
-          base=f7a559c5a124ddd54521085e661d8452c6ff8d66
+          base=d2f381d84cd4f0d8dba7a9b92e6db0f8d0562c57
           base_tag="local/optimus-deploy-base:ml-fast-$GITHUB_RUN_ID"
           candidate="local/optimus-ml-fast:ci-$GITHUB_RUN_ID"
           fixture="$(mktemp -d)"
