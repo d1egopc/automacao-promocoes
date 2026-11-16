@@ -106,7 +106,8 @@
       sourceUrl: texto(task.sourceUrl),
       capability: texto(task.capability),
       technicalSlug: texto(task.technicalSlug),
-      attempt: Number(task.attempt ?? task.attempts ?? 0)
+      attempt: Number(task.attempt ?? task.attempts ?? 0),
+      expiresAt: texto(task.expiresAt)
     };
   }
   function provaPublica(prova = {}) {
@@ -155,6 +156,74 @@
       checkedAt: texto(resultado.checkedAt)
     };
   }
+  const MOTIVOS_ML_IDENTITY = new Set([
+    "ml_identity_binding_conflitante", "ml_identity_binding_invalido", "ml_identity_canonical_divergente",
+    "ml_identity_captcha", "ml_pdp_captcha", "ml_wall_captcha", "ml_identity_resultado_stale",
+    "ml_identity_catalogo_sem_prova_anuncio", "ml_identity_catalogo_sem_titulo_oficial",
+    "ml_identity_catalogo_url_invalida", "ml_identity_catalogo_vinculo_divergente",
+    "ml_identity_contexto_ausente_ou_ambiguo", "ml_identity_contexto_invalido",
+    "ml_identity_contexto_produto_divergente", "ml_identity_entrada_invalida",
+    "ml_identity_final_url_invalida", "ml_identity_imagem_http_invalida",
+    "ml_identity_product_ausente", "ml_identity_product_identificadores_conflitantes",
+    "ml_identity_products_conflitantes", "ml_identity_redirect_produto_divergente",
+    "ml_identity_sem_identidade_factual", "ml_identity_variacao_conflitante",
+    "ml_identity_resultado_incompleto", "ml_identity_fetch_timeout", "ml_identity_fetch_sem_resposta",
+    "ml_identity_resposta_leitura_falhou",
+    "ml_identity_imagem_fetch_timeout", "ml_identity_imagem_fetch_sem_resposta"
+  ]);
+  function diagnosticoMlIdentity(erro, etapa) {
+    const codigo = texto(erro?.codigo || erro?.message);
+    const statusDoCodigo = /^ml_identity_http_(\d{3})$/.exec(codigo);
+    const bruto = Number(erro?.statusHttp || erro?.status || statusDoCodigo?.[1] || 0);
+    const statusHttp = Number.isInteger(bruto) && bruto >= 100 && bruto <= 599 ? bruto : 0;
+    const etapaInferida = /(?:entrada_invalida|catalogo_url_invalida)/.test(codigo) ? "entrada_url"
+      : /(?:final_url_invalida|redirect_produto_divergente|_http_|_captcha|_fetch_|resposta_leitura_falhou)/.test(codigo) ? "consulta_pdp"
+      : /imagem_/.test(codigo) ? "imagem_oficial" : etapa;
+    const etapaSegura = etapa === "envio_resultado" ? etapa
+      : ["entrada_url", "consulta_pdp", "parser_produto", "imagem_oficial"].includes(erro?.mlIdentityStage)
+        ? erro.mlIdentityStage : etapaInferida;
+    const motivo = MOTIVOS_ML_IDENTITY.has(codigo) || statusDoCodigo ? codigo
+      : erro?.name === "AbortError" ? (etapa === "envio_resultado" ? "ml_identity_resultado_timeout" : "ml_identity_fetch_timeout")
+      : erro?.name === "SyntaxError" ? "ml_identity_parser_erro"
+      : etapa === "envio_resultado" ? "ml_identity_resultado_envio_falhou"
+      : "ml_identity_resolver_erro";
+    return { motivo, metadata: { etapa: etapaSegura, statusHttp } };
+  }
+  const ML_CAPABILITIES = new Set([ML_CAPABILITY, ML_IDENTITY_CAPABILITY]);
+  const ML_IDENTITY_RESULT_TTL_MS = 10 * 60 * 1000;
+  const ML_IDENTITY_MAX_FUTURE_SKEW_MS = 30_000;
+  function tarefaMl(task = {}) { return ML_CAPABILITIES.has(texto(task.capability)); }
+  function motivoMlTerminal(task = {}, motivo = "") {
+    if (!tarefaMl(task)) return false;
+    return /^(?:ml_pdp_captcha|ml_identity_captcha|ml_wall_captcha|ml_image_captcha)$/.test(texto(motivo).toLowerCase());
+  }
+  function classificarFrescorMlIdentity(collectedAt, agoraMs = Date.now()) {
+    const collectedAtMs = Date.parse(texto(collectedAt));
+    if (!Number.isFinite(collectedAtMs)) return "ml_identity_resultado_stale_timestamp_invalido";
+    if (collectedAtMs > Number(agoraMs) + ML_IDENTITY_MAX_FUTURE_SKEW_MS) return "ml_identity_resultado_stale_timestamp_futuro";
+    if (Number(agoraMs) - collectedAtMs >= ML_IDENTITY_RESULT_TTL_MS) return "ml_identity_resultado_stale_timestamp_expirado";
+    return "";
+  }
+  function motivoFrescorResultadoMlIdentity(erro, collectedAt) {
+    const codigo = erroTexto(erro, "").toLowerCase();
+    if (codigo === "ml_identity_resultado_stale" &&
+        ["timestamp_invalido", "timestamp_futuro", "timestamp_expirado"].includes(erro?.body?.submotivo)) {
+      return `ml_identity_resultado_stale_${erro.body.submotivo}`;
+    }
+    if (/^ml_identity_resultado_stale_timestamp_(?:invalido|futuro|expirado)$/.test(codigo)) return codigo;
+    if (codigo === "ml_identity_resultado_stale") return classificarFrescorMlIdentity(collectedAt) || "ml_identity_resultado_stale_backend";
+    return "";
+  }
+  function failureMetadataPublico(metadata = {}, task = {}) {
+    if (!ML_CAPABILITIES.has(texto(task.capability))) return resultadoOportunidadePublico(metadata);
+    const etapa = texto(metadata.etapa);
+    const statusHttp = Number(metadata.statusHttp || 0);
+    return {
+      etapa: ["entrada_url", "consulta_pdp", "parser_produto", "imagem_oficial", "envio_resultado"].includes(etapa) ? etapa : "resolver",
+      statusHttp: Number.isInteger(statusHttp) && statusHttp >= 100 && statusHttp <= 599 ? statusHttp : 0,
+      ...(metadata.terminal === true ? { terminal: true, retryable: false } : {})
+    };
+  }
   function estadoPublico(valor = {}) {
     const agoraIso = agora();
     const causaOriginal = erroTexto(valor.originalFailureReason || (texto(valor.stage) === STAGES.FAILURE_PENDING ? valor.lastTechnicalError : ""), "");
@@ -179,7 +248,10 @@
       checkedAt: texto(valor.checkedAt),
       provaTecnica: valor.provaTecnica ? provaPublica(valor.provaTecnica) : null,
       resultadoOportunidade: valor.resultadoOportunidade ? resultadoOportunidadePublico(valor.resultadoOportunidade) : null,
-      failureMetadata: valor.failureMetadata ? resultadoOportunidadePublico(valor.failureMetadata) : null,
+      failureMetadata: valor.failureMetadata ? failureMetadataPublico(valor.failureMetadata, valor.task) : null,
+      ...(texto(valor.task?.capability) === ML_IDENTITY_CAPABILITY
+        ? { mlIdentityResultErrors: Math.max(0, Math.min(2, Number(valor.mlIdentityResultErrors || 0))) } : {}),
+      ...(tarefaMl(valor.task) && valor.failureTerminal === true ? { failureTerminal: true } : {}),
       originalFailureReason: causaOriginal,
       reportingError: erroTexto(valor.reportingError, ""),
       lastTechnicalError: causaOriginal || erroTexto(valor.lastTechnicalError, ""),
@@ -305,6 +377,11 @@
   }
   async function validarLease(task, estado) {
     if (await relinquishSeEsgotado(estado, task)) return false;
+    if (tarefaMl(task) && Number.isFinite(Date.parse(texto(task.expiresAt))) && Date.parse(texto(task.expiresAt)) <= Date.now()) {
+      await registrarBreadcrumb("TASK_EXPIRED", task, { motivo: "task_expirada", taskStage: estado?.stage });
+      await limparEstado();
+      return false;
+    }
     try {
       await registrarBreadcrumb("HEARTBEAT_START", task, { taskStage: estado?.stage });
       const resposta = await global.OptimusLocalWorkerClient.heartbeat(task.id, task.leaseToken);
@@ -344,6 +421,36 @@
     await registrarBreadcrumb("MAGALU_IDENTITY_RESULT_REFRESH", task, { motivo, taskStage: estado?.stage });
     return marcarStage(estado, STAGES.RESOLVING_PAGE, identidadeLimpa, { motivo });
   }
+  async function prepararRecapturaMercadoLivreIdentity(estado, task, motivo) {
+    if (Number(estado?.freshCaptureCount || 0) >= 1) {
+      await registrarBreadcrumb("ML_IDENTITY_RESULT_REFRESH_LIMIT", task, { motivo, taskStage: estado?.stage });
+      return null;
+    }
+    if (!await validarLease(task, estado)) return false;
+    const identidadeLimpa = {
+      tituloOficial: "",
+      imagemOficialUrl: "",
+      identidadeValidada: false,
+      expectedMlb: "",
+      observedMlb: "",
+      origemTitulo: "",
+      origemImagem: "",
+      finalUrl: "",
+      canonicalUrl: "",
+      variationId: "",
+      collectedAt: "",
+      provaTecnica: null,
+      freshCaptureCount: Number(estado?.freshCaptureCount || 0) + 1,
+      mlIdentityResultErrors: 0,
+      failureTerminal: false,
+      failureMetadata: null,
+      originalFailureReason: "",
+      lastTechnicalError: "",
+      reportingError: ""
+    };
+    await registrarBreadcrumb("ML_IDENTITY_RESULT_REFRESH", task, { motivo, taskStage: estado?.stage });
+    return marcarStage(estado, STAGES.RESOLVING_PAGE, identidadeLimpa, { motivo });
+  }
   async function marcarStage(estado, stage, extras = {}, opcoes = {}) {
     const mudou = texto(estado?.stage) !== texto(stage);
     const progressoEm = agora();
@@ -375,10 +482,15 @@
     emitir("LOCAL-WORKER-FAILURE", { taskId: texto(task.id), productId: texto(task.productId), motivo: originalFailureReason });
     await registrarBreadcrumb("FAILURE_SEND", task, { motivo: originalFailureReason, originalFailureReason, reportingError: estado.reportingError, taskStage: estado.stage });
     try {
+      const metadata = estado.failureMetadata ? failureMetadataPublico(estado.failureMetadata, task) : {};
+      if (estado.failureTerminal === true) {
+        metadata.terminal = true;
+        metadata.retryable = false;
+      }
       const resposta = await global.OptimusLocalWorkerClient.failure(task, {
         leaseToken: task.leaseToken,
         motivo: originalFailureReason.slice(0, 120),
-        ...(estado.failureMetadata ? { metadata: resultadoOportunidadePublico(estado.failureMetadata) } : {})
+        ...(Object.keys(metadata).length ? { metadata } : {})
       });
       if (!resposta || resposta.ok === false) throw new Error(texto(resposta?.motivo) || "failure_rejeitado");
       await registrarBreadcrumb("FAILURE_OK", task, { motivo: originalFailureReason, originalFailureReason, taskStage: estado.stage });
@@ -391,7 +503,8 @@
         return null;
       }
       if (autenticacaoWorkerInvalida(erro)) throw erro;
-      const reportingError = erroTexto(erro);
+      const reportingError = texto(task.capability) === ML_IDENTITY_CAPABILITY
+        ? `ml_identity_failure_post_${Number(erro?.status) || 0}` : erroTexto(erro);
       await registrarBreadcrumb("FAILURE_ERROR", task, { motivo: reportingError, originalFailureReason, reportingError, status: erro?.status, taskStage: estado.stage });
       await registrarSemProgresso({ ...estado, originalFailureReason, lastTechnicalError: originalFailureReason, reportingError }, task);
       return null;
@@ -480,7 +593,21 @@
           });
           continue;
         } catch (erro) {
-          await registrarBreadcrumb("ML_IDENTIFY_ERROR", task, { motivo: erroTexto(erro), status: erro?.status, taskStage: atual.stage });
+          const motivo = erroTexto(erro);
+          if (motivoMlTerminal(task, motivo)) {
+            const statusHttp = Number(erro?.statusHttp || erro?.status || 0);
+            const falha = await marcarStage(atual, STAGES.FAILURE_PENDING, {
+              originalFailureReason: motivo,
+              lastTechnicalError: motivo,
+              failureMetadata: { etapa: "consulta_pdp", statusHttp },
+              failureTerminal: true,
+              reportingError: ""
+            }, { motivo });
+            await registrarBreadcrumb("ML_IDENTIFY_ERROR", task, { motivo, status: statusHttp, taskStage: atual.stage });
+            await enviarFailure(falha, task);
+            return;
+          }
+          await registrarBreadcrumb("ML_IDENTIFY_ERROR", task, { motivo, status: erro?.status, taskStage: atual.stage });
           if (erroAmbiguo(erro)) { await registrarSemProgresso(atual, task); return; }
           throw erro;
         }
@@ -553,9 +680,16 @@
           });
           continue;
         } catch (erro) {
-          await registrarBreadcrumb("ML_IDENTITY_ERROR", task, { motivo: erroTexto(erro), status: erro?.status, taskStage: atual.stage });
-          if (erroAmbiguo(erro)) { await registrarSemProgresso(atual, task); return; }
-          throw erro;
+          const diagnostico = diagnosticoMlIdentity(erro, erro?.mlIdentityStage || "parser_produto");
+          await registrarBreadcrumb("ML_IDENTITY_ERROR", task, { motivo: diagnostico.motivo, status: diagnostico.metadata.statusHttp, taskStage: diagnostico.metadata.etapa });
+          atual = await marcarStage(atual, STAGES.FAILURE_PENDING, {
+            originalFailureReason: diagnostico.motivo, lastTechnicalError: diagnostico.motivo,
+            failureMetadata: diagnostico.metadata,
+            failureTerminal: motivoMlTerminal(task, diagnostico.motivo),
+            reportingError: ""
+          }, { motivo: diagnostico.motivo });
+          await enviarFailure(atual, task);
+          return;
         }
       }
       if (atual.stage === STAGES.IDENTITY_IDENTIFIED) {
@@ -563,6 +697,21 @@
         continue;
       }
       if (atual.stage === STAGES.RESULT_PENDING) {
+        const frescorLocal = classificarFrescorMlIdentity(atual.collectedAt);
+        if (frescorLocal) {
+          const recapturada = await prepararRecapturaMercadoLivreIdentity(atual, task, frescorLocal);
+          if (recapturada === false) return;
+          if (recapturada) { atual = recapturada; continue; }
+          const falha = await marcarStage(atual, STAGES.FAILURE_PENDING, {
+            originalFailureReason: frescorLocal,
+            lastTechnicalError: frescorLocal,
+            failureMetadata: { etapa: "envio_resultado", statusHttp: 422 },
+            failureTerminal: true,
+            reportingError: ""
+          }, { motivo: frescorLocal });
+          await enviarFailure(falha, task);
+          return;
+        }
         emitir("LOCAL-WORKER-ML-IDENTITY-RESULT-ENVIO", { taskId: texto(task.id), productId: texto(task.productId) });
         try {
           const resposta = await global.OptimusLocalWorkerClient.result(task, {
@@ -589,9 +738,36 @@
           await limparEstado();
           return;
         } catch (erro) {
-          await registrarBreadcrumb("ML_IDENTITY_RESULT_ERROR", task, { motivo: erroTexto(erro), status: erro?.status, taskStage: atual.stage });
-          if (erroAmbiguo(erro)) return;
-          throw erro;
+          if (leaseInvalido(erro) || autenticacaoWorkerInvalida(erro)) throw erro;
+          const diagnostico = diagnosticoMlIdentity(erro, "envio_resultado");
+          await registrarBreadcrumb("ML_IDENTITY_RESULT_ERROR", task, { motivo: diagnostico.motivo, status: diagnostico.metadata.statusHttp, taskStage: atual.stage });
+          const motivoFrescor = motivoFrescorResultadoMlIdentity(erro, atual.collectedAt);
+          if (motivoFrescor) {
+            const recapturada = await prepararRecapturaMercadoLivreIdentity(atual, task, motivoFrescor);
+            if (recapturada === false) return;
+            if (recapturada) { atual = recapturada; continue; }
+            const falha = await marcarStage(atual, STAGES.FAILURE_PENDING, {
+              originalFailureReason: motivoFrescor,
+              lastTechnicalError: motivoFrescor,
+              failureMetadata: { etapa: "envio_resultado", statusHttp: diagnostico.metadata.statusHttp || 422 },
+              failureTerminal: true,
+              reportingError: ""
+            }, { motivo: motivoFrescor });
+            await enviarFailure(falha, task);
+            return;
+          }
+          if (erroAmbiguo(erro) && Number(atual.mlIdentityResultErrors || 0) < 1) {
+            await salvarEstado({ ...atual, mlIdentityResultErrors: 1, lastTechnicalError: diagnostico.motivo });
+            return;
+          }
+          atual = await marcarStage(atual, STAGES.FAILURE_PENDING, {
+            originalFailureReason: diagnostico.motivo, lastTechnicalError: diagnostico.motivo,
+            failureMetadata: diagnostico.metadata,
+            failureTerminal: motivoMlTerminal(task, diagnostico.motivo),
+            reportingError: ""
+          }, { motivo: diagnostico.motivo });
+          await enviarFailure(atual, task);
+          return;
         }
       }
       if (atual.stage === STAGES.FAILURE_PENDING) { await enviarFailure(atual, task); return; }
@@ -871,6 +1047,12 @@
       }
     } catch (_) {}
   }
-  global.OptimusLocalWorkerRunner = { iniciar, processar, limparEstado, INTERVAL_MINUTES, ALARM_NAME, STAGES, STORAGE_KEYS, MAX_BREADCRUMBS, LIVENESS, MAGALU_IDENTITY_CAPABILITY, classificarFrescorMagaluIdentity, ML_CAPABILITY, ML_IDENTITY_CAPABILITY };
+  global.OptimusLocalWorkerRunner = {
+    iniciar, processar, limparEstado, INTERVAL_MINUTES, ALARM_NAME, STAGES, STORAGE_KEYS,
+    MAX_BREADCRUMBS, LIVENESS, MAGALU_IDENTITY_CAPABILITY, classificarFrescorMagaluIdentity,
+    motivoFrescorResultadoMagaluIdentity,
+    ML_CAPABILITY, ML_IDENTITY_CAPABILITY, classificarFrescorMlIdentity,
+    motivoFrescorResultadoMlIdentity, motivoMlTerminal
+  };
   if (typeof module !== "undefined" && module.exports) module.exports = global.OptimusLocalWorkerRunner;
 })(typeof globalThis !== "undefined" ? globalThis : self);

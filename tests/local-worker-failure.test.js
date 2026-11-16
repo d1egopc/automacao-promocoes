@@ -5,7 +5,7 @@ const express = require("express");
 const { criarLocalWorkerRepository } = require("../modules/local-worker/local-worker.repository");
 const { criarRotasLocalWorker } = require("../modules/local-worker/local-worker.routes");
 
-function poolFalha({ attempts, maxAttempts }) {
+function poolFalha({ attempts, maxAttempts, capability = "magalu_image_v1" }) {
   const chamadas = [];
   return {
     chamadas,
@@ -18,8 +18,8 @@ function poolFalha({ attempts, maxAttempts }) {
           type: "imagem_oficial",
           marketplace: "magalu",
           product_id: "afh3e1g80j",
-          status: attempts >= maxAttempts ? "failed" : "pending",
-          capability: "magalu_image_v1",
+          status: attempts >= maxAttempts || ((capability === "ml_image_v1" || capability === "ml_identity_v1") && (metadata.terminal === true || metadata.retryable === false)) ? "failed" : "pending",
+          capability,
           attempts,
           max_attempts: maxAttempts,
           result_metadata: metadata
@@ -27,6 +27,38 @@ function poolFalha({ attempts, maxAttempts }) {
       };
     }
   };
+}
+
+async function falhaMlCaptchaNaoReenfileira() {
+  const pool = poolFalha({ attempts: 1, maxAttempts: 3, capability: "ml_identity_v1" });
+  const repo = criarLocalWorkerRepository({ pool });
+  const resposta = await repo.falhar({
+    taskId: "8",
+    workerId: "worker-ml",
+    leaseToken: "lease-ml",
+    motivo: "ml_pdp_captcha",
+    metadata: { etapa: "consulta_pdp", statusHttp: 200, terminal: true, retryable: false }
+  });
+  assert.strictEqual(resposta.ok, true);
+  assert.strictEqual(resposta.task.status, "failed");
+  assert.match(pool.chamadas[0].sql, /terminal/);
+  assert.deepStrictEqual(JSON.parse(pool.chamadas[0].params[3]), {
+    etapa: "consulta_pdp", statusHttp: 200, terminal: true, retryable: false, motivo: "ml_pdp_captcha"
+  });
+}
+
+async function falhaMagaluContinuaCompatibilidade() {
+  const pool = poolFalha({ attempts: 1, maxAttempts: 3 });
+  const repo = criarLocalWorkerRepository({ pool });
+  const resposta = await repo.falhar({
+    taskId: "8",
+    workerId: "worker-magalu",
+    leaseToken: "lease-magalu",
+    motivo: "magalu_imagem_busca_captcha",
+    metadata: { terminal: true, retryable: false }
+  });
+  assert.strictEqual(resposta.ok, true);
+  assert.strictEqual(resposta.task.status, "pending", "flags terminais do ML não alteram retry de Magalu");
 }
 
 async function falhaTerminalPreservaMotivo() {
@@ -100,6 +132,8 @@ async function endpointFailureAceitaMotivoOriginal() {
 
 (async () => {
   await falhaTerminalPreservaMotivo();
+  await falhaMlCaptchaNaoReenfileira();
+  await falhaMagaluContinuaCompatibilidade();
   await metadataOpcionalNaoCriaBuracoDeParametro();
   await endpointFailureAceitaMotivoOriginal();
   console.log("local-worker-failure.test.js: ok");
