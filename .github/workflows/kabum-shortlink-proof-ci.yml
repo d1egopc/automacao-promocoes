@@ -1,0 +1,97 @@
+name: KaBuM shortlink proof CI only
+
+on:
+  push:
+    branches: [validation/guardian-v1-kabum-shortlink-proof-p0-20261116]
+
+permissions:
+  contents: read
+
+jobs:
+  kabum-shortlink-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      BASE_SHA: 96223308cf82d0e4af4544a1103446bed0558e74
+      KABUM_PG_FIXTURE_DIR: /var/lib/postgresql/data
+      ML_WORK_ENRICHMENT_ACTIVE: '0'
+      ML_WORK_ENRICHMENT_CANARY_CLIENTES: ''
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: optimus_kabum_ci_fixture
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 127.0.0.1:55433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d optimus_kabum_ci_fixture"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Exact scope and Guardian overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          git cat-file -e "${BASE_SHA}^{commit}"
+          git merge-base --is-ancestor "$BASE_SHA" HEAD
+          git diff --check "$BASE_SHA" HEAD
+          diff -u <(printf '%s\n' \
+            'A .github/workflows/kabum-shortlink-proof-ci.yml' \
+            'M modules/engine/importer/adapters/awin.adapter.js' \
+            'M modules/engine/importer/importer.service.js' \
+            'A tests/kabum-shortlink-proof.postgres.cjs' \
+            'A tests/kabum-shortlink-technical-proof.test.cjs') \
+            <(git diff --name-status --no-renames "$BASE_SHA" HEAD | tr '\t' ' ')
+          node scripts/guardian-v1.cjs prepare --base "$BASE_SHA" --source "$GITHUB_SHA" \
+            --release-mode overlay > "$RUNNER_TEMP/plan.json"
+          node -e '
+            const assert = require("node:assert/strict");
+            const plan = require(process.argv[1]);
+            assert.equal(plan.validation, "PASS");
+            assert.equal(plan.deployMode, "overlay");
+            assert.deepEqual([...plan.runtimeFiles].sort(), [
+              "modules/engine/importer/adapters/awin.adapter.js",
+              "modules/engine/importer/importer.service.js"
+            ]);
+            console.log("GUARDIAN_RUNTIME=" + plan.runtimeFiles.join(","));
+          ' "$RUNNER_TEMP/plan.json"
+      - name: Clean Node 24 dependencies
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: ssh://git@github.com/
+        run: npm ci
+      - name: Real job 1167194 and focal contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check modules/engine/importer/adapters/awin.adapter.js
+          node --check modules/engine/importer/importer.service.js
+          node --test --test-reporter=tap \
+            tests/kabum-shortlink-technical-proof.test.cjs \
+            tests/kabum-categoria-ancora.test.cjs \
+            tests/destinos-compatibilidade-kabum-awin.test.js \
+            tests/link-conversao-ocorrencia-marketplaces.test.js \
+            tests/universal-flow-queue-preflight.test.js | tee "$RUNNER_TEMP/node24.log"
+          grep -Eq '^# fail 0$' "$RUNNER_TEMP/node24.log"
+          grep -Eq '^# skipped 0$' "$RUNNER_TEMP/node24.log"
+      - name: PostgreSQL 17 persisted proof, queue and workspace isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-reporter=tap \
+            tests/kabum-shortlink-proof.postgres.cjs \
+            tests/kabum-anchor-queue.postgres.cjs | tee "$RUNNER_TEMP/pg17.log"
+          grep -Eq '^# pass 2$' "$RUNNER_TEMP/pg17.log"
+          grep -Eq '^# fail 0$' "$RUNNER_TEMP/pg17.log"
+          grep -Eq '^# skipped 0$' "$RUNNER_TEMP/pg17.log"
