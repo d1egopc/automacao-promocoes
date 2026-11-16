@@ -330,7 +330,7 @@ console.log("[DEBUG] KABUM HTML DEBUG:", {
       // ================= EXTRAIR TÍTULO =================
 
     const titulo =
-      html.match(/<title>(.*?)<\/title>/i)?.[1]
+      html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1]
         ?.replace(/\s+/g, " ")
         ?.trim() ||
       "Produto importado de Awin";
