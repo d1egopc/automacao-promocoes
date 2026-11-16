@@ -898,11 +898,19 @@ jobs:
         if: github.ref == 'refs/heads/codex/ml-anchor-fast-local'
         env:
           OPTIMUS_TEST_PG17: '1'
+          LOCAL_WORKER_TEST_DATABASE_URL: postgres://postgres@127.0.0.1:55433/optimus_universal_fixture
         run: |
           set -euo pipefail
           test "$RUNNER_ENVIRONMENT" = github-hosted
           test -z "${DATABASE_URL:-}"
           node --test --test-reporter=tap \
+            tests/local-worker-stale-captcha.postgres.test.cjs \
+            tests/local-worker-failure.test.js \
+            tests/optimus-capture-ml-identity-observability.test.cjs \
+            tests/optimus-capture-local-worker-ml-identity.test.js \
+            tests/optimus-capture-local-worker-liveness.test.js \
+            tests/local-worker-idempotency.test.js \
+            tests/magalu-local-worker-identity.test.js \
             tests/universal-offer-anchor-local.test.cjs \
             tests/mercadolivre-identidade-promocional-focal.test.cjs \
             tests/universal-flow-queue-preflight.test.js \
@@ -933,16 +941,30 @@ jobs:
             "modules/engine/importer/importer.service.js",
             "modules/engine/universal-queue-preflight.js",
             "modules/inteligencia-universal/foundation-v1.service.js",
+            "modules/local-worker/local-worker.repository.js",
             "modules/radar/comercial-precedencia.js"
           ]);
+          const extension = "optimus-capture/local-worker/task-runner.js";
+          assert.equal(plan.runtimeFiles.includes(extension), false);
+          assert.equal(plan.ignoredFiles.includes(extension), true);
           NODE
+          extension=optimus-capture/local-worker/task-runner.js
+          extension_hash="$(git show "$GITHUB_SHA:$extension" | sha256sum | cut -d' ' -f1)"
+          test "$(sha256sum "$extension" | cut -d' ' -f1)" = "$extension_hash"
+          node --check "$extension"
+          echo "EXTENSION_SOURCE_HASH_OK $extension $extension_hash"
           node scripts/guardian-v1.cjs build-dockerfile --base "$base" --source "$GITHUB_SHA" --base-tag "$base_tag" > "$fixture/Dockerfile"
+          if grep -Fq "optimus-capture/" "$fixture/Dockerfile"; then
+            echo "Unexpected extension runtime in backend overlay" >&2
+            exit 1
+          fi
           docker build -t "$base_tag" "$fixture/base"
           docker build --pull=false --network=none -f "$fixture/Dockerfile" -t "$candidate" .
           for path in \
             modules/engine/importer/importer.service.js \
             modules/engine/universal-queue-preflight.js \
             modules/inteligencia-universal/foundation-v1.service.js \
+            modules/local-worker/local-worker.repository.js \
             modules/radar/comercial-precedencia.js; do
             expected="$(git show "$GITHUB_SHA:$path" | sha256sum | cut -d' ' -f1)"
             actual="$(docker run --rm --network=none "$candidate" sha256sum "/app/$path" | cut -d' ' -f1)"
@@ -953,10 +975,12 @@ jobs:
             const assert = require("node:assert/strict");
             assert.match(process.version, /^v24\./);
             const importer = require("/app/modules/engine/importer/importer.service.js");
+            const workerRepository = require("/app/modules/local-worker/local-worker.repository.js");
             const parser = require("/app/optimus-capture/local-worker/mercadolivre-identity.js");
             const { tituloPublicitarioOuInstrucao } = require("/app/modules/radar/comercial-precedencia.js");
             const { criarPreflightFilaUniversal } = require("/app/modules/engine/universal-queue-preflight.js");
             assert.equal(typeof importer.enriquecerTituloMlPorOcorrencia, "function");
+            assert.equal(typeof workerRepository.criarLocalWorkerRepository, "function");
             assert.equal(typeof criarPreflightFilaUniversal, "function");
             const ids = parser.urlCatalogo("https://www.mercadolivre.com.br/carretilha/p/MLB22147432?pdp_filters=item_id%3AMLB4772233032");
             assert.equal(ids.catalogId, "MLB22147432");
