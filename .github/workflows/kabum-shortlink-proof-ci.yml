@@ -95,3 +95,40 @@ jobs:
           grep -Eq '^# pass 2$' "$RUNNER_TEMP/pg17.log"
           grep -Eq '^# fail 0$' "$RUNNER_TEMP/pg17.log"
           grep -Eq '^# skipped 0$' "$RUNNER_TEMP/pg17.log"
+      - name: Build disposable Linux overlay and smoke-test candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_image="local/optimus-deploy-base:ci-$GITHUB_RUN_ID"
+          candidate="local/optimus-kabum-candidate:ci-$GITHUB_RUN_ID"
+          mkdir -p "$RUNNER_TEMP/kabum-base" "$RUNNER_TEMP/kabum-context" "$RUNNER_TEMP/kabum-test"
+          git archive "$BASE_SHA" | tar -x -C "$RUNNER_TEMP/kabum-base"
+          grep -Fx 'RUN npm ci --omit=dev' "$RUNNER_TEMP/kabum-base/Dockerfile"
+          grep -F 'apt-get install -y --no-install-recommends fontconfig fonts-dejavu-core' "$RUNNER_TEMP/kabum-base/Dockerfile"
+          sed -e 's|apt-get install -y --no-install-recommends fontconfig fonts-dejavu-core|apt-get install -y --no-install-recommends fontconfig fonts-dejavu-core git ca-certificates|' \
+            -e 's|^RUN npm ci --omit=dev$|RUN GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf GIT_CONFIG_VALUE_0=ssh://git@github.com/ npm ci --omit=dev|' \
+            "$RUNNER_TEMP/kabum-base/Dockerfile" > "$RUNNER_TEMP/kabum-base.Dockerfile"
+          docker build -f "$RUNNER_TEMP/kabum-base.Dockerfile" -t "$base_image" "$RUNNER_TEMP/kabum-base"
+          for file in modules/engine/importer/adapters/awin.adapter.js modules/engine/importer/importer.service.js; do
+            install -D "$file" "$RUNNER_TEMP/kabum-context/$file"
+          done
+          node scripts/guardian-v1.cjs build-dockerfile --base "$BASE_SHA" --source "$GITHUB_SHA" \
+            --base-tag "$base_image" > "$RUNNER_TEMP/kabum-overlay.Dockerfile"
+          grep -Fx 'COPY --chown=node:node modules/engine/importer/adapters/awin.adapter.js /app/modules/engine/importer/adapters/awin.adapter.js' "$RUNNER_TEMP/kabum-overlay.Dockerfile"
+          grep -Fx 'COPY --chown=node:node modules/engine/importer/importer.service.js /app/modules/engine/importer/importer.service.js' "$RUNNER_TEMP/kabum-overlay.Dockerfile"
+          if grep -F 'COPY --chown=node:node optimus-capture/' "$RUNNER_TEMP/kabum-overlay.Dockerfile"; then
+            echo 'Chrome extension files must stay outside the KaBuM overlay' >&2
+            exit 1
+          fi
+          docker build --pull=false --network=none -f "$RUNNER_TEMP/kabum-overlay.Dockerfile" -t "$candidate" "$RUNNER_TEMP/kabum-context"
+          for file in modules/engine/importer/adapters/awin.adapter.js modules/engine/importer/importer.service.js; do
+            candidate_hash="$(git show "$GITHUB_SHA:$file" | sha256sum | cut -d' ' -f1)"
+            test "$(docker run --rm --network=none "$candidate" sha256sum "/app/$file" | cut -d' ' -f1)" = "$candidate_hash"
+            printf 'OVERLAY_HASH %s %s\n' "$candidate_hash" "$file"
+          done
+          docker image inspect "$candidate" --format 'DOCKER_IMAGE_ID={{.Id}}'
+          cp tests/kabum-shortlink-technical-proof.test.cjs "$RUNNER_TEMP/kabum-test/"
+          docker run --rm --network=none \
+            -e ML_WORK_ENRICHMENT_ACTIVE=0 -e ML_WORK_ENRICHMENT_CANARY_CLIENTES= \
+            --mount "type=bind,src=$RUNNER_TEMP/kabum-test,dst=/app/ci-kabum,readonly" \
+            "$candidate" node --test /app/ci-kabum/kabum-shortlink-technical-proof.test.cjs
