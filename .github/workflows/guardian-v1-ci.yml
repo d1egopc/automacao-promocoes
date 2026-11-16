@@ -606,6 +606,7 @@ jobs:
           set -euo pipefail
           base="$(git merge-base origin/main HEAD)"
           case "$GITHUB_REF" in
+            refs/heads/validation/guardian-v1-mlbu-422-root-cause-p0-20261116) base=96223308cf82d0e4af4544a1103446bed0558e74 ;;
             refs/heads/validation/guardian-v1-inteligencia-universal-p0) base=757d6258e4baf3a57903c20af2b8637568606c3a ;;
             refs/heads/codex/ml-anchor-fast-local) base=f7a559c5a124ddd54521085e661d8452c6ff8d66 ;;
             refs/heads/validation/guardian-v1-saas-fix1-*) base=1eaf582b68c333773a5882bcb8962ffcac7b9bef ;;
@@ -705,6 +706,20 @@ jobs:
           node --check modules/local-worker/local-worker.service.js
           node --check modules/imagens/resolver-imagem-universal.js
           git diff --exit-code b8f5746e4d562deaa5c4081738de89e0bf5fc508 HEAD -- marketplaces modules/radar modules/teleradar modules/fila modules/executor modules/ofc-v2 modules/engine/distributor utils/destinos.js
+      - name: MLBU result HTTP diagnosis and recovery - task 40615
+        if: github.ref == 'refs/heads/validation/guardian-v1-mlbu-422-root-cause-p0-20261116'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node --check modules/local-worker/local-worker.routes.js
+          node --check modules/local-worker/local-worker.service.js
+          node --test --test-reporter=tap \
+            tests/mlbu-result-http-diagnostics.test.cjs \
+            tests/ml-identity-image-publicability.test.cjs \
+            tests/ml-work-enrichment-active.test.js \
+            tests/ml-work-enrichment-shadow.test.js
       - name: Deploy mechanism regressions
         shell: bash
         run: |
@@ -853,7 +868,7 @@ jobs:
           node --test tests/mensageiro-v4-credit-scope.postgres.test.cjs
 
   universal-offer-anchor-postgres:
-    if: github.ref == 'refs/heads/validation/guardian-v1-universal-offer-anchor' || github.ref == 'refs/heads/validation/universal-closure-p0-20261112' || github.ref == 'refs/heads/validation/guardian-v1-anchor-release-gates-20261112' || github.ref == 'refs/heads/validation/guardian-v1-ml-recovery-p0-20261113' || github.ref == 'refs/heads/codex/ml-anchor-fast-local' || github.ref == 'refs/heads/validation/ml-factual-capture-p0-20261114' || github.ref == 'refs/heads/validation/guardian-v1-ml-mlbu-identity-p0'
+    if: github.ref == 'refs/heads/validation/guardian-v1-universal-offer-anchor' || github.ref == 'refs/heads/validation/universal-closure-p0-20261112' || github.ref == 'refs/heads/validation/guardian-v1-anchor-release-gates-20261112' || github.ref == 'refs/heads/validation/guardian-v1-ml-recovery-p0-20261113' || github.ref == 'refs/heads/codex/ml-anchor-fast-local' || github.ref == 'refs/heads/validation/ml-factual-capture-p0-20261114' || github.ref == 'refs/heads/validation/guardian-v1-ml-mlbu-identity-p0' || github.ref == 'refs/heads/validation/guardian-v1-mlbu-422-root-cause-p0-20261116'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -895,6 +910,7 @@ jobs:
             tests/ofertas-v2-dedup-ancora-historica.test.cjs \
             tests/optimus-capture-ml-catalog-selection.test.cjs \
             tests/optimus-capture-local-worker-ml-identity.test.js \
+            tests/mlbu-result-http-diagnostics.test.cjs \
             tests/local-worker-idempotency.test.js \
             tests/link-anchor-identity-proof-focal.test.cjs \
             tests/link-conversao-ocorrencia-marketplaces.test.js \

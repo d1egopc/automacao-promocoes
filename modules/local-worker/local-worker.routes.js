@@ -11,6 +11,20 @@ function payloadErro(e, fallback = "local_worker_falhou") {
       ? { submotivo: e.submotivo } : {}) };
 }
 
+function registrarRejeicaoResultado(req, erro, statusHttp) {
+  const codigo = texto(erro?.codigo || erro?.motivo || erro?.message || "resultado_invalido");
+  const diagnostico = {
+    taskId: texto(req?.params?.id),
+    capability: texto(req?.body?.capability),
+    ownerId: texto(req?.localWorker?.ownerId),
+    statusHttp: Number(statusHttp || 0),
+    codigo: /^[a-z0-9_]{3,100}$/i.test(codigo) ? codigo : "resultado_invalido",
+    etapa: /^[a-z0-9_]{3,60}$/i.test(texto(erro?.etapa)) ? texto(erro.etapa) : "validacao_resultado",
+    campo: /^[a-z0-9_]{3,60}$/i.test(texto(erro?.campo)) ? texto(erro.campo) : ""
+  };
+  console.warn("[LOCAL-WORKER-RESULT-REJECTED]", JSON.stringify(diagnostico));
+}
+
 function tokenWorker(req) {
   const header = texto(req.get?.("authorization") || req.headers?.authorization);
   if (/^bearer\s+/i.test(header)) return header.replace(/^bearer\s+/i, "").trim();
@@ -87,7 +101,11 @@ function criarRotasLocalWorker(deps = {}) {
         collectedAt: req.body?.collectedAt
       });
       return res.json(resultado);
-    } catch (e) { return res.status(e.statusCode || 422).json(payloadErro(e, "resultado_invalido")); }
+    } catch (e) {
+      const statusHttp = e.statusCode || 422;
+      registrarRejeicaoResultado(req, e, statusHttp);
+      return res.status(statusHttp).json(payloadErro(e, "resultado_invalido"));
+    }
   });
 
   router.post("/tasks/:id/failure", workerAuth, async (req, res) => {
@@ -111,4 +129,4 @@ function criarRotasLocalWorker(deps = {}) {
   return router;
 }
 
-module.exports = { criarRotasLocalWorker, tokenWorker };
+module.exports = { criarRotasLocalWorker, tokenWorker, registrarRejeicaoResultado };

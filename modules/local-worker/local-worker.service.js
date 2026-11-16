@@ -256,7 +256,7 @@ function criarLocalWorkerService(opcoes = {}) {
     }
   }
 
-  async function validarImagemMercadoLivreHttp(url = "") {
+  async function validarImagemMercadoLivreHttp(url = "", { identidade = false } = {}) {
     if (typeof fetchFn !== "function") throw erro("ml_imagem_fetch_indisponivel");
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), imageTimeoutMs);
@@ -265,8 +265,22 @@ function criarLocalWorkerService(opcoes = {}) {
       response = await fetchFn(url, { redirect: "follow", signal: controller.signal });
       const finalUrl = new URL(response.url || url);
       const contentType = texto(response.headers?.get?.("content-type") || "").toLowerCase().split(";", 1)[0];
-      if (!response.ok || !urlMlstaticValida(finalUrl.toString()) || !contentType.startsWith("image/")) throw erro("ml_imagem_http_nao_confirmada");
+      if (!response.ok || !urlMlstaticValida(finalUrl.toString()) || !contentType.startsWith("image/")) {
+        const rejeicao = erro("ml_imagem_http_nao_confirmada");
+        rejeicao.etapa = "imagem_oficial";
+        rejeicao.campo = "imagemOficial";
+        throw rejeicao;
+      }
       return { urlFinal: finalUrl.toString(), statusHttp: response.status, contentType };
+    } catch (falha) {
+      if (falha?.codigo) throw falha;
+      const codigo = identidade
+        ? (falha?.name === "AbortError" ? "ml_identity_imagem_fetch_timeout" : "ml_identity_imagem_fetch_sem_resposta")
+        : (falha?.name === "AbortError" ? "ml_imagem_fetch_timeout" : "ml_imagem_fetch_sem_resposta");
+      const rejeicao = erro(codigo, 503);
+      rejeicao.etapa = "imagem_oficial";
+      rejeicao.campo = "imagemOficial";
+      throw rejeicao;
     } finally {
       clearTimeout(timer);
       try { await response?.body?.cancel?.(); } catch (_) {}
@@ -341,7 +355,7 @@ function criarLocalWorkerService(opcoes = {}) {
         provaTecnica
       });
       if (validado.imagemOficial) {
-        const http = await validarImagemMercadoLivreHttp(validado.imagemOficial);
+        const http = await validarImagemMercadoLivreHttp(validado.imagemOficial, { identidade: true });
         const imagemFinalSanitizada = sanitizarUrlMlstatic(http.urlFinal);
         if (!imagemFinalSanitizada) throw erro("ml_identity_imagem_http_invalida");
         validado.imagemOficial = imagemFinalSanitizada;
