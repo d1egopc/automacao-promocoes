@@ -606,7 +606,7 @@ jobs:
           set -euo pipefail
           base="$(git merge-base origin/main HEAD)"
           case "$GITHUB_REF" in
-            refs/heads/validation/guardian-v1-mlbu-422-root-cause-p0-20261116) base=96223308cf82d0e4af4544a1103446bed0558e74 ;;
+            refs/heads/validation/guardian-v1-mlbu-422-root-cause-p0-20261116) base=681031f559e3d6632f98b2afa0bf9fba8e54ae42 ;;
             refs/heads/validation/guardian-v1-inteligencia-universal-p0) base=757d6258e4baf3a57903c20af2b8637568606c3a ;;
             refs/heads/codex/ml-anchor-fast-local) base=f7a559c5a124ddd54521085e661d8452c6ff8d66 ;;
             refs/heads/validation/guardian-v1-saas-fix1-*) base=1eaf582b68c333773a5882bcb8962ffcac7b9bef ;;
@@ -720,6 +720,7 @@ jobs:
             tests/ml-identity-image-publicability.test.cjs \
             tests/ml-work-enrichment-active.test.js \
             tests/ml-work-enrichment-shadow.test.js
+          node tests/optimus-capture-local-worker-liveness.test.js
       - name: Deploy mechanism regressions
         shell: bash
         run: |
@@ -917,8 +918,12 @@ jobs:
             tests/mercadolivre-identidade-canonica.test.js \
             tests/engine-importer-origem-fairness.test.js \
             tests/universal-flow-turbo-commercial.test.js \
-            tests/universal-flow-queue-executor.test.js
+            tests/universal-flow-queue-executor.test.js \
+            tests/universal-flow-queue-preflight.test.js
           node --test --test-name-pattern='CI da âncora' tests/guardian-v1.test.cjs
+          if [[ "$GITHUB_REF" == "refs/heads/validation/guardian-v1-mlbu-422-root-cause-p0-20261116" ]]; then
+            node tests/optimus-capture-local-worker-liveness.test.js
+          fi
           if [[ "$GITHUB_REF" == refs/heads/validation/universal-closure-p0-20261112 || "$GITHUB_REF" == refs/heads/validation/guardian-v1-anchor-release-gates-20261112 ]]; then
             node --test tests/ml-catalogo-tecnico-ancora.test.cjs \
               tests/universal-flow-vitrine-projector.test.js \
@@ -940,6 +945,67 @@ jobs:
             tests/universal-flow-queue-preflight.test.js \
             tests/mercadolivre-local-worker-gate-observability.test.js \
             tests/mercadolivre-radar-fallback.test.js
+      - name: MLBU reconciled-main overlay build and Linux smoke
+        if: github.ref == 'refs/heads/validation/guardian-v1-mlbu-422-root-cause-p0-20261116'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          base=681031f559e3d6632f98b2afa0bf9fba8e54ae42
+          base_tag="local/optimus-deploy-base:mlbu-$GITHUB_RUN_ID"
+          candidate="local/optimus-mlbu-overlay:ci-$GITHUB_RUN_ID"
+          fixture="$(mktemp -d)"
+          mkdir -p "$fixture/base" "$fixture/base-context/modules/local-worker"
+          git cat-file -e "${base}^{commit}"
+          git merge-base --is-ancestor "$base" HEAD
+          git archive "$base" | tar -x -C "$fixture/base"
+          test -f "$fixture/base/Dockerfile"
+          sed \
+            -e 's|apt-get install -y --no-install-recommends fontconfig fonts-dejavu-core|apt-get install -y --no-install-recommends fontconfig fonts-dejavu-core git ca-certificates|' \
+            -e 's|^RUN npm ci --omit=dev$|RUN GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf GIT_CONFIG_VALUE_0=ssh://git@github.com/ npm ci --omit=dev|' \
+            "$fixture/base/Dockerfile" > "$fixture/base.Dockerfile"
+          docker build -f "$fixture/base.Dockerfile" -t "$base_tag" "$fixture/base"
+          node scripts/guardian-v1.cjs prepare --base "$base" --source "$GITHUB_SHA" --release-mode overlay > "$fixture/plan.json"
+          node - "$fixture/plan.json" <<'NODE'
+          const assert = require("node:assert/strict");
+          const fs = require("node:fs");
+          const plan = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+          assert.equal(plan.validation, "PASS");
+          assert.deepEqual(plan.runtimeFiles.slice().sort(), [
+            "modules/local-worker/local-worker.routes.js",
+            "modules/local-worker/local-worker.service.js"
+          ]);
+          assert.deepEqual(plan.blocked, []);
+          console.log("MLBU_OVERLAY_RUNTIME_EXACT=" + plan.runtimeFiles.join(","));
+          NODE
+          for path in modules/local-worker/local-worker.routes.js modules/local-worker/local-worker.service.js; do
+            install -D "$path" "$fixture/base-context/$path"
+          done
+          node scripts/guardian-v1.cjs build-dockerfile --base "$base" --source "$GITHUB_SHA" --base-tag "$base_tag" > "$fixture/overlay.Dockerfile"
+          grep -Fx 'COPY --chown=node:node modules/local-worker/local-worker.routes.js /app/modules/local-worker/local-worker.routes.js' "$fixture/overlay.Dockerfile"
+          grep -Fx 'COPY --chown=node:node modules/local-worker/local-worker.service.js /app/modules/local-worker/local-worker.service.js' "$fixture/overlay.Dockerfile"
+          if grep -Fq '/app/optimus-capture/' "$fixture/overlay.Dockerfile"; then
+            echo 'MLBU overlay must not replace Chrome extension files' >&2
+            exit 1
+          fi
+          docker build --pull=false --network=none -f "$fixture/overlay.Dockerfile" -t "$candidate" "$fixture/base-context"
+          for path in modules/local-worker/local-worker.routes.js modules/local-worker/local-worker.service.js; do
+            expected="$(git show "$GITHUB_SHA:$path" | sha256sum | cut -d' ' -f1)"
+            actual="$(docker run --rm --network=none "$candidate" sha256sum "/app/$path" | cut -d' ' -f1)"
+            test "$expected" = "$actual"
+            echo "MLBU_OVERLAY_HASH_OK $path $actual"
+          done
+          echo "MLBU_OVERLAY_IMAGE_ID=$(docker image inspect "$candidate" --format '{{.Id}}')"
+          docker run --rm --network=none "$candidate" node -e '
+            const assert = require("node:assert/strict");
+            assert.match(process.version, /^v24\./);
+            const service = require("/app/modules/local-worker/local-worker.service.js");
+            const routes = require("/app/modules/local-worker/local-worker.routes.js");
+            assert.equal(typeof service.criarLocalWorkerService, "function");
+            assert.equal(typeof routes.criarRotasLocalWorker, "function");
+            console.log("MLBU_OVERLAY_LOAD_SMOKE=PASS");
+          '
       - name: ML fast anchor official overlay build and smoke
         if: github.ref == 'refs/heads/codex/ml-anchor-fast-local'
         shell: bash

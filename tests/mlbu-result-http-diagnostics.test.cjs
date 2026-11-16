@@ -122,6 +122,28 @@ test("timeout da imagem oficial preserva causa tecnica e continua retriavel", as
   });
 });
 
+test("falha transitória 503 permite nova tentativa e sucesso com a mesma prova", async () => {
+  let tentativas = 0;
+  let conclusoes = 0;
+  const service = serviceCom(async url => {
+    tentativas += 1;
+    if (tentativas === 1) throw new TypeError("fetch failed");
+    return { ok: true, status: 200, url,
+      headers: { get: () => "image/webp" }, body: { cancel: async () => {} } };
+  }, async args => { conclusoes += 1; return { ok: true, task: { ...task(), result: args.metadata } }; });
+
+  await assert.rejects(() => service.resultado({ worker: worker(), taskId: "40615", ...payload() }), erro => {
+    assert.equal(erro.statusCode, 503);
+    assert.equal(erro.codigo, "ml_identity_imagem_fetch_sem_resposta");
+    return true;
+  });
+
+  const resposta = await service.resultado({ worker: worker(), taskId: "40615", ...payload() });
+  assert.equal(resposta.ok, true);
+  assert.equal(tentativas, 2);
+  assert.equal(conclusoes, 1);
+});
+
 test("anuncio divergente continua bloqueado antes da validacao HTTP", async () => {
   let fetches = 0;
   const service = serviceCom(async () => { fetches += 1; throw new Error("nao_deveria_buscar"); });
