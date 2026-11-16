@@ -366,7 +366,17 @@ async function importarAwinEngine({ job = {}, evento = {}, links = [], deps = {}
   const linkEscolhido = escolherLinkAwinKabum(links, evento);
   const urlOriginalEngine = linkEscolhido.urlProduto || linkEscolhido.url;
   const urlCapturadaEngine = linkEscolhido.url;
-  const linksClassificados = resumoLinksClassificados(links, evento, "kabum");
+  const linksClassificados = resumoLinksClassificados(links, evento, "kabum").map((item, indice) => {
+    const linkPersistido = (Array.isArray(links) ? links : []).find(link =>
+      texto(link?.id) && texto(link.id) === texto(item.id)) || (Array.isArray(links) ? links[indice] : null) || {};
+    return {
+      ...item,
+      redirectOk: linkPersistido.redirect_ok === true ? true : linkPersistido.redirect_ok === false ? false : null,
+      motivoRedirect: texto(linkPersistido.motivo_redirect || ""),
+      dominioOriginal: texto(linkPersistido.dominio_original || ""),
+      dominioFinal: texto(linkPersistido.dominio_final || "")
+    };
+  });
   const papeisDetectados = [...new Set(linksClassificados.map(item => item.papelLink).filter(Boolean))];
   const destinoExtraido = Boolean(linkEscolhido.urlProduto && linkEscolhido.urlProduto !== linkEscolhido.url);
 
