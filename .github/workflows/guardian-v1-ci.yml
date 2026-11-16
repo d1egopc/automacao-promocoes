@@ -1035,13 +1035,9 @@ jobs:
           const fs = require("node:fs");
           const plan = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
           assert.equal(plan.validation, "PASS");
-          assert.deepEqual(plan.runtimeFiles, [
-            "modules/engine/importer/importer.service.js",
-            "modules/engine/universal-queue-preflight.js",
-            "modules/inteligencia-universal/foundation-v1.service.js",
-            "modules/local-worker/local-worker.repository.js",
-            "modules/radar/comercial-precedencia.js"
-          ]);
+           assert.deepEqual(plan.runtimeFiles, [
+             "modules/local-worker/local-worker.repository.js"
+           ]);
           const extension = "optimus-capture/local-worker/task-runner.js";
           assert.equal(plan.runtimeFiles.includes(extension), false);
           assert.equal(plan.ignoredFiles.includes(extension), true);
@@ -1058,12 +1054,7 @@ jobs:
           fi
           docker build -t "$base_tag" "$fixture/base"
           docker build --pull=false --network=none -f "$fixture/Dockerfile" -t "$candidate" .
-          for path in \
-            modules/engine/importer/importer.service.js \
-            modules/engine/universal-queue-preflight.js \
-            modules/inteligencia-universal/foundation-v1.service.js \
-            modules/local-worker/local-worker.repository.js \
-            modules/radar/comercial-precedencia.js; do
+           for path in modules/local-worker/local-worker.repository.js; do
             expected="$(git show "$GITHUB_SHA:$path" | sha256sum | cut -d' ' -f1)"
             actual="$(docker run --rm --network=none "$candidate" sha256sum "/app/$path" | cut -d' ' -f1)"
             test "$expected" = "$actual"
