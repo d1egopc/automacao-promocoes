@@ -1185,6 +1185,25 @@ function validarProvaTituloTecnico(resultado = {}, produto = {}, job = {}, ancor
   const productTitle = normalizarTexto(produto.titulo || produto.nome || produto.title || "");
   const metadataOriginal = normalizarTexto(metadata.linkOriginalEngine || "");
   const resultOriginal = normalizarTexto(resultado.linkOriginal || "");
+  const linksComerciais = Array.isArray(metadata.linksComerciais) ? metadata.linksComerciais :
+    adapter === "aliexpress" && Array.isArray(metadata.linksClassificados) ? metadata.linksClassificados : [];
+  const linkTransporteKabum = adapter === "awin_kabum" ? linksComerciais.find((link, index) => {
+    const linkUrl = normalizarTexto(link?.urlOriginal || link?.url_original || link?.original || link?.url || "");
+    if (linkUrl !== anchorUrl) return false;
+    const actualId = normalizarTexto(link?.ocorrenciaId || link?.idOcorrencia || link?.ocorrencia_id ||
+      link?.id || link?.link_id || "");
+    const actualOrder = Number(link?.ordemCaptura || link?.ordem_captura || link?.ordem || index + 1) || 0;
+    return (linkId ? actualId === linkId : order > 0 && actualOrder === order) && (!order || actualOrder === order);
+  }) : null;
+  const urlExpandidaKabum = normalizarTexto(linkTransporteKabum?.urlExpandida || linkTransporteKabum?.url_expandida || "");
+  const transporteKabumValido = Boolean(linkTransporteKabum &&
+    linkTransporteKabum.redirectOk === true &&
+    normalizarTexto(linkTransporteKabum.motivoRedirect || linkTransporteKabum.motivo_redirect || "") === "resolvido" &&
+    normalizarTexto(linkTransporteKabum.marketplace || "").toLowerCase() === "kabum" &&
+    normalizarTexto(linkTransporteKabum.dominioFinal || linkTransporteKabum.dominio_final || "")
+      .toLowerCase().replace(/^www\./, "") === "kabum.com.br" &&
+    extrairSkuUrlOficialKabum(urlExpandidaKabum) === productId &&
+    extrairSkuUrlOficialKabum(linkTransporteKabum.urlProduto || "") === productId);
 
   if (!jobId || !eventoId || !workspaceId ||
       String(prova.jobId || "") !== jobId || String(prova.eventoId || "") !== eventoId ||
@@ -1193,14 +1212,14 @@ function validarProvaTituloTecnico(resultado = {}, produto = {}, job = {}, ancor
       String(metadata.clienteId || "") !== workspaceId ||
       (!linkId && order < 1) || !anchorUrl || !canonicalUrl || !productId || !title || !source ||
       !metadataOriginal || !resultOriginal ||
-      (adapter === "awin_kabum" ? !["awin", "kabum"].includes(marketplaceAncora) : marketplaceAncora !== adapter) ||
+      (adapter === "awin_kabum"
+        ? !["awin", "kabum"].includes(marketplaceAncora) && !transporteKabumValido
+        : marketplaceAncora !== adapter) ||
       !adapterCanonicalUrl || title !== productTitle ||
       !tituloComercialUniversalValido(title, { marketplace: adapter })) {
     return null;
   }
 
-  const linksComerciais = Array.isArray(metadata.linksComerciais) ? metadata.linksComerciais :
-    adapter === "aliexpress" && Array.isArray(metadata.linksClassificados) ? metadata.linksClassificados : [];
   const occurrenceBound = linksComerciais.some((link, index) => {
     const linkUrl = normalizarTexto(link?.urlOriginal || link?.url_original || link?.original || link?.url || "");
     if (linkUrl !== anchorUrl) return false;
@@ -1299,11 +1318,12 @@ function validarProvaTituloTecnico(resultado = {}, produto = {}, job = {}, ancor
         [anchorUrl, metadataOriginal, resultOriginal].map(extrairProductIdAliExpressManual).some(id => id && id !== productId)) return null;
   } else if (adapter === "awin_kabum") {
     const skuAncora = extrairSkuUrlOficialKabum(extrairUrlKabumDeAwin(anchorUrl) || anchorUrl);
-    if (!urlDaFonteTecnica(anchorUrl, "awin", "kabum") || skuAncora !== productId ||
+    const ancoraDiretaValida = urlDaFonteTecnica(anchorUrl, "awin", "kabum") && skuAncora === productId;
+    if ((!ancoraDiretaValida && !transporteKabumValido) ||
         source !== "kabum_html.title" || produto.tituloFonteOficial !== source ||
         produto.produtoIdCanonico !== productId ||
         ![canonicalUrl, adapterCanonicalUrl, metadataOriginal].every(url => extrairSkuUrlOficialKabum(url) === productId) ||
-        [anchorUrl, resultOriginal].map(extrairSkuUrlOficialKabum).some(id => id && id !== productId)) return null;
+        [anchorUrl, resultOriginal, urlExpandidaKabum].map(extrairSkuUrlOficialKabum).some(id => id && id !== productId)) return null;
   } else {
     return null;
   }
