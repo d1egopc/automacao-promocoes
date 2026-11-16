@@ -61,8 +61,115 @@ jobs:
             --report "$RUNNER_TEMP/guardian-v1-report.json"
           cat "$RUNNER_TEMP/guardian-v1-report.json"
 
+  fairness-baseline:
+    name: PostgreSQL 17 fairness base versus candidate evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Prepare equivalent base and candidate checkouts
+        shell: bash
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: ssh://git@github.com/
+        run: |
+          set -euo pipefail
+          git cat-file -e "${BASE_SHA}^{commit}"
+          git merge-base --is-ancestor "$BASE_SHA" "$GITHUB_SHA"
+          git worktree add --detach "$RUNNER_TEMP/fairness-base" "$BASE_SHA"
+          git worktree add --detach "$RUNNER_TEMP/fairness-candidate" "$GITHUB_SHA"
+          (cd "$RUNNER_TEMP/fairness-base" && npm ci)
+          (cd "$RUNNER_TEMP/fairness-candidate" && npm ci)
+          base_test_hash="$(sha256sum "$RUNNER_TEMP/fairness-base/tests/universal-flow-fairness-real-transitions.postgres.js" | cut -d' ' -f1)"
+          candidate_test_hash="$(sha256sum "$RUNNER_TEMP/fairness-candidate/tests/universal-flow-fairness-real-transitions.postgres.js" | cut -d' ' -f1)"
+          test "$base_test_hash" = "$candidate_test_hash"
+          echo "FAIRNESS_TEST_HASH_SAME=$base_test_hash"
+      - name: Start independent BASE PostgreSQL 17
+        shell: bash
+        run: |
+          set -euo pipefail
+          data="$RUNNER_TEMP/fairness-base/.local-postgres/data"
+          mkdir -p "$data"
+          docker run -d --name fairness-base-pg --network host \
+            -e POSTGRES_DB=optimus_universal_fixture \
+            -e POSTGRES_HOST_AUTH_METHOD=trust \
+            -e PGDATA="$data" -v "$data:$data" postgres:17 -p 55433
+          for attempt in $(seq 1 30); do
+            docker exec fairness-base-pg pg_isready -h 127.0.0.1 -p 55433 -U postgres -d optimus_universal_fixture && exit 0
+            sleep 2
+          done
+          docker logs fairness-base-pg
+          exit 1
+      - name: BASE fairness raw test (failure remains visible)
+        id: base_fairness
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          cd "$RUNNER_TEMP/fairness-base"
+          node tests/universal-flow-fairness-real-transitions.postgres.js 2>&1 | tee "$RUNNER_TEMP/base-fairness.log"
+      - name: Stop BASE PostgreSQL 17
+        if: always()
+        shell: bash
+        run: docker rm -f fairness-base-pg >/dev/null 2>&1 || true
+      - name: Start independent CANDIDATE PostgreSQL 17
+        shell: bash
+        run: |
+          set -euo pipefail
+          data="$RUNNER_TEMP/fairness-candidate/.local-postgres/data"
+          mkdir -p "$data"
+          docker run -d --name fairness-candidate-pg --network host \
+            -e POSTGRES_DB=optimus_universal_fixture \
+            -e POSTGRES_HOST_AUTH_METHOD=trust \
+            -e PGDATA="$data" -v "$data:$data" postgres:17 -p 55433
+          for attempt in $(seq 1 30); do
+            docker exec fairness-candidate-pg pg_isready -h 127.0.0.1 -p 55433 -U postgres -d optimus_universal_fixture && exit 0
+            sleep 2
+          done
+          docker logs fairness-candidate-pg
+          exit 1
+      - name: CANDIDATE fairness raw test (failure remains visible)
+        id: candidate_fairness
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          cd "$RUNNER_TEMP/fairness-candidate"
+          node tests/universal-flow-fairness-real-transitions.postgres.js 2>&1 | tee "$RUNNER_TEMP/candidate-fairness.log"
+      - name: Stop CANDIDATE PostgreSQL 17
+        if: always()
+        shell: bash
+        run: docker rm -f fairness-candidate-pg >/dev/null 2>&1 || true
+      - name: Compare original failure signatures without masking them
+        if: always()
+        shell: bash
+        env:
+          BASE_OUTCOME: ${{ steps.base_fairness.outcome }}
+          CANDIDATE_OUTCOME: ${{ steps.candidate_fairness.outcome }}
+        run: |
+          set -euo pipefail
+          test "$BASE_OUTCOME" = failure
+          test "$CANDIDATE_OUTCOME" = failure
+          grep -o '"fairness_claim_falhou":[0-9]*' "$RUNNER_TEMP/base-fairness.log" > "$RUNNER_TEMP/base-fairness.signature"
+          grep -o '"fairness_claim_falhou":[0-9]*' "$RUNNER_TEMP/candidate-fairness.log" > "$RUNNER_TEMP/candidate-fairness.signature"
+          diff -u "$RUNNER_TEMP/base-fairness.signature" "$RUNNER_TEMP/candidate-fairness.signature"
+          test "$(cat "$RUNNER_TEMP/base-fairness.signature")" = '"fairness_claim_falhou":2'
+          {
+            echo '### Fairness baseline comparison'
+            echo '- BASE_FAIRNESS=FAIL fairness_claim_falhou:2'
+            echo '- CANDIDATO_FAIRNESS=FAIL fairness_claim_falhou:2'
+            echo '- BASELINE_DEBT=COMPROVADA; original failures remain in the raw test steps'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
   postgres17:
-    name: PostgreSQL 17 queue and persistence gates
+    name: ML PostgreSQL 17 capture, anchor, offer and queue gate
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -100,7 +207,7 @@ jobs:
           done
           docker logs ci-postgres17
           exit 1
-      - name: PostgreSQL 17 queue, dedup, fanout and workspace isolation
+      - name: PostgreSQL 17 capture, queue and fanout contracts
         shell: bash
         env:
           UF_TEST_PG_PORT: '55433'
@@ -111,14 +218,43 @@ jobs:
           set -euo pipefail
           test "$RUNNER_ENVIRONMENT" = github-hosted
           test -z "${DATABASE_URL:-}"
+          node tests/ml-backend-first-title-capture.test.cjs
           node tests/universal-flow-queue-epoch.postgres.js
           node tests/universal-flow-fanout-owner.postgres.js
-          node tests/universal-flow-fairness-real-transitions.postgres.js
-          node tests/ofertas-v2-dedup-ancora-historica.test.cjs
-      - name: Stop PostgreSQL 17 disposable host service
-        if: always()
+      - name: Stop PostgreSQL 17 host service
         shell: bash
         run: docker rm -f ci-postgres17 >/dev/null 2>&1 || true
+      - name: Start PostgreSQL 17 for anchor and historical dedup
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --name ci-postgres17-anchor \
+            -e POSTGRES_DB=optimus_universal_fixture \
+            -e POSTGRES_HOST_AUTH_METHOD=trust \
+            -p 127.0.0.1:55433:5432 postgres:17
+          for attempt in $(seq 1 30); do
+            docker exec ci-postgres17-anchor pg_isready -U postgres -d optimus_universal_fixture && exit 0
+            sleep 2
+          done
+          docker logs ci-postgres17-anchor
+          exit 1
+      - name: PostgreSQL 17 anchor, Oferta Universal and dedup with zero skips
+        shell: bash
+        env:
+          OPTIMUS_TEST_PG17: '1'
+        run: |
+          set -euo pipefail
+          node --test --test-reporter=tap tests/universal-offer-anchor-local.test.cjs | tee "$RUNNER_TEMP/ml-anchor.tap"
+          grep -Fx '# fail 0' "$RUNNER_TEMP/ml-anchor.tap"
+          grep -Fx '# skipped 0' "$RUNNER_TEMP/ml-anchor.tap"
+          node --test --test-reporter=tap tests/ofertas-v2-dedup-ancora-historica.test.cjs | tee "$RUNNER_TEMP/ml-dedup.tap"
+          grep -Fx '# fail 0' "$RUNNER_TEMP/ml-dedup.tap"
+          grep -Fx '# skipped 0' "$RUNNER_TEMP/ml-dedup.tap"
+      - name: Stop all PostgreSQL 17 disposable services
+        if: always()
+        shell: bash
+        run: |
+          docker rm -f ci-postgres17 ci-postgres17-anchor >/dev/null 2>&1 || true
 
   docker-overlay:
     name: Linux Docker overlay and official image smoke
