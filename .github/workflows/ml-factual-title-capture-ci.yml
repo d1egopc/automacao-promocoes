@@ -1,0 +1,340 @@
+name: ML factual title capture CI only
+
+on:
+  push:
+    branches:
+      - validation/guardian-v1-ml-factual-title-capture-p0-20261116
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  BASE_SHA: 3fd2dc35b9c3987dd0a5ff2c04464ba929f0e95c
+  CANDIDATE_RUNTIME_SHA: f304746b8d045953c22107f1924e5f4955703f78
+
+jobs:
+  validate:
+    name: Node 24 + Guardian + factual title contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install declared dependencies
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: ssh://git@github.com/
+        run: npm ci
+      - name: Exact scope, syntax and factual ML contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git merge-base --is-ancestor "$BASE_SHA" HEAD
+          actual="$(git diff --name-only "$BASE_SHA" HEAD | sort)"
+          expected=$'.github/workflows/ml-factual-title-capture-ci.yml\nmodules/radar/extrator-local.js\ntests/ml-backend-first-title-capture.test.cjs'
+          test "$actual" = "$expected"
+          node --version
+          node --check modules/radar/extrator-local.js
+          node tests/ml-backend-first-title-capture.test.cjs
+          node tests/mercadolivre-identidade-canonica.test.js
+          node tests/mercadolivre-imagem-oficial-fallback.test.js
+          node tests/ml-anchored-polycard-image-queue.test.cjs
+          node tests/mercadolivre-identidade-promocional-focal.test.cjs
+          node tests/radar-commercial-fidelity.test.cjs
+      - name: Guardian exact candidate validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/guardian-v1.cjs validate \
+            --base "$BASE_SHA" \
+            --source "$GITHUB_SHA" \
+            --report "$RUNNER_TEMP/guardian-v1-report.json"
+          cat "$RUNNER_TEMP/guardian-v1-report.json"
+
+  fairness-baseline:
+    name: PostgreSQL 17 fairness base versus candidate evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Prepare equivalent base and candidate checkouts
+        shell: bash
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: ssh://git@github.com/
+        run: |
+          set -euo pipefail
+          git cat-file -e "${BASE_SHA}^{commit}"
+          git cat-file -e "${CANDIDATE_RUNTIME_SHA}^{commit}"
+          git merge-base --is-ancestor "$BASE_SHA" "$GITHUB_SHA"
+          git merge-base --is-ancestor "$CANDIDATE_RUNTIME_SHA" "$GITHUB_SHA"
+          git worktree add --detach "$RUNNER_TEMP/fairness-base" "$BASE_SHA"
+          git worktree add --detach "$RUNNER_TEMP/fairness-candidate" "$CANDIDATE_RUNTIME_SHA"
+          (cd "$RUNNER_TEMP/fairness-base" && npm ci)
+          (cd "$RUNNER_TEMP/fairness-candidate" && npm ci)
+          base_test_hash="$(sha256sum "$RUNNER_TEMP/fairness-base/tests/universal-flow-fairness-real-transitions.postgres.js" | cut -d' ' -f1)"
+          candidate_test_hash="$(sha256sum "$RUNNER_TEMP/fairness-candidate/tests/universal-flow-fairness-real-transitions.postgres.js" | cut -d' ' -f1)"
+          test "$base_test_hash" = "$candidate_test_hash"
+          echo "FAIRNESS_TEST_HASH_SAME=$base_test_hash"
+      - name: Start independent BASE PostgreSQL 17
+        shell: bash
+        run: |
+          set -euo pipefail
+          data="$RUNNER_TEMP/fairness-base/.local-postgres/data"
+          mkdir -p "$data"
+          docker run -d --name fairness-base-pg --network host \
+            -e POSTGRES_DB=optimus_universal_fixture \
+            -e POSTGRES_HOST_AUTH_METHOD=trust \
+            -e PGDATA="$data" -v "$data:$data" postgres:17 -p 55433
+          for attempt in $(seq 1 30); do
+            docker exec fairness-base-pg pg_isready -h 127.0.0.1 -p 55433 -U postgres -d optimus_universal_fixture && exit 0
+            sleep 2
+          done
+          docker logs fairness-base-pg
+          exit 1
+      - name: BASE fairness raw test (failure remains visible)
+        id: base_fairness
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          cd "$RUNNER_TEMP/fairness-base"
+          node tests/universal-flow-fairness-real-transitions.postgres.js 2>&1 | tee "$RUNNER_TEMP/base-fairness.log"
+      - name: Stop BASE PostgreSQL 17
+        if: always()
+        shell: bash
+        run: docker rm -f fairness-base-pg >/dev/null 2>&1 || true
+      - name: Start independent CANDIDATE PostgreSQL 17
+        shell: bash
+        run: |
+          set -euo pipefail
+          data="$RUNNER_TEMP/fairness-candidate/.local-postgres/data"
+          mkdir -p "$data"
+          docker run -d --name fairness-candidate-pg --network host \
+            -e POSTGRES_DB=optimus_universal_fixture \
+            -e POSTGRES_HOST_AUTH_METHOD=trust \
+            -e PGDATA="$data" -v "$data:$data" postgres:17 -p 55433
+          for attempt in $(seq 1 30); do
+            docker exec fairness-candidate-pg pg_isready -h 127.0.0.1 -p 55433 -U postgres -d optimus_universal_fixture && exit 0
+            sleep 2
+          done
+          docker logs fairness-candidate-pg
+          exit 1
+      - name: CANDIDATE fairness raw test (failure remains visible)
+        id: candidate_fairness
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          cd "$RUNNER_TEMP/fairness-candidate"
+          node tests/universal-flow-fairness-real-transitions.postgres.js 2>&1 | tee "$RUNNER_TEMP/candidate-fairness.log"
+      - name: Stop CANDIDATE PostgreSQL 17
+        if: always()
+        shell: bash
+        run: docker rm -f fairness-candidate-pg >/dev/null 2>&1 || true
+      - name: Compare original failure signatures without masking them
+        if: always()
+        shell: bash
+        env:
+          BASE_OUTCOME: ${{ steps.base_fairness.outcome }}
+          CANDIDATE_OUTCOME: ${{ steps.candidate_fairness.outcome }}
+        run: |
+          set -euo pipefail
+          test "$BASE_OUTCOME" = failure
+          test "$CANDIDATE_OUTCOME" = failure
+          grep -o '"fairness_claim_falhou":[0-9]*' "$RUNNER_TEMP/base-fairness.log" > "$RUNNER_TEMP/base-fairness.signature"
+          grep -o '"fairness_claim_falhou":[0-9]*' "$RUNNER_TEMP/candidate-fairness.log" > "$RUNNER_TEMP/candidate-fairness.signature"
+          diff -u "$RUNNER_TEMP/base-fairness.signature" "$RUNNER_TEMP/candidate-fairness.signature"
+          test "$(cat "$RUNNER_TEMP/base-fairness.signature")" = '"fairness_claim_falhou":2'
+          {
+            echo '### Fairness baseline comparison'
+            echo '- BASE_FAIRNESS=FAIL fairness_claim_falhou:2'
+            echo '- CANDIDATO_FAIRNESS=FAIL fairness_claim_falhou:2'
+            echo '- BASELINE_DEBT=COMPROVADA; original failures remain in the raw test steps'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  postgres17:
+    name: ML PostgreSQL 17 capture, anchor, offer and queue gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install declared dependencies
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: ssh://git@github.com/
+        run: npm ci
+      - name: Start PostgreSQL 17 disposable host service
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker rm -f ci-postgres17 >/dev/null 2>&1 || true
+          mkdir -p "$GITHUB_WORKSPACE/.local-postgres/data"
+          docker run -d --name ci-postgres17 --network host \
+            -e POSTGRES_DB=optimus_universal_fixture \
+            -e POSTGRES_HOST_AUTH_METHOD=trust \
+            -e PGDATA="$GITHUB_WORKSPACE/.local-postgres/data" \
+            -v "$GITHUB_WORKSPACE/.local-postgres/data:$GITHUB_WORKSPACE/.local-postgres/data" \
+            postgres:17 -p 55433
+          for attempt in $(seq 1 30); do
+            if docker exec ci-postgres17 pg_isready -h 127.0.0.1 -p 55433 -U postgres -d optimus_universal_fixture; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs ci-postgres17
+          exit 1
+      - name: PostgreSQL 17 capture, queue and fanout contracts
+        shell: bash
+        env:
+          UF_TEST_PG_PORT: '55433'
+          UF_TEST_PG_EXPECTED_SERVER_HOST: 127.0.0.1
+          UF_TEST_PG_EXPECTED_SERVER_PORT: '55433'
+          UF_TEST_PG_EXPECTED_DATA_DIR: ${{ github.workspace }}/.local-postgres/data
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node tests/ml-backend-first-title-capture.test.cjs
+          node tests/universal-flow-queue-epoch.postgres.js
+          node tests/universal-flow-fanout-owner.postgres.js
+      - name: Stop PostgreSQL 17 host service
+        shell: bash
+        run: docker rm -f ci-postgres17 >/dev/null 2>&1 || true
+      - name: Start PostgreSQL 17 for anchor and historical dedup
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --name ci-postgres17-anchor \
+            -e POSTGRES_DB=optimus_universal_fixture \
+            -e POSTGRES_HOST_AUTH_METHOD=trust \
+            -p 127.0.0.1:55433:5432 postgres:17
+          for attempt in $(seq 1 30); do
+            docker exec ci-postgres17-anchor pg_isready -U postgres -d optimus_universal_fixture && exit 0
+            sleep 2
+          done
+          docker logs ci-postgres17-anchor
+          exit 1
+      - name: PostgreSQL 17 anchor, Oferta Universal and dedup with zero skips
+        shell: bash
+        env:
+          OPTIMUS_TEST_PG17: '1'
+        run: |
+          set -euo pipefail
+          node --test --test-reporter=tap tests/universal-offer-anchor-local.test.cjs | tee "$RUNNER_TEMP/ml-anchor.tap"
+          grep -Fx '# fail 0' "$RUNNER_TEMP/ml-anchor.tap"
+          grep -Fx '# skipped 0' "$RUNNER_TEMP/ml-anchor.tap"
+          node --test --test-reporter=tap tests/ofertas-v2-dedup-ancora-historica.test.cjs | tee "$RUNNER_TEMP/ml-dedup.tap"
+          grep -Fx '# fail 0' "$RUNNER_TEMP/ml-dedup.tap"
+          grep -Fx '# skipped 0' "$RUNNER_TEMP/ml-dedup.tap"
+      - name: Stop all PostgreSQL 17 disposable services
+        if: always()
+        shell: bash
+        run: |
+          docker rm -f ci-postgres17 ci-postgres17-anchor >/dev/null 2>&1 || true
+
+  docker-overlay:
+    name: Linux Docker overlay and official image smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Build base and candidate overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          base="$BASE_SHA"
+          base_tag="local/optimus-deploy-base:ml-title-$GITHUB_RUN_ID"
+          candidate="local/optimus-ml-title-overlay:ci-$GITHUB_RUN_ID"
+          fixture="$(mktemp -d)"
+          mkdir -p "$fixture/base"
+          git cat-file -e "${base}^{commit}"
+          git merge-base --is-ancestor "$base" HEAD
+          git archive "$base" | tar -x -C "$fixture/base"
+          test -f "$fixture/base/Dockerfile"
+          sed \
+            -e 's|apt-get install -y --no-install-recommends fontconfig fonts-dejavu-core|apt-get install -y --no-install-recommends fontconfig fonts-dejavu-core git ca-certificates|' \
+            -e 's|^RUN npm ci --omit=dev$|RUN GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf GIT_CONFIG_VALUE_0=ssh://git@github.com/ npm ci --omit=dev|' \
+            "$fixture/base/Dockerfile" > "$fixture/base.Dockerfile"
+          docker build -f "$fixture/base.Dockerfile" -t "$base_tag" "$fixture/base"
+          node scripts/guardian-v1.cjs prepare --base "$base" --source "$GITHUB_SHA" --release-mode overlay > "$fixture/plan.json"
+          node - "$fixture/plan.json" <<'NODE'
+          const assert = require("node:assert/strict");
+          const fs = require("node:fs");
+          const plan = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+          assert.equal(plan.validation, "PASS");
+          assert.deepEqual(plan.runtimeFiles, ["modules/radar/extrator-local.js"]);
+          assert.deepEqual(plan.blocked, []);
+          console.log("OVERLAY_RUNTIME_EXACT=" + plan.runtimeFiles.join(","));
+          NODE
+          node scripts/guardian-v1.cjs build-dockerfile --base "$base" --source "$GITHUB_SHA" --base-tag "$base_tag" > "$fixture/overlay.Dockerfile"
+          grep -Fx 'COPY --chown=node:node modules/radar/extrator-local.js /app/modules/radar/extrator-local.js' "$fixture/overlay.Dockerfile"
+          if grep -Fq '/app/optimus-capture/' "$fixture/overlay.Dockerfile"; then
+            echo 'overlay must not replace Chrome extension files' >&2
+            exit 1
+          fi
+          docker build --pull=false --network=none -f "$fixture/overlay.Dockerfile" -t "$candidate" .
+          expected="$(git show "$GITHUB_SHA:modules/radar/extrator-local.js" | sha256sum | cut -d' ' -f1)"
+          actual="$(docker run --rm --network=none "$candidate" sha256sum /app/modules/radar/extrator-local.js | cut -d' ' -f1)"
+          test "$expected" = "$actual"
+          echo "RUNTIME_HASH_OK modules/radar/extrator-local.js $actual"
+          docker run --rm --network=none "$base_tag" sh -c 'cd /app && find optimus-capture -type f -print | LC_ALL=C sort | xargs -r sha256sum' > "$fixture/extension-base.sha"
+          docker run --rm --network=none "$candidate" sh -c 'cd /app && find optimus-capture -type f -print | LC_ALL=C sort | xargs -r sha256sum' > "$fixture/extension-candidate.sha"
+          diff -u "$fixture/extension-base.sha" "$fixture/extension-candidate.sha"
+          echo "EXTENSION_TREE_UNCHANGED=PASS"
+          echo "OVERLAY_IMAGE_ID=$(docker image inspect "$candidate" --format '{{.Id}}')"
+          docker run --rm --network=none "$candidate" node -e '
+            const assert = require("node:assert/strict");
+            assert.match(process.version, /^v24\./);
+            const radar = require("/app/modules/radar/extrator-local.js");
+            const image = require("/app/modules/imagens/resolver-imagem-universal.js");
+            assert.equal(typeof radar.extrairEvidenciasRadarLocal, "function");
+            assert.equal(typeof image, "object");
+            const link = "https://meli.la/1wteTwg";
+            const result = radar.extrairEvidenciasRadarLocal({
+              textoOriginal: "Kit 4 Cuecas Lupo Am Boxer Masculina\nR$ 35,00\n" + link,
+              links: [link], marketplaceDetectado: "mercadolivre"
+            });
+            assert.equal(result.titulo.valor, "Kit 4 Cuecas Lupo Am Boxer Masculina");
+            const rejected = radar.extrairEvidenciasRadarLocal({
+              textoOriginal: "Grupo de ofertas Gerais\nR$ 35,00\n" + link,
+              links: [link], marketplaceDetectado: "mercadolivre"
+            });
+            assert.equal(rejected.titulo.valor, null);
+            console.log("DOCKER_SMOKE=PASS node=" + process.version + " factual-title footer image-resolver-loaded");
+          '
