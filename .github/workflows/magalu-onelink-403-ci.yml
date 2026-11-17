@@ -1,0 +1,115 @@
+name: Magalu OneLink 403 CI only
+
+on:
+  push:
+    branches:
+      - validation/guardian-v1-magalu-onelink-403-20261116
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BASE_SHA: 681031f559e3d6632f98b2afa0bf9fba8e54ae42
+      UF_TEST_PG_PORT: 55433
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Start loopback-only disposable PostgreSQL 17
+        run: |
+          set -euo pipefail
+          docker run -d --name magalu-onelink-pg17 --network host \
+            -e PGDATA="$GITHUB_WORKSPACE/.local-postgres/data" \
+            -e POSTGRES_DB=optimus_universal_fixture \
+            -e POSTGRES_HOST_AUTH_METHOD=trust \
+            postgres:17 -p 55433 -c listen_addresses=127.0.0.1
+          for attempt in $(seq 1 30); do
+            if docker exec magalu-onelink-pg17 pg_isready -h 127.0.0.1 -p 55433 -U postgres; then exit 0; fi
+            sleep 2
+          done
+          exit 1
+
+      - name: Exact scope and Guardian overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${DATABASE_URL:-}"
+          git cat-file -e "${BASE_SHA}^{commit}"
+          git merge-base --is-ancestor "$BASE_SHA" "$GITHUB_SHA"
+          git diff --check "$BASE_SHA" "$GITHUB_SHA" -- \
+            .github/workflows/magalu-onelink-403-ci.yml \
+            modules/engine/importer/adapters/magalu.adapter.js
+          diff -u <(printf '%s\n' \
+            'A .github/workflows/magalu-onelink-403-ci.yml' \
+            'M modules/engine/importer/adapters/magalu.adapter.js' \
+            'A tests/magalu-onelink-403-fallback.test.cjs') \
+            <(git diff --name-status --no-renames "$BASE_SHA" "$GITHUB_SHA" | tr '\t' ' ')
+          node scripts/guardian-v1.cjs prepare \
+            --base "$BASE_SHA" --source "$GITHUB_SHA" --release-mode overlay \
+            > "$RUNNER_TEMP/magalu-plan.json"
+          node -e '
+            const assert = require("node:assert/strict");
+            const plan = require(process.argv[1]);
+            assert.equal(plan.validation, "PASS");
+            assert.equal(plan.deployMode, "overlay");
+            assert.deepEqual([...plan.runtimeFiles].sort(), [
+              "modules/engine/importer/adapters/magalu.adapter.js"
+            ]);
+            console.log("GUARDIAN_RUNTIME=" + plan.runtimeFiles.join(","));
+          ' "$RUNNER_TEMP/magalu-plan.json"
+
+      - name: Install declared dependencies
+        run: npm ci
+
+      - name: Node 24 Magalu focal and regressions
+        run: |
+          set -euo pipefail
+          node --check modules/engine/importer/adapters/magalu.adapter.js
+          node tests/magalu-onelink-403-fallback.test.cjs
+          node --test \
+            tests/magalu-engine-importer.test.js \
+            tests/magalu-v2-golden-path.test.js \
+            tests/magalu-firstparty-identity-fallback.test.cjs \
+            tests/magalu-worker-boundary-focal.test.cjs \
+            tests/magalu-local-worker-sku-identity.test.cjs \
+            tests/magalu-affiliate-link.test.js \
+            tests/link-conversao-ocorrencia-marketplaces.test.js
+
+      - name: PostgreSQL 17 queue, expiry and fanout contracts
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 55433
+          PGUSER: postgres
+          PGDATABASE: optimus_universal_fixture
+          UF_TEST_PG_EXPECTED_SERVER_HOST: 127.0.0.1
+          UF_TEST_PG_EXPECTED_SERVER_PORT: 55433
+          UF_TEST_PG_EXPECTED_DATA_DIR: ${{ github.workspace }}/.local-postgres/data
+        run: |
+          set -euo pipefail
+          until pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE"; do sleep 1; done
+          node tests/universal-flow-queue-epoch.postgres.js
+          node tests/universal-flow-expired-fresh.postgres.js
+          node tests/universal-flow-fanout-owner.postgres.js
+
+      - name: Guardian final validation
+        run: |
+          set -euo pipefail
+          node scripts/guardian-v1.cjs validate \
+            --base "$BASE_SHA" --source "$GITHUB_SHA" \
+            --report "$RUNNER_TEMP/magalu-guardian.json"
+
+      - name: Remove disposable lab only
+        if: always()
+        run: docker rm -f magalu-onelink-pg17 || true
