@@ -17,7 +17,8 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    steps:`n      - uses: actions/checkout@v4
+    steps:
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -87,7 +88,8 @@ jobs:
             if docker exec magalu-composed-pg17 pg_isready -h 127.0.0.1 -p 55433 -U postgres; then exit 0; fi
             sleep 2
           done
-          exit 1      - name: PostgreSQL 17 disposable contracts
+          exit 1
+      - name: PostgreSQL 17 disposable contracts
         env:
           UF_TEST_PG_PORT: '55433'
         run: |
@@ -98,7 +100,8 @@ jobs:
           node tests/universal-flow-fanout-owner.postgres.js
       - name: Remove disposable PostgreSQL 17
         if: always()
-        run: docker rm -f magalu-composed-pg17 || true      - name: Guardian final validation
+        run: docker rm -f magalu-composed-pg17 || true
+      - name: Guardian final validation
         run: |
           set -euo pipefail
           node scripts/guardian-v1.cjs validate --base "$BASE_SHA" --source "$GITHUB_SHA" --release-mode overlay --report "$RUNNER_TEMP/guardian.json"
