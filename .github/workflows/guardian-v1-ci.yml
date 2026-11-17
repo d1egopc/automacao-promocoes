@@ -34,6 +34,7 @@ on:
       - validation/classificador-universal-v3-20261027
       - feature/landing-page-v1-*
       - validation/landing-v13-media-buttons-20261025
+      - validation/golden-kabum-awin-20261116
   workflow_dispatch:
 
 permissions:
@@ -200,6 +201,16 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: KaBuM/AWIN Golden contracts (Node 24)
+        if: github.ref == 'refs/heads/validation/golden-kabum-awin-20261116'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-reporter=tap \
+            tests/kabum-awin-golden-contract.test.cjs | tee "$RUNNER_TEMP/kabum-awin-golden.log"
+          grep -Eq '^# pass 5$' "$RUNNER_TEMP/kabum-awin-golden.log"
+          grep -Eq '^# fail 0$' "$RUNNER_TEMP/kabum-awin-golden.log"
+          grep -Eq '^# skipped 0$' "$RUNNER_TEMP/kabum-awin-golden.log"
       - name: ML factual capture and proven listing anchor
         if: github.ref == 'refs/heads/validation/ml-factual-capture-p0-20261114'
         run: |
