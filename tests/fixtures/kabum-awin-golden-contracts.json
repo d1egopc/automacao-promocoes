@@ -1,0 +1,33 @@
+{
+  "workspaceId": "user_pss60lus",
+  "job": {
+    "id": 991001,
+    "evento_id": 242901,
+    "cliente_id": "user_pss60lus",
+    "marketplace": "kabum"
+  },
+  "eventoTexto": "Produto oficial KaBuM\nR$ 1.779,00\nDe R$ 1.999,00\nPIX\nCupom FARMOU",
+  "produto": {
+    "sku": "609953",
+    "urlOriginal": "https://www.kabum.com.br/produto/609953/processador-amd-ryzen-9-5900xt?variant=12345",
+    "titulo": "Processador AMD Ryzen 9 5900XT",
+    "categoria": "Gamer e Hardware",
+    "imagem": "https://images.kabum.com.br/produtos/fotos/609953/ryzen-9-5900xt.jpg",
+    "preco": 1779,
+    "precoOriginal": 1999,
+    "pix": "À vista no PIX",
+    "cupom": "FARMOU",
+    "variante": "12345"
+  },
+  "campanha": {
+    "urlOriginal": "https://seuhardware.com/s/C1TyTxK",
+    "urlExpandida": "https://www.kabum.com.br/promocao/CP1TEMPESTADE10"
+  },
+  "cupomAuxiliar": {
+    "urlOriginal": "https://seuhardware.com/s/cupom-farmou",
+    "urlExpandida": "https://www.kabum.com.br/categoria/cupom"
+  },
+  "produtoDivergente": {
+    "urlOriginal": "https://www.kabum.com.br/produto/999999/produto-diferente"
+  }
+}
