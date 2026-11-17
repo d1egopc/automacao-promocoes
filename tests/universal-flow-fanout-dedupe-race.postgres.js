@@ -74,6 +74,8 @@ async function run() {
     [guardedEventId])).rows[0].n;
     const guardedUsed = (await admin.query(`SELECT hot_used FROM engine_hot_admission_control
       WHERE id=1`)).rows[0].hot_used;
+    console.log(JSON.stringify({ test: "universal_fanout_guarded_results",
+      guarded }));
     assert.equal(guardedCount, 1);
     assert.equal(guardedUsed, 1);
     assert(guarded.every(result => result.inserted === 1 ||
