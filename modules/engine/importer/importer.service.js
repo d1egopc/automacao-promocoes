@@ -659,6 +659,88 @@ function sqlConclusaoIdentidadeMl(j) {
       AND (t.result_metadata->>'collectedAt')::timestamptz < to_timestamp((${v}->>'deadline')::double precision / 1000)))`;
 }
 
+function sqlConclusaoIdentidadeMagalu(j, e) {
+  const r = `${j}.metadata->'localWorkerImageRetry'`;
+  const t = `${r}->'identidadeTask'`;
+  const frescor = sqlFrescorComercialPreImporter(j, e);
+  return `(LOWER(COALESCE(NULLIF(TRIM(${j}.marketplace), ''), NULLIF(TRIM(${j}.marketplace_detectado), ''), '')) = 'magalu'
+    AND ${j}.oferta_id IS NULL
+    AND ${r}->>'resultadoAplicadoTaskId' IS NOT NULL
+    AND ${t}->>'taskId' = ${r}->>'resultadoAplicadoTaskId'
+    AND ${t}->>'workspaceId' = ${j}.cliente_id
+    AND ${t}->>'eventoId' = ${j}.evento_id::text
+    AND NULLIF(${t}->>'expiresAt', '')::timestamptz > clock_timestamp()
+    AND ${frescor.vivo})`;
+}
+
+function validarCallbackIdentidadeMagaluParaAcordar({ task = {}, resultado = {}, agoraMs = Date.now() } = {}) {
+  if (String(task.marketplace || "").toLowerCase() !== "magalu" ||
+      task.capability !== "magalu_identity_v1" || task.type !== "identidade_oficial") {
+    return { ok: false, motivo: "task_magalu_invalida" };
+  }
+  if (task.status !== "completed") return { ok: false, motivo: "task_nao_concluida" };
+  if (resultado?.identidadeValidada !== true ||
+      String(resultado.identityKey || "") !== String(task.productId || "") ||
+      !String(resultado.observedProductId || "") ||
+      !String(resultado.canonicalUrl || resultado.finalUrl || "")) {
+    return { ok: false, motivo: "resultado_identidade_invalido" };
+  }
+  const completedAt = Date.parse(task.completedAt || "");
+  const createdAt = Date.parse(task.createdAt || "");
+  const expiresAt = Date.parse(task.expiresAt || "");
+  if (!Number.isFinite(completedAt) || !Number.isFinite(createdAt) || !Number.isFinite(expiresAt) ||
+      completedAt < createdAt || completedAt >= expiresAt || completedAt > Number(agoraMs || Date.now()) + 30_000) {
+    return { ok: false, motivo: "task_resultado_fora_da_janela" };
+  }
+  return { ok: true, completedAt, expiresAt };
+}
+
+async function acordarJobMagaluPorIdentidade({ task = {}, resultado = {}, agoraMs = Date.now(), queryFn = queryEngine } = {}) {
+  const validacao = validarCallbackIdentidadeMagaluParaAcordar({ task, resultado, agoraMs });
+  if (!validacao.ok) return { ok: false, ignorado: true, motivo: validacao.motivo };
+  const taskId = String(task.id || task.taskId || "").trim();
+  const identityKey = String(task.productId || "").trim();
+  if (!taskId || !identityKey || typeof queryFn !== "function") {
+    return { ok: false, ignorado: true, motivo: "callback_magalu_sem_vinculo" };
+  }
+  const frescor = sqlFrescorComercialPreImporter("j", "e");
+  const sql = `UPDATE engine_jobs_cliente j
+      SET metadata = COALESCE(j.metadata, '{}'::jsonb) || jsonb_build_object(
+        'localWorkerImageRetry',
+        COALESCE(j.metadata->'localWorkerImageRetry', '{}'::jsonb) || jsonb_build_object(
+          'proximaTentativaEm', clock_timestamp(),
+          'proximaTentativaEmMs', (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::bigint,
+          'motivo', 'identidade_local_concluida',
+          'resultadoAplicadoTaskId', $1::text
+        )
+      ),
+      atualizado_em = NOW()
+    FROM engine_eventos_brutos e
+    WHERE j.id::text = (j.metadata #>> '{localWorkerImageRetry,identidadeTask,jobId}')
+      AND j.evento_id = e.id
+      AND LOWER(COALESCE(NULLIF(TRIM(j.marketplace), ''), NULLIF(TRIM(j.marketplace_detectado), ''), '')) = 'magalu'
+      AND j.status = 'pronto_para_importar'
+      AND j.oferta_id IS NULL
+      AND (j.metadata #>> '{localWorkerImageRetry,identidadeTask,taskId}') = $1::text
+      AND (j.metadata #>> '{localWorkerImageRetry,identidadeTask,identityKey}') = $2::text
+      AND (j.metadata #>> '{localWorkerImageRetry,identidadeTask,workspaceId}') = j.cliente_id
+      AND (j.metadata #>> '{localWorkerImageRetry,identidadeTask,eventoId}') = j.evento_id::text
+      AND NULLIF(j.metadata #>> '{localWorkerImageRetry,identidadeTask,expiresAt}', '')::timestamptz > clock_timestamp()
+      AND COALESCE(j.metadata #>> '{localWorkerImageRetry,resultadoAplicadoTaskId}', '') <> $1::text
+      AND ${frescor.vivo}`;
+  let resultadoQuery;
+  try {
+    resultadoQuery = await queryFn(sql, [taskId, identityKey]);
+  } catch (erro) {
+    return { ok: false, motivo: "acordar_job_magalu_query_falhou", erro: String(erro?.message || erro).slice(0, 180) };
+  }
+  if (!resultadoQuery?.ok) return { ok: false, motivo: resultadoQuery?.motivo || "acordar_job_magalu_query_falhou", erro: resultadoQuery?.erro || "" };
+  const rowCount = Number(resultadoQuery.resultado?.rowCount || 0);
+  return rowCount > 0
+    ? { ok: true, acordado: true, resultado: resultadoQuery.resultado }
+    : { ok: true, acordado: false, ignorado: true, motivo: "job_magalu_nao_elegivel_ou_ja_acordado", resultado: resultadoQuery.resultado };
+}
+
 async function buscarJobsProntos({ limite = 10, marketplace = "" } = {}) {
   const frescor = sqlFrescorComercialPreImporter("j", "e");
   const params = [];
@@ -668,8 +750,8 @@ async function buscarJobsProntos({ limite = 10, marketplace = "" } = {}) {
   const filtros = [
     "j.status = 'pronto_para_importar'",
     parametroCanario
-      ? `(${retry.vencido} OR (j.cliente_id = ANY(${parametroCanario}::text[]) AND ${sqlConclusaoIdentidadeMl("j")}))`
-      : retry.vencido,
+      ? `(${retry.vencido} OR (j.cliente_id = ANY(${parametroCanario}::text[]) AND ${sqlConclusaoIdentidadeMl("j")}) OR ${sqlConclusaoIdentidadeMagalu("j", "e")})`
+      : `(${retry.vencido} OR ${sqlConclusaoIdentidadeMagalu("j", "e")})`,
     sqlFiltroEpochReal("e")
   ];
   const marketplaceExpr = "LOWER(COALESCE(NULLIF(TRIM(marketplace), ''), NULLIF(TRIM(marketplace_detectado), ''), ''))";
@@ -6447,6 +6529,8 @@ module.exports = {
   agendarRetryAfiliacaoShopee,
   planoRetryImagemMagaluLocal,
   agendarRetryImagemMagaluLocal,
+  validarCallbackIdentidadeMagaluParaAcordar,
+  acordarJobMagaluPorIdentidade,
   planoRetryImagemMercadoLivreLocal,
   agendarRetryImagemMercadoLivreLocal,
   normalizarOfertaImportada,

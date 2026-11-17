@@ -1,0 +1,103 @@
+name: Magalu composed overlay CI only
+
+on:
+  push:
+    branches:
+      - validation/magalu-overlay-composed-ci-20261116
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  BASE_SHA: 83b9d09a9023c264ed6d36f75339929e40bbb26c
+  BASE_IMAGE: sha256:9dcb55cfeb4532338ad81a3413940092d17a34d80d3c147325e0c3a35ed33106
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: optimus_universal_fixture
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 127.0.0.1:55433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d optimus_universal_fixture"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install declared dependencies
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: ssh://git@github.com/
+        run: npm ci
+      - name: Exact five-file runtime scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${DATABASE_URL:-}"
+          expected=$(printf '%s\n' \
+            '.github/workflows/magalu-overlay-composed-ci.yml' \
+            'index.js' \
+            'modules/engine/importer/adapters/magalu.adapter.js' \
+            'modules/engine/importer/importer.service.js' \
+            'modules/engine/orchestrator.runner.js' \
+            'modules/local-worker/local-worker.service.js' | sort)
+          actual=$(git diff --name-only --no-renames "$BASE_SHA" "$GITHUB_SHA" | sort)
+          test "$actual" = "$expected"
+          node scripts/guardian-v1.cjs prepare --base "$BASE_SHA" --source "$GITHUB_SHA" --release-mode overlay > "$RUNNER_TEMP/plan.json"
+          node - "$RUNNER_TEMP/plan.json" <<'NODE'
+          const fs = require('node:fs');
+          const assert = require('node:assert/strict');
+          const plan = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          assert.equal(plan.validation, 'PASS');
+          assert.deepEqual([...plan.runtimeFiles].sort(), [
+            'index.js',
+            'modules/engine/importer/adapters/magalu.adapter.js',
+            'modules/engine/importer/importer.service.js',
+            'modules/engine/orchestrator.runner.js',
+            'modules/local-worker/local-worker.service.js'
+          ]);
+          assert.deepEqual(plan.blocked, []);
+          console.log('COMPOSITION_SCOPE=PASS');
+          NODE
+      - name: Node 24 syntax and Magalu/shared regressions
+        run: |
+          set -euo pipefail
+          node --version
+          node --check index.js
+          node --check modules/engine/importer/adapters/magalu.adapter.js
+          node --check modules/engine/importer/importer.service.js
+          node --check modules/engine/orchestrator.runner.js
+          node --check modules/local-worker/local-worker.service.js
+          node tests/magalu-engine-importer.test.js
+          node tests/magalu-local-worker-identity.test.js
+          node tests/contrato-comercial-final-universal.test.js
+          node tests/link-conversao-ocorrencia-marketplaces.test.js
+      - name: PostgreSQL 17 disposable contracts
+        env:
+          UF_TEST_PG_PORT: '55433'
+          UF_TEST_PG_EXPECTED_SERVER_HOST: 127.0.0.1
+          UF_TEST_PG_EXPECTED_SERVER_PORT: '5432'
+        run: |
+          set -euo pipefail
+          test -z "${DATABASE_URL:-}"
+          node tests/universal-flow-queue-epoch.postgres.js
+          node tests/universal-flow-expired-fresh.postgres.js
+          node tests/universal-flow-fanout-owner.postgres.js
+      - name: Guardian final validation
+        run: |
+          set -euo pipefail
+          node scripts/guardian-v1.cjs validate --base "$BASE_SHA" --source "$GITHUB_SHA" --release-mode overlay --report "$RUNNER_TEMP/guardian.json"

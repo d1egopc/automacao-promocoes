@@ -118,6 +118,7 @@ function criarLocalWorkerService(opcoes = {}) {
   const technicalSlug = slugTecnicoMagalu(opcoes.magaluTechnicalSlug || process.env.LOCAL_WORKER_MAGALU_TECHNICAL_SLUG || "");
   const agora = typeof opcoes.agora === "function" ? opcoes.agora : () => new Date();
   const onOpportunityResult = typeof opcoes.onOpportunityResult === "function" ? opcoes.onOpportunityResult : null;
+  const onIdentityResult = typeof opcoes.onIdentityResult === "function" ? opcoes.onIdentityResult : null;
 
   async function ensureSchema() {
     try {
@@ -328,13 +329,25 @@ function criarLocalWorkerService(opcoes = {}) {
         }
         throw rejeicao;
       }
-      return repo.completarIdentidade({
+      const conclusao = await repo.completarIdentidade({
         taskId,
         workerId: worker.workerId,
         leaseToken,
         resultado: validado,
         cacheTtlMs: MAGALU_IDENTITY_CACHE_TTL_MS
       });
+      if (conclusao?.ok && conclusao.idempotente !== true && onIdentityResult) {
+        try {
+          await onIdentityResult({ task: conclusao.task, resultado: validado });
+        } catch (erroWake) {
+          console.warn("[MAGALU-IDENTITY-RESULT-WAKE-ERRO]", JSON.stringify({
+            taskId: task.id,
+            motivo: "callback_importador_falhou",
+            erro: texto(erroWake?.message).slice(0, 180)
+          }));
+        }
+      }
+      return conclusao;
     }
     if (task.capability === ML_IDENTITY_CAPABILITY) {
       const validado = validarResultadoIdentidadeMercadoLivre({

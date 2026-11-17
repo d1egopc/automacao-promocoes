@@ -5,6 +5,10 @@ let engineOrquestradorInicioMs = 0;
 let engineOrquestradorOfcAtivo = false;
 let engineOrquestradorUltimaRodada = { rodadaId: "", inicioMs: 0, fimMs: 0 };
 let engineOrquestradorUltimaOfc = { rodadaId: "", inicioMs: 0, fimMs: 0 };
+let engineOrquestradorOpcoes = null;
+let engineMagaluWakeRodando = false;
+let engineMagaluWakeAgendado = false;
+let engineMagaluWakePendente = false;
 let clonadorGruposEntradaRodando = false;
 let clonadorGruposEntradaIntervalo = null;
 let clonadorGruposEntradaOpcoes = null;
@@ -644,7 +648,66 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
       }, {})
     });
     finalizarPerfBackground(okPerfBackground, { engineRodadaId: rodadaId });
+    if (engineMagaluWakePendente) {
+      engineMagaluWakePendente = false;
+      solicitarImportacaoMagalu({ motivo: "rodada_engine_concluida" });
+    }
   }
+}
+
+function solicitarImportacaoMagalu({ motivo = "identidade_magalu_concluida" } = {}) {
+  const opcoes = engineOrquestradorOpcoes;
+  if (typeof opcoes?.importarJobsProntosEngine !== "function" || typeof opcoes?.getDepsImportador !== "function") {
+    engineMagaluWakePendente = true;
+    return { ok: true, agendado: false, coalescido: true, motivo: "importador_magalu_nao_inicializado" };
+  }
+  if (engineOrquestradorRodando || engineMagaluWakeRodando) {
+    engineMagaluWakePendente = true;
+    return { ok: true, agendado: false, coalescido: true, motivo };
+  }
+  if (engineMagaluWakeAgendado) {
+    return { ok: true, agendado: false, coalescido: true, motivo };
+  }
+  engineMagaluWakeAgendado = true;
+  const setImmediateFn = typeof opcoes.setImmediateFn === "function" ? opcoes.setImmediateFn : setImmediate;
+  try {
+    setImmediateFn(async () => {
+      engineMagaluWakeAgendado = false;
+      if (engineOrquestradorRodando || engineMagaluWakeRodando) {
+        engineMagaluWakePendente = true;
+        return;
+      }
+      engineMagaluWakeRodando = true;
+      engineOrquestradorRodando = true;
+      engineOrquestradorRodadaAtual = `engine_magalu_wake_${Date.now()}`;
+      engineOrquestradorInicioMs = Date.now();
+      try {
+        await opcoes.importarJobsProntosEngine({
+          limite: Number(opcoes.limiteWakeMagalu || LIMITES_PADRAO.importar),
+          marketplace: "magalu",
+          deps: opcoes.getDepsImportador()
+        });
+      } catch (erro) {
+        console.log("[ENGINE-MAGALU-WAKE-ERRO]", {
+          motivo,
+          erro: String(erro?.message || erro).slice(0, 180)
+        });
+      } finally {
+        engineMagaluWakeRodando = false;
+        engineOrquestradorRodando = false;
+        engineOrquestradorRodadaAtual = "";
+        engineOrquestradorInicioMs = 0;
+        if (engineMagaluWakePendente) {
+          engineMagaluWakePendente = false;
+          solicitarImportacaoMagalu({ motivo: "wake_magalu_pendente" });
+        }
+      }
+    });
+  } catch (erro) {
+    engineMagaluWakeAgendado = false;
+    return { ok: false, agendado: false, motivo: "wake_magalu_agendamento_falhou", erro: String(erro?.message || erro).slice(0, 180) };
+  }
+  return { ok: true, agendado: true, coalescido: false, motivo };
 }
 
 function solicitarCicloEntradaClonador({ motivo = "captura_persistida" } = {}) {
@@ -775,6 +838,12 @@ function iniciarOrquestradorEngine(opcoes = {}) {
     return { ok: true, jaIniciado: true };
   }
 
+  engineOrquestradorOpcoes = opcoes;
+  if (engineMagaluWakePendente) {
+    engineMagaluWakePendente = false;
+    setImmediate(() => solicitarImportacaoMagalu({ motivo: "wake_magalu_pos_inicializacao" }));
+  }
+
   const intervaloMs = Number(opcoes.intervaloMs || 120000);
   const intervaloFinal = Number.isFinite(intervaloMs) && intervaloMs > 0 ? intervaloMs : 120000;
 
@@ -809,6 +878,7 @@ module.exports = {
   iniciarOrquestradorEngine,
   iniciarCicloEntradaClonador,
   solicitarCicloEntradaClonador,
+  solicitarImportacaoMagalu,
   executarRodadaEngineOrquestrador,
   executarCicloEntradaClonador,
   dimensionarLimitePreImporter,
