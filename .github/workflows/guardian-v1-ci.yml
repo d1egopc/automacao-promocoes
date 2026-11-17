@@ -36,6 +36,7 @@ on:
       - validation/landing-v13-media-buttons-20261025
       - validation/golden-kabum-awin-20261116
       - validation/golden-magalu-v1-20261117
+      - validation/golden-universal-anchor-v1-20261117
   workflow_dispatch:
 
 permissions:
@@ -189,6 +190,74 @@ jobs:
           node tests/universal-flow-credits.postgres.js
           node tests/universal-flow-expired-fresh.postgres.js
 
+  universal-anchor-pg17:
+    if: github.ref == 'refs/heads/validation/golden-universal-anchor-v1-20261117'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install declared dependencies with pinned public Git source over HTTPS
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: ssh://git@github.com/
+        run: npm ci
+      - name: Universal persistence contracts on disposable PostgreSQL 17
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          PG_CONTAINER="universal-anchor-pg17-${GITHUB_RUN_ID}"
+          PGDATA_HOST="$GITHUB_WORKSPACE/.local-postgres/data"
+          cleanup() {
+            status=$?
+            if [[ "$status" -ne 0 ]]; then
+              docker logs "$PG_CONTAINER" || true
+            fi
+            docker rm -f "$PG_CONTAINER" >/dev/null 2>&1 || true
+            sudo rm -rf "$GITHUB_WORKSPACE/.local-postgres"
+            exit "$status"
+          }
+          trap cleanup EXIT
+          sudo mkdir -p "$PGDATA_HOST"
+          sudo chown 999:999 "$PGDATA_HOST"
+          docker run --detach --name "$PG_CONTAINER" --network host \
+            --env POSTGRES_DB=optimus_universal_fixture \
+            --env POSTGRES_HOST_AUTH_METHOD=trust \
+            --env PGDATA="$PGDATA_HOST" \
+            --volume "$PGDATA_HOST:$PGDATA_HOST" \
+            postgres:17 \
+            -c listen_addresses=127.0.0.1 \
+            -c port=55433
+          for attempt in $(seq 1 60); do
+            if docker exec "$PG_CONTAINER" pg_isready -h 127.0.0.1 -p 55433 -U postgres -d optimus_universal_fixture; then
+              break
+            fi
+            if [[ "$attempt" -eq 60 ]]; then
+              echo "PostgreSQL 17 did not become ready" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          export UF_TEST_PG_PORT=55433
+          export UF_TEST_PG_EXPECTED_SERVER_HOST=127.0.0.1
+          export UF_TEST_PG_EXPECTED_SERVER_PORT=55433
+          export UF_TEST_PG_EXPECTED_DATA_DIR="$PGDATA_HOST"
+          export PGSSLMODE=disable
+          unset DATABASE_URL
+          node tests/universal-flow-queue-epoch.postgres.js
+          node tests/universal-flow-expired-fresh.postgres.js
+          node tests/universal-flow-fanout-owner.postgres.js
+          node tests/universal-flow-fanout-dedupe-race.postgres.js
+
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -221,6 +290,25 @@ jobs:
           grep -Eq '^# pass 6$' "$RUNNER_TEMP/magalu-golden-v1.log"
           grep -Eq '^# fail 0$' "$RUNNER_TEMP/magalu-golden-v1.log"
           grep -Eq '^# skipped 0$' "$RUNNER_TEMP/magalu-golden-v1.log"
+      - name: Universal Anchor Golden contracts (Node 24)
+        if: github.ref == 'refs/heads/validation/golden-universal-anchor-v1-20261117'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-reporter=tap tests/universal-anchor-golden-v1.test.cjs | tee "$RUNNER_TEMP/universal-anchor-golden-v1.log"
+          grep -Eq '^# pass 10$' "$RUNNER_TEMP/universal-anchor-golden-v1.log"
+          grep -Eq '^# fail 0$' "$RUNNER_TEMP/universal-anchor-golden-v1.log"
+          grep -Eq '^# skipped 0$' "$RUNNER_TEMP/universal-anchor-golden-v1.log"
+      - name: Universal Anchor ingress regressions (Radar, TeleRadar and Clonador)
+        if: github.ref == 'refs/heads/validation/golden-universal-anchor-v1-20261117'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${DATABASE_URL:-}"
+          node tests/clonador-multilink-papeis.test.js
+          node tests/teleradar-handoff.test.js
+          node tests/universal-offer-anchor-local.test.cjs
+          node tests/radar-commercial-fidelity.test.cjs
       - name: ML factual capture and proven listing anchor
         if: github.ref == 'refs/heads/validation/ml-factual-capture-p0-20261114'
         run: |
