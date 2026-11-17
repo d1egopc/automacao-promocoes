@@ -35,6 +35,7 @@ on:
       - feature/landing-page-v1-*
       - validation/landing-v13-media-buttons-20261025
       - validation/golden-kabum-awin-20261116
+      - validation/golden-magalu-v1-20261117
   workflow_dispatch:
 
 permissions:
@@ -211,6 +212,15 @@ jobs:
           grep -Eq '^# pass 5$' "$RUNNER_TEMP/kabum-awin-golden.log"
           grep -Eq '^# fail 0$' "$RUNNER_TEMP/kabum-awin-golden.log"
           grep -Eq '^# skipped 0$' "$RUNNER_TEMP/kabum-awin-golden.log"
+      - name: Magalu Golden V1 contracts (Node 24)
+        if: github.ref == 'refs/heads/validation/golden-magalu-v1-20261117'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-reporter=tap tests/magalu-golden-v1-contract.test.cjs | tee "$RUNNER_TEMP/magalu-golden-v1.log"
+          grep -Eq '^# pass 6$' "$RUNNER_TEMP/magalu-golden-v1.log"
+          grep -Eq '^# fail 0$' "$RUNNER_TEMP/magalu-golden-v1.log"
+          grep -Eq '^# skipped 0$' "$RUNNER_TEMP/magalu-golden-v1.log"
       - name: ML factual capture and proven listing anchor
         if: github.ref == 'refs/heads/validation/ml-factual-capture-p0-20261114'
         run: |
@@ -1490,3 +1500,60 @@ jobs:
                   raise SystemExit("New or changed regression: " + file)
               print("BASELINE_MATCH" if candidate else "PASS_CANDIDATE", file, flush=True)
           PY
+
+  magalu-golden-pg17:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/golden-magalu-v1-20261117'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: optimus_universal_fixture
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 127.0.0.1:55433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d optimus_universal_fixture"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install declared dependencies
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: ssh://git@github.com/
+        run: npm ci
+      - name: Magalu Golden V1 callback persistence on PostgreSQL 17
+        shell: bash
+        env:
+          MAGALU_GOLDEN_PG_URL: postgresql://postgres@127.0.0.1:55433/optimus_universal_fixture
+          MAGALU_GOLDEN_PG_REQUIRED: '1'
+          MAGALU_GOLDEN_PG_EXPECTED_SERVER_PORT: '5432'
+        run: |
+          set -euo pipefail
+          test -z "${DATABASE_URL:-}"
+          node --test --test-reporter=tap tests/magalu-golden-v1-wakeup.postgres.test.cjs | tee "$RUNNER_TEMP/magalu-golden-pg17.log"
+          grep -Eq '^# pass 1$' "$RUNNER_TEMP/magalu-golden-pg17.log"
+          grep -Eq '^# fail 0$' "$RUNNER_TEMP/magalu-golden-pg17.log"
+          grep -Eq '^# skipped 0$' "$RUNNER_TEMP/magalu-golden-pg17.log"
+      - name: Existing PostgreSQL 17 queue, TTL and fanout contracts
+        shell: bash
+        env:
+          UF_TEST_PG_PORT: '55433'
+          UF_TEST_PG_EXPECTED_SERVER_PORT: '5432'
+          UF_TEST_PG_EXPECTED_DATA_DIR: /var/lib/postgresql/data
+        run: |
+          set -euo pipefail
+          test -z "${DATABASE_URL:-}"
+          node tests/universal-flow-queue-epoch.postgres.js
+          node tests/universal-flow-expired-fresh.postgres.js
+          node tests/universal-flow-fanout-owner.postgres.js
+          node tests/universal-flow-fanout-dedupe-race.postgres.js
