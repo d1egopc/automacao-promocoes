@@ -147,13 +147,15 @@ function writerDistribuidorOperacional() {
 }
 const {
   agendarRetryImagemMagaluLocal,
-  agendarRetryImagemMercadoLivreLocal
+  agendarRetryImagemMercadoLivreLocal,
+  acordarJobMagaluPorIdentidade
 } = require("./modules/engine/importer/importer.service");
 
 const {
   iniciarOrquestradorEngine,
   iniciarCicloEntradaClonador,
   solicitarCicloEntradaClonador,
+  solicitarImportacaoMagalu,
   obterEstadoOrquestradorEngine
 } = require("./modules/engine/orchestrator.runner");
 const { solenoideGlobal } = require("./modules/solenoide/solenoide.service");
@@ -7821,7 +7823,20 @@ function iniciarDiagnosticoRuntime() {
 iniciarDiagnosticoRuntime();
 const app = express(); // ðŸ‘ˆ MUITO IMPORTANTE ter isso
 const localWorkerService = criarLocalWorkerService({
-  onOpportunityResult: () => invalidarCacheFonteOficial("magalu")
+  onOpportunityResult: () => invalidarCacheFonteOficial("magalu"),
+  onIdentityResult: async ({ task, resultado }) => {
+    const acordado = await acordarJobMagaluPorIdentidade({ task, resultado });
+    if (acordado?.ok && acordado.acordado) {
+      const wake = solicitarImportacaoMagalu({ motivo: "magalu_identity_resultado_persistido" });
+      console.log("[MAGALU-IDENTITY-RESULT-WAKE]", {
+        taskId: task?.id || null,
+        jobAcordado: true,
+        wakeAgendado: wake?.agendado === true,
+        coalescido: wake?.coalescido === true
+      });
+    }
+    return acordado;
+  }
 });
 
 function capturarRawBody(req, res, buf) {

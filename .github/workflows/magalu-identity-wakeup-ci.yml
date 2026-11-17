@@ -1,0 +1,124 @@
+name: Magalu identity wakeup CI only
+
+on:
+  push:
+    branches:
+      - validation/guardian-v1-magalu-identity-wakeup-20261116
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      BASE_SHA: e2ffe1a7001466cec7d90844695c67f96f249ca9
+      UF_TEST_PG_PORT: '55433'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install declared dependencies
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: ssh://git@github.com/
+        run: npm ci
+
+      - name: Exact scope and Guardian overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${DATABASE_URL:-}"
+          git cat-file -e "${BASE_SHA}^{commit}"
+          git merge-base --is-ancestor "$BASE_SHA" "$GITHUB_SHA"
+          diff -u <(printf '%s\n' \
+            'A .github/workflows/magalu-identity-wakeup-ci.yml' \
+            'M index.js' \
+            'M modules/engine/importer/importer.service.js' \
+            'M modules/engine/orchestrator.runner.js' \
+            'M modules/local-worker/local-worker.service.js' \
+            'A tests/magalu-identity-result-wakeup.test.cjs') \
+            <(git diff --name-status --no-renames "$BASE_SHA" "$GITHUB_SHA" | tr '\t' ' ')
+          node scripts/guardian-v1.cjs prepare \
+            --base "$BASE_SHA" --source "$GITHUB_SHA" --release-mode overlay \
+            > "$RUNNER_TEMP/magalu-wakeup-plan.json"
+          node -e '
+            const assert = require("node:assert/strict");
+            const plan = require(process.argv[1]);
+            assert.equal(plan.validation, "PASS");
+            assert.equal(plan.deployMode, "overlay");
+            assert.deepEqual([...plan.runtimeFiles].sort(), [
+              "index.js",
+              "modules/engine/importer/importer.service.js",
+              "modules/engine/orchestrator.runner.js",
+              "modules/local-worker/local-worker.service.js"
+            ]);
+            console.log("GUARDIAN_RUNTIME=" + plan.runtimeFiles.join(","));
+          ' "$RUNNER_TEMP/magalu-wakeup-plan.json"
+
+      - name: Node 24 wakeup and shared regressions
+        run: |
+          set -euo pipefail
+          node --check index.js
+          node --check modules/engine/importer/importer.service.js
+          node --check modules/engine/orchestrator.runner.js
+          node --check modules/local-worker/local-worker.service.js
+          node --check tests/magalu-identity-result-wakeup.test.cjs
+          node tests/magalu-identity-result-wakeup.test.cjs
+          node tests/magalu-local-worker-identity.test.js
+          node tests/magalu-recovery-retry.test.cjs
+          node tests/magalu-task-bound-wait.test.cjs
+          node tests/magalu-onelink-403-fallback.test.cjs
+          node tests/magalu-firstparty-identity-fallback.test.cjs
+          node tests/magalu-worker-boundary-focal.test.cjs
+          node tests/magalu-engine-importer.test.js
+          node tests/mercadolivre-local-worker-gate-observability.test.js
+          node tests/shopee-importer-retry.test.js
+          node tests/kabum-shortlink-technical-proof.test.cjs
+          node tests/amazon-shortlink-afiliacao.test.js
+          node tests/aliexpress-afiliacao-workspace.test.js
+          node tests/aliexpress-app-moedas-contrato.test.js
+          node tests/link-conversao-ocorrencia-marketplaces.test.js
+          node tests/contrato-comercial-final-universal.test.js
+
+      - name: PostgreSQL 17 queue, expiry, fanout and idempotency contracts
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: '55433'
+          PGUSER: postgres
+          PGDATABASE: optimus_universal_fixture
+          UF_TEST_PG_EXPECTED_SERVER_PORT: '55433'
+          UF_TEST_PG_EXPECTED_DATA_DIR: ${{ github.workspace }}/.local-postgres/data
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/.local-postgres/data"
+          docker run -d --name magalu-identity-wakeup-pg17 --network host \
+            -e PGDATA="$GITHUB_WORKSPACE/.local-postgres/data" \
+            -e POSTGRES_DB=optimus_universal_fixture \
+            -e POSTGRES_HOST_AUTH_METHOD=trust \
+            postgres:17 -p 55433 -c listen_addresses=127.0.0.1
+          until pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE"; do sleep 1; done
+          node tests/universal-flow-queue-epoch.postgres.js
+          node tests/universal-flow-expired-fresh.postgres.js
+          node tests/universal-flow-fanout-owner.postgres.js
+
+      - name: Remove disposable PostgreSQL 17
+        if: always()
+        run: docker rm -f magalu-identity-wakeup-pg17 || true
+
+      - name: Guardian final validation
+        run: |
+          set -euo pipefail
+          node scripts/guardian-v1.cjs validate \
+            --base "$BASE_SHA" --source "$GITHUB_SHA" \
+            --release-mode overlay --report "$RUNNER_TEMP/magalu-wakeup-guardian.json"
