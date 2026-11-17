@@ -1,7 +1,9 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { EventEmitter } = require("node:events");
 const {
@@ -12,6 +14,77 @@ const {
 
 const indexSource = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
 const quiescenceSource = fs.readFileSync(path.join(__dirname, "..", "modules/whatsapp/session-quiescence.service.js"), "utf8");
+
+function hashFile(filePath) {
+  return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
+}
+
+function authStoreManifest(rootDir) {
+  const root = path.resolve(rootDir);
+  const entries = [];
+  function visit(current, relative = "") {
+    const stat = fs.lstatSync(current);
+    assert.equal(stat.isSymbolicLink(), false, `auth fixture must not contain symlinks: ${relative}`);
+    const type = stat.isDirectory() ? "dir" : stat.isFile() ? "file" : "other";
+    assert.notEqual(type, "other", `unsupported auth fixture entry: ${relative}`);
+    const entry = {
+      relative,
+      type,
+      mode: stat.mode & 0o777,
+      size: stat.size,
+      mtimeMs: Math.round(stat.mtimeMs)
+    };
+    if (type === "file") entry.sha256 = hashFile(current);
+    entries.push(entry);
+    if (type === "dir") {
+      for (const child of fs.readdirSync(current).sort()) {
+        const childRelative = relative ? path.join(relative, child) : child;
+        visit(path.join(current, child), childRelative);
+      }
+    }
+  }
+  visit(root);
+  return entries;
+}
+
+function copyAuthFixture(sourceDir, destinationDir, onAfterFirstFile) {
+  const source = path.resolve(sourceDir);
+  const destination = path.resolve(destinationDir);
+  assert.notEqual(source, destination);
+  assert.equal(fs.existsSync(destination), false, "snapshot destination must be new");
+  const before = authStoreManifest(source);
+  let copiedFiles = 0;
+  for (const entry of before) {
+    const sourcePath = path.join(source, entry.relative);
+    const destinationPath = path.join(destination, entry.relative);
+    if (entry.type === "dir") {
+      fs.mkdirSync(destinationPath, { recursive: true, mode: entry.mode });
+      fs.chmodSync(destinationPath, entry.mode);
+      continue;
+    }
+    fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
+    fs.copyFileSync(sourcePath, destinationPath, fs.constants.COPYFILE_EXCL);
+    fs.chmodSync(destinationPath, entry.mode);
+    fs.utimesSync(destinationPath, new Date(entry.mtimeMs), new Date(entry.mtimeMs));
+    copiedFiles += 1;
+    if (copiedFiles === 1) onAfterFirstFile?.();
+  }
+  for (const entry of before.filter(item => item.type === "dir").sort((a, b) => b.relative.length - a.relative.length)) {
+    const destinationPath = path.join(destination, entry.relative);
+    fs.chmodSync(destinationPath, entry.mode);
+    fs.utimesSync(destinationPath, new Date(entry.mtimeMs), new Date(entry.mtimeMs));
+  }
+  const after = authStoreManifest(source);
+  assert.deepEqual(after, before, "source auth store changed during snapshot");
+  const copied = authStoreManifest(destination);
+  assert.deepEqual(copied, before, "snapshot tree differs from source manifest");
+  return { files: copiedFiles, manifest: copied };
+}
+
+function snapshotCaller({ registry, sessionId, epoch, sourceDir, destinationDir, onAfterFirstFile }) {
+  registry.assertSnapshotAllowed(sessionId, epoch);
+  return copyAuthFixture(sourceDir, destinationDir, onAfterFirstFile);
+}
 
 async function main() {
   const closeEmitter = new EventEmitter();
@@ -28,6 +101,64 @@ async function main() {
   const registry = createSessionQuiescenceRegistry();
   const claro = registry.trackerFor("admin_Radar Zap Claro");
   const other = registry.trackerFor("workspace_outro");
+
+  // Disposable multi-file auth store: no real creds, tokens, cookies or sockets.
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-quiescence-auth-"));
+  const authSource = path.join(fixtureRoot, "auth_source");
+  const authSnapshot = path.join(fixtureRoot, "auth_snapshot");
+  const authRestore = path.join(fixtureRoot, "auth_restore");
+  fs.mkdirSync(path.join(authSource, "keys"), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(path.join(authSource, "creds.json"), JSON.stringify({ fixture: true, session: "synthetic" }));
+  fs.writeFileSync(path.join(authSource, "keys", "session-1"), "synthetic-session-key");
+  fs.writeFileSync(path.join(authSource, "keys", "pre-key-1"), "synthetic-pre-key");
+  fs.chmodSync(path.join(authSource, "creds.json"), 0o600);
+  fs.chmodSync(path.join(authSource, "keys", "session-1"), 0o600);
+  fs.chmodSync(path.join(authSource, "keys", "pre-key-1"), 0o600);
+  const snapshotSession = registry.trackerFor("workspace_snapshot");
+  const initialSnapshotEpoch = snapshotSession.status().epoch;
+  assert.throws(
+    () => snapshotCaller({ registry, sessionId: "workspace_snapshot", epoch: initialSnapshotEpoch, sourceDir: authSource, destinationDir: authSnapshot }),
+    /snapshot_not_allowed/
+  );
+  const snapshotRequest = registry.request("workspace_snapshot");
+  assert.throws(
+    () => snapshotCaller({ registry, sessionId: "workspace_snapshot", epoch: snapshotRequest.epoch, sourceDir: authSource, destinationDir: authSnapshot }),
+    /snapshot_not_allowed/
+  );
+  assert.equal(snapshotSession.beginDrain({ closed: true }).ok, true);
+  assert.throws(
+    () => snapshotCaller({ registry, sessionId: "workspace_snapshot", epoch: snapshotRequest.epoch, sourceDir: authSource, destinationDir: authSnapshot }),
+    /snapshot_not_allowed/
+  );
+  const snapshotDrain = await snapshotSession.waitForDrain({ timeoutMs: 250, quietWindowMs: 2 });
+  assert.equal(snapshotDrain.ok, true);
+  const snapshotResult = snapshotCaller({
+    registry,
+    sessionId: "workspace_snapshot",
+    epoch: snapshotRequest.epoch,
+    sourceDir: authSource,
+    destinationDir: authSnapshot
+  });
+  assert.equal(snapshotResult.files, 3);
+  assert.deepEqual(authStoreManifest(authSnapshot), authStoreManifest(authSource));
+  copyAuthFixture(authSnapshot, authRestore);
+  assert.deepEqual(authStoreManifest(authRestore), authStoreManifest(authSnapshot));
+
+  const failedCopyDir = path.join(fixtureRoot, "auth_failed_copy");
+  assert.throws(
+    () => snapshotCaller({
+      registry,
+      sessionId: "workspace_snapshot",
+      epoch: snapshotRequest.epoch,
+      sourceDir: authSource,
+      destinationDir: failedCopyDir,
+      onAfterFirstFile: () => fs.appendFileSync(path.join(authSource, "keys", "session-1"), "late-writer")
+    }),
+    /source auth store changed during snapshot/
+  );
+  assert.equal(snapshotSession.status().state, STATES.QUIESCED, "copy failure must not auto-resume the session");
+  assert.equal(registry.resume("workspace_snapshot", snapshotRequest.epoch).ok, true);
+  fs.rmSync(fixtureRoot, { recursive: true, force: true });
 
   // A pending Signal write must drain before QUIESCED is granted.
   let finishPending;
@@ -144,9 +275,9 @@ async function main() {
 
   // Snapshot failure is terminal until an explicit, safe recovery path is chosen.
   const snapshotFailure = registry.trackerFor("workspace_snapshot_failure");
-  const snapshotRequest = registry.request("workspace_snapshot_failure");
+  const terminalSnapshotRequest = registry.request("workspace_snapshot_failure");
   assert.equal(snapshotFailure.fail("snapshot_copy_failed").reason, "snapshot_copy_failed");
-  assert.throws(() => snapshotFailure.assertSnapshotAllowed(snapshotRequest.epoch), /snapshot_not_allowed/);
+  assert.throws(() => snapshotFailure.assertSnapshotAllowed(terminalSnapshotRequest.epoch), /snapshot_not_allowed/);
 
   // Runtime integration guards lifecycle/reconnect and never logs out for quiescence.
   assert.ok(indexSource.includes("whatsappQuiescence.wrapAuthState(id, authState)"));
