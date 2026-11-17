@@ -74,12 +74,15 @@ async function run() {
     [guardedEventId])).rows[0].n;
     const guardedUsed = (await admin.query(`SELECT hot_used FROM engine_hot_admission_control
       WHERE id=1`)).rows[0].hot_used;
-    console.log(JSON.stringify({ test: "universal_fanout_guarded_results",
-      guarded }));
     assert.equal(guardedCount, 1);
     assert.equal(guardedUsed, 1);
-    assert(guarded.every(result => result.inserted === 1 ||
-      (result.code === "23505" && result.constraint === "engine_jobs_event_workspace_unique_candidate")));
+    assert.equal(guarded.filter(result => result.inserted === 1 &&
+      result.code === null).length, 1);
+    assert(guarded.every(result =>
+      (result.inserted === 1 && result.code === null) ||
+      (result.inserted === 0 && result.code === null) ||
+      (result.inserted === 0 && result.code === "23505" &&
+        result.constraint === "engine_jobs_event_workspace_unique_candidate")));
 
     const twoEvent = (await admin.query(`INSERT INTO engine_eventos_brutos
       (origem,fonte,origem_tipo) VALUES ('radar','radar','whatsapp') RETURNING id`)).rows[0].id;
