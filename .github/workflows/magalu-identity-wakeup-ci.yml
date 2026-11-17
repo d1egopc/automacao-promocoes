@@ -85,6 +85,11 @@ jobs:
           node tests/mercadolivre-local-worker-gate-observability.test.js
           node tests/shopee-importer-retry.test.js
           node tests/kabum-shortlink-technical-proof.test.cjs
+          node tests/amazon-shortlink-afiliacao.test.js
+          node tests/aliexpress-afiliacao-workspace.test.js
+          node tests/aliexpress-app-moedas-contrato.test.js
+          node tests/link-conversao-ocorrencia-marketplaces.test.js
+          node tests/contrato-comercial-final-universal.test.js
 
       - name: PostgreSQL 17 queue, expiry, fanout and idempotency contracts
         env:
