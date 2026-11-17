@@ -16,17 +16,6 @@ jobs:
     env:
       BASE_SHA: 681031f559e3d6632f98b2afa0bf9fba8e54ae42
       UF_TEST_PG_PORT: 55433
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_DB: optimus_universal_fixture
-          POSTGRES_HOST_AUTH_METHOD: trust
-        ports:
-          - 127.0.0.1:55433:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d optimus_universal_fixture"
-          --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
       - uses: actions/checkout@v4
         with:
@@ -37,6 +26,20 @@ jobs:
         with:
           node-version: 24
           cache: npm
+
+      - name: Start loopback-only disposable PostgreSQL 17
+        run: |
+          set -euo pipefail
+          docker run -d --name magalu-onelink-pg17 --network host \
+            -e PGDATA="$GITHUB_WORKSPACE/.local-postgres/data" \
+            -e POSTGRES_DB=optimus_universal_fixture \
+            -e POSTGRES_HOST_AUTH_METHOD=trust \
+            postgres:17 -p 55433 -c listen_addresses=127.0.0.1
+          for attempt in $(seq 1 30); do
+            if docker exec magalu-onelink-pg17 pg_isready -h 127.0.0.1 -p 55433 -U postgres; then exit 0; fi
+            sleep 2
+          done
+          exit 1
 
       - name: Exact scope and Guardian overlay
         shell: bash
@@ -90,14 +93,13 @@ jobs:
           PGPORT: 55433
           PGUSER: postgres
           PGDATABASE: optimus_universal_fixture
-          UF_TEST_PG_EXPECTED_SERVER_PORT: 5432
-          UF_TEST_PG_EXPECTED_DATA_DIR: /var/lib/postgresql/data
+          UF_TEST_PG_EXPECTED_SERVER_HOST: 127.0.0.1
+          UF_TEST_PG_EXPECTED_SERVER_PORT: 55433
+          UF_TEST_PG_EXPECTED_DATA_DIR: ${{ github.workspace }}/.local-postgres/data
         run: |
           set -euo pipefail
           until pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE"; do sleep 1; done
-          export UF_TEST_PG_EXPECTED_SERVER_HOST="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' '${{ job.services.postgres.id }}')"
-          test -n "$UF_TEST_PG_EXPECTED_SERVER_HOST"
-          UF_TEST_PG_EXPECTED_SERVER_HOST=private-container node tests/universal-flow-queue-epoch.postgres.js
+          node tests/universal-flow-queue-epoch.postgres.js
           node tests/universal-flow-expired-fresh.postgres.js
           node tests/universal-flow-fanout-owner.postgres.js
 
@@ -107,3 +109,7 @@ jobs:
           node scripts/guardian-v1.cjs validate \
             --base "$BASE_SHA" --source "$GITHUB_SHA" \
             --report "$RUNNER_TEMP/magalu-guardian.json"
+
+      - name: Remove disposable lab only
+        if: always()
+        run: docker rm -f magalu-onelink-pg17 || true
