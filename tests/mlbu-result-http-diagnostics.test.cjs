@@ -21,7 +21,7 @@ const MLBU = "MLBU3826952667";
 const SOURCE = `https://www.mercadolivre.com.br/carretilha-lite-esquerda-kawana-185g-11-rolamentos/up/${MLBU}?pdp_filters=item_id%3A${MLB}`;
 const CANONICAL = `https://www.mercadolivre.com.br/carretilha-lite-esquerda-kawana-185g-11-rolamentos/up/${MLBU}`;
 const IMAGE = "https://http2.mlstatic.com/D_NQ_NP_672228-MLB113183169306_072026-O.webp";
-const AGORA = Date.parse("2026-11-15T23:25:07.600Z");
+const AGORA = Date.now();
 
 function associacao(mlb = MLB) {
   return { pageMlbu: MLBU, mlb, source: "nordic_current_product", bookmarkItem: mlb,
@@ -29,7 +29,7 @@ function associacao(mlb = MLB) {
 }
 
 function payload(overrides = {}) {
-  const collectedAt = "2026-11-15T23:25:07.440Z";
+  const collectedAt = new Date(AGORA - 160).toISOString();
   const base = {
     leaseToken: "lease-fixture", capability: "ml_identity_v1", marketplace: "mercadolivre",
     productId: MLB, expectedMlb: MLB, observedMlb: MLB, identidadeValidada: true,
