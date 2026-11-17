@@ -146,6 +146,18 @@
     if (prova.identityKey !== undefined) resultado.identityKey = texto(prova.identityKey);
     if (prova.observedProductId !== undefined) resultado.observedProductId = texto(prova.observedProductId);
     if (prova.redirected !== undefined) resultado.redirected = prova.redirected === true;
+    if (prova.associacaoPagina && typeof prova.associacaoPagina === "object") {
+      const associacao = prova.associacaoPagina;
+      resultado.associacaoPagina = {
+        source: texto(associacao.source),
+        pageMlbu: texto(associacao.pageMlbu),
+        mlb: texto(associacao.mlb),
+        bookmarkItem: texto(associacao.bookmarkItem),
+        trackItem: texto(associacao.trackItem),
+        bookmarkPage: texto(associacao.bookmarkPage),
+        trackPage: texto(associacao.trackPage)
+      };
+    }
     return resultado;
   }
   function resultadoOportunidadePublico(resultado = {}) {

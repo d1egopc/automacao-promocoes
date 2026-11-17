@@ -1,0 +1,85 @@
+name: MLBU association serialization CI only
+
+on:
+  push:
+    branches:
+      - validation/mlbu-associacao-page-ci-20261117
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  node24:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install declared dependencies
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: ssh://git@github.com/
+        run: npm ci
+      - name: MLBU serialization and protected regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${DATABASE_URL:-}"
+          node --check optimus-capture/local-worker/task-runner.js
+          node --test tests/optimus-capture-mlbu-associacao-serialization.test.cjs
+          node --test tests/universal-anchor-golden-v1.test.cjs
+          node tests/optimus-capture-local-worker-ml-identity.test.js
+          node tests/optimus-capture-local-worker-ml-image.test.js
+          node tests/optimus-capture-local-worker-liveness.test.js
+          node tests/optimus-capture-ml-identity-observability.test.cjs
+          node tests/ml-work-enrichment-shadow.test.js
+          node tests/ml-work-enrichment-active.test.js
+          node tests/mlbu-result-http-diagnostics.test.cjs
+          node tests/magalu-local-worker-identity.test.js
+
+  postgres17:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: optimus_mlbu_fixture
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d optimus_mlbu_fixture"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install declared dependencies
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: ssh://git@github.com/
+        run: npm ci
+      - name: Work ML persistence on disposable PostgreSQL 17
+        shell: bash
+        env:
+          LOCAL_WORKER_TEST_DATABASE_URL: postgresql://postgres@127.0.0.1:55433/optimus_mlbu_fixture
+          PGSSLMODE: disable
+        run: |
+          set -euo pipefail
+          test -z "${DATABASE_URL:-}"
+          node tests/local-worker-stale-captcha.postgres.test.cjs

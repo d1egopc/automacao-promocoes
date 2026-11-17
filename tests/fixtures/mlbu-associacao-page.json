@@ -1,0 +1,44 @@
+{
+  "cases": [
+    {
+      "taskId": "mlbu-41291",
+      "mlbu": "MLBU4982518129",
+      "mlb": "MLB5153566447",
+      "variationId": "1",
+      "sourceUrl": "https://www.mercadolivre.com.br/up/MLBU4982518129?pdp_filters=item_id%3AMLB5153566447&searchVariation=1",
+      "finalUrl": "https://www.mercadolivre.com.br/up/MLBU4982518129?pdp_filters=item_id%3AMLB5153566447&searchVariation=1",
+      "canonicalUrl": "https://www.mercadolivre.com.br/up/MLBU4982518129?pdp_filters=item_id%3AMLB5153566447&searchVariation=1",
+      "title": "Carretilha Daiwa Tatula com variação confirmada",
+      "image": "https://http2.mlstatic.com/D_NQ_NP_2X-MLB5153566447.jpg",
+      "association": {
+        "source": "nordic_current_product",
+        "pageMlbu": "MLBU4982518129",
+        "mlb": "MLB5153566447",
+        "bookmarkItem": "MLB5153566447",
+        "trackItem": "MLB5153566447",
+        "bookmarkPage": "MLBU4982518129",
+        "trackPage": "MLBU4982518129"
+      }
+    },
+    {
+      "taskId": "mlbu-41294",
+      "mlbu": "MLBU4574541430",
+      "mlb": "MLB4987156527",
+      "variationId": "22",
+      "sourceUrl": "https://www.mercadolivre.com.br/up/MLBU4574541430?pdp_filters=item_id%3AMLB4987156527&searchVariation=22",
+      "finalUrl": "https://www.mercadolivre.com.br/up/MLBU4574541430?pdp_filters=item_id%3AMLB4987156527&searchVariation=22",
+      "canonicalUrl": "https://www.mercadolivre.com.br/up/MLBU4574541430?pdp_filters=item_id%3AMLB4987156527&searchVariation=22",
+      "title": "Isca Nelson Nakamura com segunda variação confirmada",
+      "image": "https://http2.mlstatic.com/D_NQ_NP_2X-MLB4987156527.jpg",
+      "association": {
+        "source": "nordic_current_product",
+        "pageMlbu": "MLBU4574541430",
+        "mlb": "MLB4987156527",
+        "bookmarkItem": "MLB4987156527",
+        "trackItem": "MLB4987156527",
+        "bookmarkPage": "MLBU4574541430",
+        "trackPage": "MLBU4574541430"
+      }
+    }
+  ]
+}
