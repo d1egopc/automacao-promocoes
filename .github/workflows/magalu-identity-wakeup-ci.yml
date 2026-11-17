@@ -93,10 +93,12 @@ jobs:
           PGUSER: postgres
           PGDATABASE: optimus_universal_fixture
           UF_TEST_PG_EXPECTED_SERVER_PORT: '55433'
-          UF_TEST_PG_EXPECTED_DATA_DIR: /var/lib/postgresql/data
+          UF_TEST_PG_EXPECTED_DATA_DIR: ${{ github.workspace }}/.local-postgres/data
         run: |
           set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/.local-postgres/data"
           docker run -d --name magalu-identity-wakeup-pg17 --network host \
+            -e PGDATA="$GITHUB_WORKSPACE/.local-postgres/data" \
             -e POSTGRES_DB=optimus_universal_fixture \
             -e POSTGRES_HOST_AUTH_METHOD=trust \
             postgres:17 -p 55433 -c listen_addresses=127.0.0.1
