@@ -16,17 +16,6 @@ jobs:
     env:
       BASE_SHA: e2ffe1a7001466cec7d90844695c67f96f249ca9
       UF_TEST_PG_PORT: '55433'
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_DB: optimus_universal_fixture
-          POSTGRES_HOST_AUTH_METHOD: trust
-        ports:
-          - 55433:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d optimus_universal_fixture"
-          --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -107,12 +96,18 @@ jobs:
           UF_TEST_PG_EXPECTED_DATA_DIR: /var/lib/postgresql/data
         run: |
           set -euo pipefail
+          docker run -d --name magalu-identity-wakeup-pg17 --network host \
+            -e POSTGRES_DB=optimus_universal_fixture \
+            -e POSTGRES_HOST_AUTH_METHOD=trust \
+            postgres:17 -p 55433 -c listen_addresses=127.0.0.1
           until pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE"; do sleep 1; done
-          export UF_TEST_PG_EXPECTED_SERVER_HOST="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' '${{ job.services.postgres.id }}')"
-          test -n "$UF_TEST_PG_EXPECTED_SERVER_HOST"
           node tests/universal-flow-queue-epoch.postgres.js
           node tests/universal-flow-expired-fresh.postgres.js
           node tests/universal-flow-fanout-owner.postgres.js
+
+      - name: Remove disposable PostgreSQL 17
+        if: always()
+        run: docker rm -f magalu-identity-wakeup-pg17 || true
 
       - name: Guardian final validation
         run: |
