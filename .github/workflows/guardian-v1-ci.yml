@@ -1571,9 +1571,11 @@ jobs:
         run: |
           set -euo pipefail
           docker rm -f magalu-universal-pg17 >/dev/null 2>&1 || true
-          docker run -d --name magalu-universal-pg17 --network host --tmpfs /var/lib/postgresql/data \
+          PGDATA_PATH="$GITHUB_WORKSPACE/.local-postgres/data"
+          docker run -d --name magalu-universal-pg17 --network host --tmpfs "$PGDATA_PATH" \
             -e POSTGRES_DB=optimus_universal_fixture \
             -e POSTGRES_HOST_AUTH_METHOD=trust \
+            -e PGDATA="$PGDATA_PATH" \
             postgres:17 postgres -c listen_addresses=127.0.0.1 -c port=55433
           for attempt in {1..30}; do
             if docker exec magalu-universal-pg17 pg_isready -h 127.0.0.1 -p 55433 -U postgres -d optimus_universal_fixture; then
@@ -1588,7 +1590,7 @@ jobs:
         env:
           UF_TEST_PG_PORT: '55433'
           UF_TEST_PG_EXPECTED_SERVER_PORT: '55433'
-          UF_TEST_PG_EXPECTED_DATA_DIR: /var/lib/postgresql/data
+          UF_TEST_PG_EXPECTED_DATA_DIR: ${{ github.workspace }}/.local-postgres/data
         run: |
           set -euo pipefail
           test -z "${DATABASE_URL:-}"
