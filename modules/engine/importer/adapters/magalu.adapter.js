@@ -2,7 +2,8 @@
 
 const { normalizarNumeroMoeda } = require("../../../../utils/moeda");
 const {
-  produtoIdPorUrl
+  produtoIdPorUrl,
+  hostMagaluValido
 } = require("../../../marketplaces/magalu/magalu-parser");
 const {
   resolverFatosMagalu
@@ -335,6 +336,7 @@ function escolherLinkMagalu(links = [], evento = {}) {
 function escolherOneLinkMagalu(links = [], evento = {}) {
   const candidatos = [];
   for (const link of Array.isArray(links) ? links : []) {
+    candidatos.push({ url: link.url_expandida, link, campo: "url_expandida" });
     candidatos.push({ url: link.url_original, link, campo: "url_original" });
     candidatos.push({ url: link.url_normalizada, link, campo: "url_normalizada" });
   }
@@ -346,6 +348,12 @@ function escolherOneLinkMagalu(links = [], evento = {}) {
     if (url) return { ...candidato, url };
   }
   return { url: "", link: null, campo: "" };
+}
+
+function urlProdutoMagaluConfirmada(valor = "") {
+  const url = texto(valor);
+  if (!url || !/^https:\/\//i.test(url) || !hostMagaluValido(url) || !produtoIdPorUrl(url)) return "";
+  return url;
 }
 
 function credencialPromoterIdMagalu(integracao = {}) {
@@ -506,8 +514,9 @@ function registrarBuscaImagemMagazineVoce({ job = {}, clienteId = "", productId 
 async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], deps = {} } = {}) {
   const clienteId = texto(job.cliente_id || job.clienteId || "");
   let linkEscolhido = escolherLinkMagalu(links, evento);
-  let urlOriginalEngine = linkEscolhido.url;
-  const linksClassificados = resumoLinksClassificados(links, evento, "magalu");
+  const urlSelecionada = texto(linkEscolhido.url);
+  let urlOriginalEngine = urlProdutoMagaluConfirmada(urlSelecionada);
+  let linksClassificados = resumoLinksClassificados(links, evento, "magalu");
   let integracao = null;
   let promoterId = "";
   let identidadeLocalWorker = null;
@@ -517,6 +526,7 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
   }
 
   const oneLinkPendente = !urlOriginalEngine ? escolherOneLinkMagalu(links, evento) : { url: "" };
+  const linkOriginalOcorrencia = texto(oneLinkPendente.url || urlSelecionada || urlOriginalEngine);
   if (!urlOriginalEngine && oneLinkPendente.url &&
     typeof deps.obterIdentidadeMagaluLocalWorker === "function" &&
     typeof deps.garantirIdentidadeMagaluLocalWorker === "function") {
@@ -551,6 +561,15 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
         papelLink: "produto",
         papelLinkMotivo: "magalu_identity_v1"
       };
+      linksClassificados = linksClassificados.map(item => item.urlOriginal === oneLinkPendente.url
+        ? {
+            ...item,
+            papelLink: "produto",
+            papelLinkMotivo: "magalu_identity_v1",
+            papelLinkConfianca: "alta",
+            urlProduto: urlIdentificada
+          }
+        : item);
     } else {
       let taskIdentidade = null;
       try {
@@ -606,13 +625,13 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
   }
 
   if (typeof deps.getIntegracaoCliente !== "function") {
-    return { ok: false, marketplace: "magalu", motivo: "get_integracao_indisponivel", linkOriginal: urlOriginalEngine };
+    return { ok: false, marketplace: "magalu", motivo: "get_integracao_indisponivel", linkOriginal: linkOriginalOcorrencia || urlOriginalEngine };
   }
 
   if (!integracao) integracao = deps.getIntegracaoCliente(clienteId, "magalu");
   if (!promoterId) promoterId = credencialPromoterIdMagalu(integracao);
   if (!integracao || !promoterId) {
-    return { ok: false, marketplace: "magalu", motivo: "integracao_ausente", linkOriginal: urlOriginalEngine };
+    return { ok: false, marketplace: "magalu", motivo: "integracao_ausente", linkOriginal: linkOriginalOcorrencia || urlOriginalEngine };
   }
 
   const produtoIdRadar = produtoIdPorUrl(urlOriginalEngine);
@@ -674,7 +693,7 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
         marketplace: "magalu",
         motivo: "sem_imagem",
         retriavel: Boolean(taskLocalWorker?.ok),
-        linkOriginal: urlOriginalEngine,
+        linkOriginal: linkOriginalOcorrencia || urlOriginalEngine,
         imagemEnviavel: false,
         metadata: {
           adapter: "magalu",
@@ -907,6 +926,9 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
   }
 
   let imagemOficial = imagemMlcdnValidaMagalu(produto.imagem) ? texto(produto.imagem) : "";
+  const linkPrincipalComercial = linksClassificados.some(item => item.urlOriginal === linkOriginalOcorrencia)
+    ? linkOriginalOcorrencia
+    : urlOriginalEngine;
 
   const payloadRetornoMagalu = {
     jobId: job.id,
@@ -929,7 +951,7 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
       ok: false,
       marketplace: "magalu",
       motivo: "identidade_produto_insegura",
-      linkOriginal: urlOriginalEngine,
+      linkOriginal: linkOriginalOcorrencia || urlOriginalEngine,
       metadata: {
         adapter: "magalu",
         linksClassificados,
@@ -940,11 +962,11 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
   }
 
   if (!texto(tituloFinal)) {
-    return { ok: false, marketplace: "magalu", motivo: "titulo_indisponivel", linkOriginal: urlOriginalEngine };
+    return { ok: false, marketplace: "magalu", motivo: "titulo_indisponivel", linkOriginal: linkOriginalOcorrencia || urlOriginalEngine };
   }
 
   if (precoNumerico === null) {
-    return { ok: false, marketplace: "magalu", motivo: "preco_indisponivel", linkOriginal: urlOriginalEngine };
+    return { ok: false, marketplace: "magalu", motivo: "preco_indisponivel", linkOriginal: linkOriginalOcorrencia || urlOriginalEngine };
   }
 
   if (!linkAfiliado) {
@@ -953,7 +975,7 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
       ok: false,
       marketplace: "magalu",
       motivo: "afiliacao_workspace_incompleta",
-      linkOriginal: urlOriginalEngine,
+      linkOriginal: linkOriginalOcorrencia || urlOriginalEngine,
       metadata: {
         adapter: "magalu",
         linksClassificados,
@@ -1028,7 +1050,7 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
         marketplace: "magalu",
         motivo: "sem_imagem",
         retriavel: Boolean(taskLocalWorker?.ok),
-        linkOriginal: urlOriginalEngine,
+        linkOriginal: linkOriginalOcorrencia || urlOriginalEngine,
         imagemEnviavel: false,
         metadata: {
           adapter: "magalu",
@@ -1078,7 +1100,7 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
     dominioImagem: imagemOficial ? new URL(imagemOficial).hostname : "",
     dimensoesImagem: produto.metadata?.imagemOficial?.dimensoes || null,
     imagemEnviavel: Boolean(imagemOficial),
-    linkOriginal: primeiroValor(produto.urlOriginal, urlOriginalEngine),
+    linkOriginal: linkOriginalOcorrencia || primeiroValor(produto.urlOriginal, urlOriginalEngine),
     linkExpandido: urlCanonica,
     linkAfiliado,
     categoria: produto.categoria || "",
@@ -1104,6 +1126,7 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
       eventoId: job.evento_id,
       clienteId,
       linkOriginalEngine: urlOriginalEngine,
+      linkOriginalOcorrencia,
       campoLinkEscolhido: linkEscolhido.campo || "",
       papelLinkEscolhido: linkEscolhido.papelLink || "",
       papelLinkMotivo: linkEscolhido.papelLinkMotivo || "",
@@ -1122,14 +1145,14 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
         ...item,
         papel: item.papelLink,
         tipo: item.papelLink,
-        urlAfiliada: item.urlOriginal === urlOriginalEngine ? linkAfiliado : "",
-        urlAfiliadaWorkspace: item.urlOriginal === urlOriginalEngine ? linkAfiliado : "",
-        renderizavel: item.urlOriginal === urlOriginalEngine && provaAfiliado.conversaoStatus === "convertida",
-        convertidoWorkspace: item.urlOriginal === urlOriginalEngine && provaAfiliado.conversaoStatus === "convertida",
-        conversaoStatus: item.urlOriginal === urlOriginalEngine
+        urlAfiliada: item.urlOriginal === linkPrincipalComercial ? linkAfiliado : "",
+        urlAfiliadaWorkspace: item.urlOriginal === linkPrincipalComercial ? linkAfiliado : "",
+        renderizavel: item.urlOriginal === linkPrincipalComercial && provaAfiliado.conversaoStatus === "convertida",
+        convertidoWorkspace: item.urlOriginal === linkPrincipalComercial && provaAfiliado.conversaoStatus === "convertida",
+        conversaoStatus: item.urlOriginal === linkPrincipalComercial
           ? provaAfiliado.conversaoStatus
           : "nao_aplicavel",
-        motivoConversao: item.urlOriginal === urlOriginalEngine
+        motivoConversao: item.urlOriginal === linkPrincipalComercial
           ? provaAfiliado.motivoConversao
           : "link_nao_principal"
       })),
