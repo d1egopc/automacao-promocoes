@@ -74,6 +74,9 @@ function processo() {
     achatarGruposWhatsappMonitoradosRadar: () => [],
     mesclarSessoesWhatsappMonitoradasRadar: () => [],
     textoRadarId: valor => String(valor || "").trim(),
+    whatsappIngressRadarRevision: new Map(),
+    MAX_WHATSAPP_INGRESS_RADAR_REVISIONS: 2048,
+    whatsappIngressScopeCache: new Map(),
     logDebug: () => {},
     console
   };

@@ -1,0 +1,56 @@
+name: Radar Claro ingress proof CI only
+
+on:
+  push:
+    branches:
+      - validation/radar-claro-ingress-proof-20261117
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ingress-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install declared dependencies only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          npm ci
+      - name: Radar Claro proof and ingress boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test tests/radar-claro-ingress-proof.test.cjs
+          node --test tests/whatsapp-ingress-boundary.test.cjs
+          node --test tests/whatsapp-ingress-continuous.test.cjs tests/whatsapp-ingress-observation-journal.test.cjs tests/whatsapp-ingress-frame-types.test.cjs
+          node tests/whatsapp-socket-listener-lifecycle.test.js
+          node tests/baileys-session-observability.test.js
+          node --test tests/baileys-bootstrap-observation.test.cjs
+      - name: Radar, TeleRadar and Clonador separation regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/radar-ingress-observation-v1.test.cjs
+          node tests/teleradar-operational-control.test.js
+          node tests/clonador-grupos-foundation.test.js
+          node tests/clonador-grupos-entrada-runner.test.js
+      - name: Existing capture-gate baseline (must remain visible)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # This is intentionally not softened: the known harness failure must
+          # remain visible until its missing VM binding is separately approved.
+          node tests/radar-whatsapp-capture-gate.test.js
