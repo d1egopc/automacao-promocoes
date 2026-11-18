@@ -183,6 +183,23 @@ async function main() {
     [factualCheckpoint.clienteId, factualCheckpoint.filaItemId,
       factualCheckpoint.destinoChave, factualCheckpoint.alvoChave,
       confirmationKey, "provider-fence-ack"]);
+    const persistedCheckpoint = (await admin.query(`SELECT cliente_id,
+        fila_item_id,destino_chave,alvo_chave,attempt_id::text AS attempt_id,
+        estado,provider_message_id
+      FROM fila_checkpoints_entrega
+      WHERE cliente_id=$1 AND fila_item_id=$2 AND destino_chave=$3
+        AND alvo_chave=$4`, [factualCheckpoint.clienteId,
+      factualCheckpoint.filaItemId, factualCheckpoint.destinoChave,
+      factualCheckpoint.alvoChave])).rows[0];
+    assert.deepEqual(persistedCheckpoint, {
+      cliente_id: factualCheckpoint.clienteId,
+      fila_item_id: factualCheckpoint.filaItemId,
+      destino_chave: factualCheckpoint.destinoChave,
+      alvo_chave: factualCheckpoint.alvoChave,
+      attempt_id: confirmationKey,
+      estado: "enviado",
+      provider_message_id: "provider-fence-ack"
+    });
     assert.equal((await queue.confirmSend({ pool, destinationId: activeClaim.id,
       leaseToken: activeClaim.leaseToken, confirmationKey,
       providerMessageId: "provider-fence-ack" })).ok, true);
