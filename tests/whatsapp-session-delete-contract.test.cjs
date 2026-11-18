@@ -195,6 +195,14 @@ async function main() {
   });
   assert.equal(bootAfterDelete.some(item => item.sessaoId === sessionId && item.elegivel), false, "restart não pode ressuscitar sessão excluída");
 
+  const failedDeleteBoot = enumerarSessoesReconexaoBoot({
+    sessoesMeta: { [sessionId]: { id: sessionId, workspaceId: "user_a", ativo: false, status: "deleting" } },
+    configSessoesWhatsapp: [sessionId],
+    statusSessao: {},
+    auditarAuth: () => ({ authValidaParaReconectar: true })
+  });
+  assert.equal(failedDeleteBoot[0]?.elegivel, false, "exclusão incompleta deve permanecer bloqueada após restart");
+
   const recreate = deletionRegistry.releaseForRecreate(sessionId, {
     metadataExists: Boolean(metadata[sessionId]),
     authExists: fs.existsSync(authPath)
@@ -268,6 +276,15 @@ async function main() {
   assert.ok(deleteRoute.includes("cancelarTimerReconexaoWhatsapp(id)"));
   assert.ok(deleteRoute.includes("whatsappQuiescence.blockForDeletion(id)"));
   assert.ok(deleteRoute.includes("whatsappQuiescence.discardAfterDeletion(id)"));
+  assert.ok(deleteRoute.includes("limparRadarPersistidoDaSessao(ownerWorkspaceId, id)"));
+  assert.ok(deleteRoute.includes("limparClonadorPersistidoDaSessao(ownerWorkspaceId, id)"));
+  assert.ok(deleteRoute.includes("destination_session_references_remain"));
+  assert.ok(indexSource.includes("if (clienteId && cfgClienteId !== clienteId) continue"), "configurações inteligentes devem permanecer isoladas por workspace");
+  const radarCleanupOffset = deleteRoute.indexOf("limparRadarPersistidoDaSessao(ownerWorkspaceId, id)");
+  const clonadorCleanupOffset = deleteRoute.indexOf("limparClonadorPersistidoDaSessao(ownerWorkspaceId, id)");
+  const authRemovalOffset = deleteRoute.indexOf("fs.rmSync(authStorePath");
+  assert.ok(radarCleanupOffset >= 0 && radarCleanupOffset < authRemovalOffset, "Radar deve ser limpo antes do auth store");
+  assert.ok(clonadorCleanupOffset >= 0 && clonadorCleanupOffset < authRemovalOffset, "Clonador deve ser limpo antes do auth store");
   assert.ok(deleteRoute.includes("resolverAuthStoreSeguro"));
   assert.equal(deleteRoute.includes("idsPossiveis"), false, "ID bruto não pode voltar ao contrato destrutivo");
   assert.equal(deleteRoute.includes("sock.logout"), false, "exclusão local não deve executar logout destrutivo remoto");

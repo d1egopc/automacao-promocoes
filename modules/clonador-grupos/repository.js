@@ -375,6 +375,23 @@ function criarRepositorioClonadorGrupos(opcoes = {}) {
     });
   }
 
+  async function removerFontesDaSessao(clienteId = "", sessaoId = "") {
+    await pronto();
+    const cliente = texto(clienteId);
+    const sessao = texto(sessaoId);
+    if (!cliente || !sessao) throw erroValidacao("clonador_session_identity_required");
+
+    return comTransacao(async (client) => {
+      await bloquearWorkspace(client, "clonador_grupos:fontes", cliente);
+      const resultado = await client.query(`
+        DELETE FROM clonador_grupos_fontes
+         WHERE cliente_id = $1 AND sessao_id = $2
+        RETURNING id, cliente_id, sessao_id, grupo_jid, grupo_nome, ativo, criado_em, atualizado_em
+      `, [cliente, sessao]);
+      return resultado.rows.map(normalizarFonte);
+    });
+  }
+
   async function listarDestinos(clienteId = "") {
     await pronto();
     const resultado = await executar(`
@@ -1017,6 +1034,7 @@ function criarRepositorioClonadorGrupos(opcoes = {}) {
     listarFontes,
     listarFontesAtivasObservacao,
     substituirFontes,
+    removerFontesDaSessao,
     listarDestinos,
     substituirDestinos,
     inserirBufferCaptura,

@@ -6105,16 +6105,15 @@ function removerIdsDeArray(lista, idsRemover) {
 function limparDestinoSessao(destino, idsRemover) {
   if (!destino || typeof destino !== "object") return;
 
-  if (destino.conexaoId && idsRemover.has(String(destino.conexaoId))) {
-    destino.conexaoId = "";
+  let sessaoRemovida = false;
+  for (const campo of ["conexaoId", "sessaoId", "idSessao", "sessao", "idConexao"]) {
+    if (destino[campo] && idsRemover.has(String(destino[campo]))) {
+      destino[campo] = "";
+      sessaoRemovida = true;
+    }
   }
-
-  if (destino.sessaoId && idsRemover.has(String(destino.sessaoId))) {
-    destino.sessaoId = "";
-  }
-
-  if (destino.idSessao && idsRemover.has(String(destino.idSessao))) {
-    destino.idSessao = "";
+  if (sessaoRemovida && destino.grupoJid && idsRemover.has(String(destino.grupoJid))) {
+    destino.grupoJid = "";
   }
 
   destino.sessoes = removerIdsDeArray(destino.sessoes, idsRemover);
@@ -6142,9 +6141,13 @@ function removerReferenciasSessao(ids = [], clienteId = null) {
   limparMapaDestinosPorSessao(config.destinosPorSessao, idsRemover);
   limparMapaDestinosPorSessao(destinosPorSessao, idsRemover);
 
-  for (const cfg of Object.values(configsPorCliente || {})) {
+  for (const [cfgClienteId, cfg] of Object.entries(configsPorCliente || {})) {
+    if (clienteId && cfgClienteId !== clienteId) continue;
     limparMapaDestinosPorSessao(cfg?.destinosPorSessao, idsRemover);
+    limparColecaoDestinos(cfg?.destinosInteligentes, idsRemover);
   }
+
+  limparColecaoDestinos(config?.destinosInteligentes, idsRemover);
 
   const clientes = clienteId
     ? [clienteId]
@@ -6167,6 +6170,61 @@ function removerReferenciasSessao(ids = [], clienteId = null) {
       });
     }
   }
+}
+
+function limparRadarPersistidoDaSessao(clienteId = "", sessaoId = "") {
+  const workspace = String(clienteId || "").trim();
+  const alvo = String(sessaoId || "").trim();
+  if (!workspace || !alvo) return { ok: false, reason: "radar_cleanup_identity_required" };
+
+  const atual = readClienteJson(workspace, "radar-config.json", null);
+  if (!atual || typeof atual !== "object" || Array.isArray(atual)) {
+    return { ok: true, changed: false, removedGroups: 0, remainingGroups: 0 };
+  }
+
+  const limpeza = limparRadarConfigSessao(atual, alvo);
+  if (limpeza.changed) {
+    writeClienteJson(workspace, "radar-config.json", limpeza.config);
+    whatsappIngressRadarRevision.set(workspace, (whatsappIngressRadarRevision.get(workspace) || 0) + 1);
+    while (whatsappIngressRadarRevision.size > MAX_WHATSAPP_INGRESS_RADAR_REVISIONS) {
+      whatsappIngressRadarRevision.delete(whatsappIngressRadarRevision.keys().next().value);
+    }
+    invalidarEscopoObservacaoIngressWhatsapp(workspace);
+  }
+
+  const verificado = readClienteJson(workspace, "radar-config.json", null);
+  if (radarConfigContemSessao(verificado, alvo)) {
+    const erro = new Error("radar_session_references_remain");
+    erro.code = "radar_session_references_remain";
+    throw erro;
+  }
+
+  return { ok: true, ...limpeza };
+}
+
+async function limparClonadorPersistidoDaSessao(clienteId = "", sessaoId = "") {
+  const workspace = String(clienteId || "").trim();
+  const alvo = String(sessaoId || "").trim();
+  if (!workspace || !alvo) throw new Error("clonador_cleanup_identity_required");
+  if (!clonadorGruposRepository || typeof clonadorGruposRepository.removerFontesDaSessao !== "function") {
+    throw new Error("clonador_session_cleanup_unavailable");
+  }
+
+  const removidas = await clonadorGruposRepository.removerFontesDaSessao(workspace, alvo);
+  const restantes = await clonadorGruposRepository.listarFontes(workspace);
+  const sobreviventes = restantes.filter(fonte => String(fonte?.sessaoId || "").trim() === alvo);
+  if (sobreviventes.length) throw new Error("clonador_session_references_remain");
+
+  atualizarFontesClonadorObservacaoIngress(restantes, { clienteId: workspace });
+
+  const ativas = restantes.filter(fonte => fonte?.ativo !== false);
+  if (!ativas.length && typeof clonadorGruposRepository.lerConfig === "function" &&
+      typeof clonadorGruposRepository.salvarConfig === "function") {
+    const configClonador = await clonadorGruposRepository.lerConfig(workspace);
+    if (configClonador?.ativo === true) await clonadorGruposRepository.salvarConfig(workspace, { ativo: false });
+  }
+
+  return { ok: true, removed: removidas.length, remaining: restantes.length, active: ativas.length };
 }
 
 function sessaoPertenceAoWorkspaceExclusivo(sessaoId = "", meta = {}, clienteId = "") {
@@ -13145,6 +13203,12 @@ const {
   aguardarPendenciasZeradas,
   executarComTimeout
 } = require("./modules/whatsapp/session-delete.service");
+const {
+  limparColecaoDestinos,
+  colecaoContemVinculo,
+  limparRadarConfigSessao,
+  radarConfigContemSessao
+} = require("./modules/whatsapp/session-reference-cleanup.service");
 whatsappSessionDeletion = createSessionDeletionRegistry();
 whatsappReconnectTimers = createReconnectTimerRegistry();
 const {
@@ -33522,6 +33586,26 @@ app.delete("/sessoes/:id", async (req, res) => {
       throw error;
     }
 
+    // Remove only the target session's persisted observation/binding references
+    // before deleting auth. Any failure remains fail-closed and leaves auth
+    // available for recovery rather than reporting a partial deletion.
+    limparRadarPersistidoDaSessao(ownerWorkspaceId, id);
+    await limparClonadorPersistidoDaSessao(ownerWorkspaceId, id);
+    removerReferenciasSessao([id], ownerWorkspaceId);
+    const idsRemovidos = new Set([id]);
+    const referenciasDestinoRestantes = colecaoContemVinculo(destinosPorCliente?.[ownerWorkspaceId], idsRemovidos) ||
+      colecaoContemVinculo(configsPorCliente?.[ownerWorkspaceId]?.destinosInteligentes, idsRemovidos) ||
+      colecaoContemVinculo(config?.destinosInteligentes, idsRemovidos) ||
+      Boolean(destinosPorSessao?.[id] || config?.destinosPorSessao?.[id]);
+    if (referenciasDestinoRestantes) {
+      const error = new Error("destination_session_references_remain");
+      error.code = "destination_session_references_remain";
+      throw error;
+    }
+    salvarDestinosClientes();
+    salvarConfigsClientes();
+    salvarConfig();
+
     fs.rmSync(authStorePath, { recursive: true, force: true });
     if (fs.existsSync(authStorePath)) {
       const error = new Error("auth_store_delete_not_confirmed");
@@ -33546,8 +33630,6 @@ app.delete("/sessoes/:id", async (req, res) => {
     delete ultimoMotivoDisconnectWhatsApp[id];
     delete geracoesSocketWhatsapp[id];
     delete sessoesMeta[id];
-
-    removerReferenciasSessao([id], ownerWorkspaceId);
 
     const destinosCliente = destinosPorCliente?.[ownerWorkspaceId] || [];
     const listasDestinosCliente = Array.isArray(destinosCliente)
