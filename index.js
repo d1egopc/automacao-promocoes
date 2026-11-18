@@ -147,13 +147,15 @@ function writerDistribuidorOperacional() {
 }
 const {
   agendarRetryImagemMagaluLocal,
-  agendarRetryImagemMercadoLivreLocal
+  agendarRetryImagemMercadoLivreLocal,
+  acordarJobMagaluPorIdentidade
 } = require("./modules/engine/importer/importer.service");
 
 const {
   iniciarOrquestradorEngine,
   iniciarCicloEntradaClonador,
   solicitarCicloEntradaClonador,
+  solicitarImportacaoMagalu,
   obterEstadoOrquestradorEngine
 } = require("./modules/engine/orchestrator.runner");
 const { solenoideGlobal } = require("./modules/solenoide/solenoide.service");
@@ -1211,6 +1213,8 @@ let geracoesSocketWhatsapp = {};
 let integracoesPorCliente = {};
 let sessoesMeta = {};
 let whatsappQuiescence;
+let whatsappSessionDeletion;
+let whatsappReconnectTimers;
 
 const FILA_FILE = "/data/fila.json";
 const CONFIG_FILE = "/data/config.json";
@@ -7822,7 +7826,20 @@ function iniciarDiagnosticoRuntime() {
 iniciarDiagnosticoRuntime();
 const app = express(); // ðŸ‘ˆ MUITO IMPORTANTE ter isso
 const localWorkerService = criarLocalWorkerService({
-  onOpportunityResult: () => invalidarCacheFonteOficial("magalu")
+  onOpportunityResult: () => invalidarCacheFonteOficial("magalu"),
+  onIdentityResult: async ({ task, resultado }) => {
+    const acordado = await acordarJobMagaluPorIdentidade({ task, resultado });
+    if (acordado?.ok && acordado.acordado) {
+      const wake = solicitarImportacaoMagalu({ motivo: "magalu_identity_resultado_persistido" });
+      console.log("[MAGALU-IDENTITY-RESULT-WAKE]", {
+        taskId: task?.id || null,
+        jobAcordado: true,
+        wakeAgendado: wake?.agendado === true,
+        coalescido: wake?.coalescido === true
+      });
+    }
+    return acordado;
+  }
 });
 
 function capturarRawBody(req, res, buf) {
@@ -13120,6 +13137,16 @@ const {
   createSessionQuiescenceAdminCaller
 } = require("./modules/whatsapp/session-quiescence-admin-caller");
 whatsappQuiescence = createSessionQuiescenceRegistry();
+const {
+  resolverSessaoAutorizadaParaExclusao,
+  resolverAuthStoreSeguro,
+  createSessionDeletionRegistry,
+  createReconnectTimerRegistry,
+  aguardarPendenciasZeradas,
+  executarComTimeout
+} = require("./modules/whatsapp/session-delete.service");
+whatsappSessionDeletion = createSessionDeletionRegistry();
+whatsappReconnectTimers = createReconnectTimerRegistry();
 const {
   marcarSocketAtual,
   registrarListenerUnicoSocket,
@@ -33382,6 +33409,15 @@ const id = normalizarSessaoId(
   nomeSessao
 );
 
+    const authStoreNovaSessao = resolverAuthStoreSeguro("/data", id);
+    const liberacaoRecriacao = whatsappSessionDeletion.releaseForRecreate(id, {
+      metadataExists: Boolean(sessoesMeta[id]),
+      authExists: fs.existsSync(authStoreNovaSessao)
+    });
+    if (!liberacaoRecriacao.ok) {
+      return res.status(409).json({ ok: false, erro: liberacaoRecriacao.reason });
+    }
+
     if (sessoesMeta[id]) {
       return res.status(400).json({
         ok: false,
@@ -33415,94 +33451,143 @@ console.log("[WHATSAPP]ðŸ’¾ Sesso criada e salva:", sessoesMeta[id]);
 });
 
 app.delete("/sessoes/:id", async (req, res) => {
+  let deleteToken = null;
+  let deleteSessionId = "";
   try {
-  const clienteId = getClienteId(req);
+    const clienteId = getClienteId(req);
+    const autorizacao = resolverSessaoAutorizadaParaExclusao({
+      requestedId: req.params.id,
+      actorWorkspaceId: clienteId,
+      actorRole: req.usuario?.papel || "",
+      explicitTargetWorkspaceId: req.body?.targetWorkspaceId,
+      explicitTargetSessionId: req.body?.confirmSessionId,
+      sessoesMeta,
+      normalizarSessaoId
+    });
+    if (!autorizacao.ok) {
+      return res.status(autorizacao.statusCode || 403).json({ ok: false, erro: autorizacao.reason });
+    }
 
-  const id = normalizarSessaoId(
-  clienteId,
-  req.params.id
-  );
+    const id = autorizacao.sessionId;
+    const ownerWorkspaceId = autorizacao.ownerWorkspaceId;
+    const authStorePath = resolverAuthStoreSeguro("/data", id);
+    const deletion = whatsappSessionDeletion.begin(id);
+    if (!deletion.ok) {
+      return res.status(409).json({ ok: false, erro: deletion.reason });
+    }
+    deleteToken = deletion.token;
+    deleteSessionId = id;
 
-const idsPossiveis = [...new Set([
-  id,
-  req.params.id
-])];
+    sessoesMeta[id] = {
+      ...sessoesMeta[id],
+      ativo: false,
+      status: "deleting",
+      deleteEpoch: deletion.epoch,
+      deleteRequestedAt: new Date().toISOString()
+    };
+    salvarSessoesMeta();
 
-    try {
-      if (sessoes[id]?.sock?.logout) {
-        await sessoes[id].sock.logout();
+    cancelarTimerReconexaoWhatsapp(id);
+    reconectando[id] = false;
+    inicializandoWhatsApp[id] = false;
+
+    const socket = sessoes[id]?.sock || sessoes[id] || null;
+    geracoesSocketWhatsapp[id] = Number(geracoesSocketWhatsapp[id] || socket?.__optimusSocketGeracao || 0) + 1;
+    delete sessoes[id];
+    statusSessao[id] = ESTADOS_WHATSAPP.APAGADA;
+
+    whatsappQuiescence.blockForDeletion(id);
+
+    const listeners = socket?.__optimusListeners && typeof socket.__optimusListeners === "object"
+      ? Object.values(socket.__optimusListeners)
+      : [];
+    for (const listener of listeners) {
+      try { listener?.emissor?.off?.(listener.evento, listener.handler); } catch { /* fence/geracao ainda bloqueiam */ }
+    }
+
+    if (socket && typeof socket.end === "function") {
+      await executarComTimeout(() => socket.end(), {
+        timeoutMs: 5000,
+        timeoutCode: "session_socket_close_timeout"
+      });
+    }
+
+    const drain = await aguardarPendenciasZeradas({
+      getPending: () => whatsappQuiescence.status(id).pending,
+      timeoutMs: 5000
+    });
+    if (!drain.ok) {
+      const error = new Error(drain.reason);
+      error.code = drain.reason;
+      throw error;
+    }
+
+    fs.rmSync(authStorePath, { recursive: true, force: true });
+    if (fs.existsSync(authStorePath)) {
+      const error = new Error("auth_store_delete_not_confirmed");
+      error.code = "auth_store_delete_not_confirmed";
+      throw error;
+    }
+
+    const quiescenceCleanup = whatsappQuiescence.discardAfterDeletion(id);
+    if (!quiescenceCleanup.ok) {
+      const error = new Error(quiescenceCleanup.reason);
+      error.code = quiescenceCleanup.reason;
+      throw error;
+    }
+
+    delete qrCodes[id];
+    delete statusSessao[id];
+    delete destinosPorSessao[id];
+    delete gruposPorSessao[id];
+    delete reconectando[id];
+    delete inicializandoWhatsApp[id];
+    delete tentativasReconexaoWhatsApp[id];
+    delete ultimoMotivoDisconnectWhatsApp[id];
+    delete geracoesSocketWhatsapp[id];
+    delete sessoesMeta[id];
+
+    removerReferenciasSessao([id], ownerWorkspaceId);
+
+    const destinosCliente = destinosPorCliente?.[ownerWorkspaceId] || [];
+    const listasDestinosCliente = Array.isArray(destinosCliente)
+      ? [destinosCliente]
+      : Object.values(destinosCliente || {}).filter(Array.isArray);
+
+    for (const listaDestino of listasDestinosCliente) {
+      for (const destino of listaDestino) {
+        if (destino.conexaoId === id) destino.conexaoId = "";
+        if (Array.isArray(destino.sessoes)) destino.sessoes = destino.sessoes.filter(sessao => sessao !== id);
+        if (Array.isArray(destino.sessoesWhatsapp)) destino.sessoesWhatsapp = destino.sessoesWhatsapp.filter(sessao => sessao !== id);
       }
-    } catch (e) {
-      console.log("[AVISO] logout ignorado ao excluir:", e.message);
     }
-
-    try {
-      sessoes[id]?.sock?.end?.();
-    } catch (e) {
-      console.log("[AVISO] end ignorado ao excluir:", e.message);
-    }
-
-for (const sid of idsPossiveis) {
-  delete sessoes[sid];
-  delete qrCodes[sid];
-  delete statusSessao[sid];
-  delete destinosPorSessao[sid];
-  delete gruposPorSessao[sid];
-  delete reconectando[sid];
-  delete inicializandoWhatsApp[sid];
-  delete tentativasReconexaoWhatsApp[sid];
-  delete ultimoMotivoDisconnectWhatsApp[sid];
-  delete sessoesMeta[sid];
-
-  fs.rmSync("/data/auth_" + sid, {
-    recursive: true,
-    force: true
-  });
-}
-
-removerReferenciasSessao(idsPossiveis, clienteId);
-
-const destinosCliente = destinosPorCliente?.[clienteId] || [];
-
-const listasDestinosCliente = Array.isArray(destinosCliente)
-  ? [destinosCliente]
-  : Object.values(destinosCliente || {}).filter(Array.isArray);
-
-for (const listaDestino of listasDestinosCliente) {
-  for (const destino of listaDestino) {
-    if (destino.conexaoId && idsPossiveis.includes(destino.conexaoId)) {
-      destino.conexaoId = "";
-    }
-
-    if (Array.isArray(destino.sessoes)) {
-      destino.sessoes = destino.sessoes.filter(
-        s => !idsPossiveis.includes(s)
-      );
-    }
-
-    if (Array.isArray(destino.sessoesWhatsapp)) {
-      destino.sessoesWhatsapp = destino.sessoesWhatsapp.filter(
-        s => !idsPossiveis.includes(s)
-      );
-    }
-  }
-}
-
-salvarDestinosClientes();
-salvarConfigsClientes();
-salvarConfig();
 
     salvarSessoesMeta();
+
+    salvarDestinosClientes();
+    salvarConfigsClientes();
+    salvarConfig();
+
+    const completed = whatsappSessionDeletion.complete(id, deleteToken);
+    if (!completed.ok) throw new Error(completed.reason);
 
     return res.json({
       ok: true,
       message: "SessÃ£o excluÃ­da com sucesso",
-      id
+      id,
+      authorization: autorizacao.authorization
     });
   } catch (e) {
+    if (deleteSessionId && deleteToken) {
+      whatsappSessionDeletion.fail(deleteSessionId, deleteToken, e.code || "session_delete_failed");
+    }
+    console.log("[WHATSAPP-DELETE-ERRO]", JSON.stringify({
+      sessaoId: deleteSessionId || "",
+      motivo: e.code || "session_delete_failed"
+    }));
     return res.status(500).json({
       ok: false,
-      erro: e.message
+      erro: e.code || "session_delete_failed"
     });
   }
 });
@@ -34564,9 +34649,35 @@ function marcarSessaoWhatsAppMetaStatus(id, status) {
   salvarSessoesMeta();
 }
 
+function cancelarTimerReconexaoWhatsapp(sessaoId = "") {
+  return whatsappReconnectTimers.cancel(sessaoId);
+}
+
+function agendarReconexaoWhatsapp(sessaoId, atrasoMs, callback, origem = "indefinida") {
+  const id = String(sessaoId || "").trim();
+  if (!id || typeof callback !== "function") return null;
+  return whatsappReconnectTimers.schedule(id, atrasoMs, () => {
+    if (whatsappSessionDeletion?.isBlocked(id)) {
+      reconectando[id] = false;
+      console.log("[WHATSAPP-DELETE-BLOCK]", JSON.stringify({ sessaoId: id, operacao: "reconnect_timer", origem }));
+      return;
+    }
+    callback();
+  });
+}
+
 function reconectarSessaoWhatsAppSeguro(id, opcoes = {}) {
   const sessaoId = String(id || "").trim();
   if (!sessaoId) return Promise.resolve(null);
+
+  if (whatsappSessionDeletion?.isBlocked(sessaoId)) {
+    console.log("[WHATSAPP-DELETE-BLOCK]", JSON.stringify({
+      sessaoId,
+      operacao: "reconnect",
+      motivo: "session_delete_fence"
+    }));
+    return Promise.resolve(null);
+  }
 
   if (whatsappQuiescence.isQuiescing(sessaoId)) {
     console.log("[WHATSAPP-QUIESCENCE-BLOCK]", JSON.stringify({
@@ -34593,7 +34704,21 @@ async function quiescerSessaoWhatsAppParaSnapshot(id, opcoes = {}) {
     ...opcoes,
     endSocket: async () => {
       const socket = sessoes[sessaoId]?.sock || sessoes[sessaoId] || null;
-      const closed = await waitForSocketClose(socket, { timeoutMs: opcoes.socketCloseTimeoutMs });
+      const expectedGeneration = Number(
+        geracoesSocketWhatsapp[sessaoId] || socket?.__optimusSocketGeracao || 0
+      );
+      const closed = await waitForSocketClose(socket, {
+        timeoutMs: opcoes.socketCloseTimeoutMs,
+        expectedGeneration,
+        getCurrentGeneration: () => Number(
+          geracoesSocketWhatsapp[sessaoId] || socket?.__optimusSocketGeracao || 0
+        ),
+        logger: event => console.log("[WHATSAPP-QUIESCENCE-CLOSE]", JSON.stringify({
+          target: "claro",
+          sessaoId,
+          ...event
+        }))
+      });
       try { socket?.ev?.removeAllListeners?.(); } catch { /* old socket is discarded; cleanup is best effort */ }
       const current = sessoes[sessaoId]?.sock || sessoes[sessaoId] || null;
       if (!current || current === socket) {
@@ -34622,6 +34747,15 @@ function recuperarSessaoWhatsAppAposFalhaQuiescencia(sessaoId, epoch) {
 
 async function iniciarWhatsApp(id, force = false) {
   console.log("[WHATSAPP] Iniciando sesso:", id, "force:", force);
+
+  if (whatsappSessionDeletion?.isBlocked(id)) {
+    console.log("[WHATSAPP-DELETE-BLOCK]", JSON.stringify({
+      sessaoId: id,
+      operacao: "start",
+      motivo: "session_delete_fence"
+    }));
+    return null;
+  }
 
   const quiescenceEpochAtStart = typeof whatsappQuiescence !== "undefined"
     ? whatsappQuiescence.status(id).epoch
@@ -35233,6 +35367,16 @@ sock.ev.on("group-participants.update", async (evento) => {
 
   sock.ev.on("connection.update", async (update) => {
     const { connection, qr, lastDisconnect } = update;
+    if (whatsappSessionDeletion?.isBlocked(id)) {
+      console.log("[WHATSAPP-DELETE-BLOCK]", JSON.stringify({
+        sessaoId: id,
+        socketGeracao,
+        operacao: "connection.update",
+        connection: connection || (qr ? "connection.qr" : "connection.update"),
+        motivo: "session_delete_fence"
+      }));
+      return;
+    }
     if (whatsappQuiescence.isQuiescing(id)) {
       console.log("[WHATSAPP-QUIESCENCE-BLOCK]", JSON.stringify({
         sessaoId: id,
@@ -35375,7 +35519,7 @@ salvarSessoesMeta();
           : 0;
         const reconnectEpochScheduled = whatsappQuiescence.status(id).epoch;
 
-        setTimeout(() => {
+        agendarReconexaoWhatsapp(id, backoffMs, () => {
           const reconnectState = whatsappQuiescence.status(id);
           if (reconnectState.epoch !== reconnectEpochScheduled) {
             reconectando[id] = false;
@@ -35416,7 +35560,7 @@ salvarSessoesMeta();
             statusSessao[id] = ESTADOS_WHATSAPP.OFFLINE;
             reconectando[id] = false;
           });
-        }, backoffMs);
+        }, "connection_close_backoff");
       }
     }
   });
@@ -35986,10 +36130,10 @@ const sessoesParaReconectar = decisoesReconexaoBoot
   .map(decisao => decisao.sessaoId);
 
     sessoesParaReconectar.forEach((id, index) => {
-      setTimeout(() => {
+      agendarReconexaoWhatsapp(id, 3000 + index * 4000, () => {
         console.log("[WHATSAPP] Reconectando sesso:", id);
         reconectarSessaoWhatsAppSeguro(id, { origem: "boot_automatico" });
-      }, 3000 + index * 4000);
+      }, "boot_automatico");
     });
 
   }, 3000);

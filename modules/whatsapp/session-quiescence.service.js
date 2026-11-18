@@ -11,32 +11,131 @@ const STATES = Object.freeze({
 const DEFAULT_DRAIN_TIMEOUT_MS = 5000;
 const DEFAULT_QUIET_WINDOW_MS = 50;
 
-async function waitForSocketClose(socket, { timeoutMs = 5000, setTimeoutImpl = setTimeout, clearTimeoutImpl = clearTimeout } = {}) {
-  if (!socket) return { closed: true, reason: "no_socket" };
-  if (socket.ws?.isClosed === true) return { closed: true, reason: "already_closed" };
+const SOCKET_CLOSE_REASON_CODES = Object.freeze({
+  OBSERVER_UNAVAILABLE: "socket_close_observer_unavailable",
+  END_ERROR: "socket_end_error",
+  TIMEOUT: "socket_close_timeout",
+  GENERATION_MISMATCH: "socket_generation_mismatch",
+  CONFIRMED: "socket_close_confirmed"
+});
+
+function socketCloseError(code, message = code) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function safeGeneration(value) {
+  const generation = Number(value);
+  return Number.isSafeInteger(generation) && generation >= 0 ? generation : null;
+}
+
+async function waitForSocketClose(socket, {
+  timeoutMs = 5000,
+  setTimeoutImpl = setTimeout,
+  clearTimeoutImpl = clearTimeout,
+  expectedGeneration,
+  getCurrentGeneration,
+  logger
+} = {}) {
+  const log = typeof logger === "function" ? logger : () => {};
+  const socketGeneration = safeGeneration(socket?.__optimusSocketGeracao);
+  const expected = safeGeneration(expectedGeneration);
+  const currentGeneration = () => {
+    if (typeof getCurrentGeneration !== "function") return socketGeneration;
+    return safeGeneration(getCurrentGeneration());
+  };
+  const emit = (phase, reasonCode, extra = {}) => {
+    try {
+      log({
+        phase,
+        reasonCode,
+        socketPresent: Boolean(socket),
+        socketGeneration,
+        expectedGeneration: expected,
+        currentGeneration: currentGeneration(),
+        ...extra
+      });
+    } catch {
+      // Observabilidade não pode alterar o gate de fechamento.
+    }
+  };
+  const mismatch = () => expected !== null && currentGeneration() !== null && currentGeneration() !== expected;
+
+  if (!socket) {
+    emit("close_confirmed", SOCKET_CLOSE_REASON_CODES.CONFIRMED, { closeReason: "no_socket" });
+    return { closed: true, reason: "no_socket" };
+  }
+  if (mismatch()) {
+    emit("generation_mismatch", SOCKET_CLOSE_REASON_CODES.GENERATION_MISMATCH);
+    throw socketCloseError(SOCKET_CLOSE_REASON_CODES.GENERATION_MISMATCH);
+  }
+  if (socket.ws?.isClosed === true) {
+    emit("close_confirmed", SOCKET_CLOSE_REASON_CODES.CONFIRMED, { closeReason: "already_closed" });
+    return { closed: true, reason: "already_closed" };
+  }
   const emitter = socket.ev;
-  if (!emitter || typeof emitter.once !== "function") throw new Error("socket_close_observer_unavailable");
+  if (!emitter || typeof emitter.on !== "function" || typeof emitter.off !== "function") {
+    emit("observer_unavailable", SOCKET_CLOSE_REASON_CODES.OBSERVER_UNAVAILABLE);
+    throw socketCloseError(SOCKET_CLOSE_REASON_CODES.OBSERVER_UNAVAILABLE);
+  }
   return new Promise((resolve, reject) => {
     let settled = false;
     let timer;
+    let registered = false;
+    const cleanup = () => {
+      if (!registered) return;
+      registered = false;
+      try { emitter.off("connection.update", onUpdate); } catch { /* best effort */ }
+    };
     const finish = (error, result) => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeoutImpl(timer);
-      try { emitter.off?.("connection.update", onUpdate); } catch { /* best effort */ }
+      cleanup();
       if (error) reject(error);
       else resolve(result);
     };
     const onUpdate = update => {
-      if (update?.connection === "close") finish(null, { closed: true, reason: "connection_update_close" });
+      if (update?.connection !== "close") return;
+      if (mismatch()) {
+        emit("close_event", SOCKET_CLOSE_REASON_CODES.GENERATION_MISMATCH, { closeEvent: true });
+        finish(socketCloseError(SOCKET_CLOSE_REASON_CODES.GENERATION_MISMATCH));
+        return;
+      }
+      emit("close_event", SOCKET_CLOSE_REASON_CODES.CONFIRMED, { closeEvent: true });
+      finish(null, { closed: true, reason: "connection_update_close" });
     };
-    emitter.once("connection.update", onUpdate);
-    timer = setTimeoutImpl(() => finish(new Error("socket_close_not_confirmed")), Math.max(1, Number(timeoutMs) || 5000));
+    try {
+      emitter.on("connection.update", onUpdate);
+      registered = true;
+    } catch {
+      emit("observer_registration_error", SOCKET_CLOSE_REASON_CODES.OBSERVER_UNAVAILABLE);
+      finish(socketCloseError(SOCKET_CLOSE_REASON_CODES.OBSERVER_UNAVAILABLE));
+      return;
+    }
+    timer = setTimeoutImpl(() => {
+      emit("close_timeout", SOCKET_CLOSE_REASON_CODES.TIMEOUT);
+      finish(socketCloseError(SOCKET_CLOSE_REASON_CODES.TIMEOUT, "socket_close_not_confirmed"));
+    }, Math.max(1, Number(timeoutMs) || 5000));
+    emit("socket_end_started", null);
     try {
       const endResult = socket.end();
-      if (endResult && typeof endResult.then === "function") endResult.catch(error => finish(error));
-    } catch (error) {
-      finish(error);
+      if (endResult && typeof endResult.then === "function") {
+        endResult.then(
+          () => { if (!settled) emit("socket_end_returned", null, { async: true }); },
+          () => {
+            if (settled) return;
+            emit("socket_end_rejected", SOCKET_CLOSE_REASON_CODES.END_ERROR);
+            finish(socketCloseError(SOCKET_CLOSE_REASON_CODES.END_ERROR));
+          }
+        );
+      } else {
+        emit("socket_end_returned", null, { async: false });
+      }
+    } catch {
+      emit("socket_end_exception", SOCKET_CLOSE_REASON_CODES.END_ERROR);
+      finish(socketCloseError(SOCKET_CLOSE_REASON_CODES.END_ERROR));
     }
   });
 }
@@ -334,15 +433,54 @@ function createSessionQuiescenceRegistry(options = {}) {
     return trackerFor(sessionId).recover(epoch);
   }
 
+  function blockForDeletion(sessionId) {
+    const tracker = trackerFor(sessionId);
+    return tracker.fail("session_deletion_started");
+  }
+
+  function discardAfterDeletion(sessionId) {
+    const id = String(sessionId || "").trim();
+    if (!id) return { ok: false, reason: "session_id_required" };
+    const tracker = trackers.get(id);
+    if (!tracker) return { ok: true, removed: false };
+    const current = tracker.status();
+    if (current.pending !== 0 || current.state !== STATES.FAILED || current.lastFailureReason !== "session_deletion_started") {
+      return {
+        ok: false,
+        reason: "quiescence_delete_cleanup_not_safe",
+        state: current.state,
+        pending: current.pending,
+        lastFailureReason: current.lastFailureReason
+      };
+    }
+    trackers.delete(id);
+    return { ok: true, removed: true, previousEpoch: current.epoch };
+  }
+
   function assertSnapshotAllowed(sessionId, epoch) {
     return trackerFor(sessionId).assertSnapshotAllowed(epoch);
   }
 
-  return Object.freeze({ trackerFor, isQuiescing, wrapAuthState, run, enter, status, request, quiesce, resume, recover, assertSnapshotAllowed });
+  return Object.freeze({
+    trackerFor,
+    isQuiescing,
+    wrapAuthState,
+    run,
+    enter,
+    status,
+    request,
+    quiesce,
+    resume,
+    recover,
+    blockForDeletion,
+    discardAfterDeletion,
+    assertSnapshotAllowed
+  });
 }
 
 module.exports = {
   STATES,
+  SOCKET_CLOSE_REASON_CODES,
   DEFAULT_DRAIN_TIMEOUT_MS,
   DEFAULT_QUIET_WINDOW_MS,
   waitForSocketClose,
