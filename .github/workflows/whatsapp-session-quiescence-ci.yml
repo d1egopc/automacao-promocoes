@@ -1,0 +1,49 @@
+name: WhatsApp session quiescence CI only
+
+on:
+  push:
+    branches:
+      - validation/radar-claro-quiescence-local-20261117
+      - validation/radar-claro-caller-pr-20261118
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  node24-whatsapp-quiescence:
+    name: Node 24 WhatsApp/Radar quiescence contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install declared dependencies
+        run: npm ci
+      - name: Syntax and quiescence contract
+        run: |
+          node --check index.js
+          node --check modules/whatsapp/session-quiescence.service.js
+          node --check modules/whatsapp/session-quiescence-admin-caller.js
+          node --check tests/whatsapp-quiescence-close-observability.test.cjs
+          node tests/whatsapp-session-quiescence.test.cjs
+          node tests/whatsapp-session-quiescence-admin-caller.test.cjs
+          node tests/whatsapp-quiescence-close-observability.test.cjs
+      - name: WhatsApp and Radar regressions
+        run: |
+          node tests/whatsapp-reconnect-seguro.test.js
+          node tests/whatsapp-socket-listener-lifecycle.test.js
+          node tests/whatsapp-ingress-boundary.test.cjs
+          node tests/whatsapp-ingress-continuous.test.cjs
+          node tests/baileys-bootstrap-observation.test.cjs
+          node tests/baileys-bootstrap-production.test.cjs
+          node tests/baileys-session-observability.test.js
+          node tests/radar-ingress-observation-v1.test.cjs
+          node tests/whatsapp-runtime-journal-correlation.test.cjs
+          node tests/whatsapp-socket-listener-baileys-real.test.cjs

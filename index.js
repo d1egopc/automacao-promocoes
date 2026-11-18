@@ -1210,6 +1210,7 @@ let ultimoMotivoDisconnectWhatsApp = {};
 let geracoesSocketWhatsapp = {};
 let integracoesPorCliente = {};
 let sessoesMeta = {};
+let whatsappQuiescence;
 
 const FILA_FILE = "/data/fila.json";
 const CONFIG_FILE = "/data/config.json";
@@ -13112,6 +13113,14 @@ const {
   enumerarSessoesReconexaoBoot
 } = require("./modules/whatsapp/session-reconnect.service");
 const {
+  createSessionQuiescenceRegistry,
+  waitForSocketClose
+} = require("./modules/whatsapp/session-quiescence.service");
+const {
+  createSessionQuiescenceAdminCaller
+} = require("./modules/whatsapp/session-quiescence-admin-caller");
+whatsappQuiescence = createSessionQuiescenceRegistry();
+const {
   marcarSocketAtual,
   registrarListenerUnicoSocket,
   socketEhAtual,
@@ -15399,6 +15408,49 @@ const exigirAdminMasterEstrito = criarAdminMasterEstrito({
   getUsuarios: () => usuarios,
   usuarioEhAdminMaster
 });
+
+const whatsappQuiescenceAdminCaller = createSessionQuiescenceAdminCaller({
+  registry: whatsappQuiescence,
+  quiesceSession: quiescerSessaoWhatsAppParaSnapshot,
+  resumeSession: liberarSessaoWhatsAppAposSnapshot,
+  recoverSession: recuperarSessaoWhatsAppAposFalhaQuiescencia,
+  startSession: sessaoId => reconectarSessaoWhatsAppSeguro(sessaoId, { origem: "admin_quiescence_resume" }),
+  logger: (event, payload) => console.log(event, payload)
+});
+
+function exigirLoopbackQuiescenciaClaro(req, res, next) {
+  const autorizacao = whatsappQuiescenceAdminCaller.authorizeRequest(req);
+  if (!autorizacao.ok) {
+    return res.status(403).json({ ok: false, reason: autorizacao.reason });
+  }
+  return next();
+}
+
+function responderQuiescenciaClaro(operacao) {
+  return async (req, res) => {
+    try {
+      const resultado = await operacao(req);
+      return res.status(resultado.ok === false ? 409 : 200).json(resultado);
+    } catch (erro) {
+      console.log("[WHATSAPP-QUIESCENCE-ADMIN-ERRO]", JSON.stringify({
+        operation: operacao.name || "unknown",
+        reason: erro.code || erro.message || "operation_failed"
+      }));
+      return res.status(500).json({ ok: false, reason: "quiescence_operation_failed" });
+    }
+  };
+}
+
+app.get("/admin/whatsapp/claro-quiescence/status", exigirAdminMasterEstrito, exigirLoopbackQuiescenciaClaro,
+  responderQuiescenciaClaro(() => whatsappQuiescenceAdminCaller.status()));
+app.post("/admin/whatsapp/claro-quiescence/pause", exigirAdminMasterEstrito, exigirLoopbackQuiescenciaClaro,
+  responderQuiescenciaClaro(() => whatsappQuiescenceAdminCaller.pause()));
+app.post("/admin/whatsapp/claro-quiescence/snapshot", exigirAdminMasterEstrito, exigirLoopbackQuiescenciaClaro,
+  responderQuiescenciaClaro(req => whatsappQuiescenceAdminCaller.snapshot(req.body?.epoch)));
+app.post("/admin/whatsapp/claro-quiescence/resume", exigirAdminMasterEstrito, exigirLoopbackQuiescenciaClaro,
+  responderQuiescenciaClaro(req => whatsappQuiescenceAdminCaller.resume(req.body?.epoch)));
+app.post("/admin/whatsapp/claro-quiescence/recover", exigirAdminMasterEstrito, exigirLoopbackQuiescenciaClaro,
+  responderQuiescenciaClaro(req => whatsappQuiescenceAdminCaller.recover(req.body?.epoch)));
 
 const telegramTeleRadarControlPlane = createTelegramTeleRadarControlPlane({ logger: console });
 
@@ -34516,6 +34568,15 @@ function reconectarSessaoWhatsAppSeguro(id, opcoes = {}) {
   const sessaoId = String(id || "").trim();
   if (!sessaoId) return Promise.resolve(null);
 
+  if (whatsappQuiescence.isQuiescing(sessaoId)) {
+    console.log("[WHATSAPP-QUIESCENCE-BLOCK]", JSON.stringify({
+      sessaoId,
+      operacao: "reconnect",
+      motivo: "sessao_em_quiescencia"
+    }));
+    return Promise.resolve(null);
+  }
+
   console.log("[WHATSAPP-RECONNECT-SEGURO]", JSON.stringify({
     sessaoId,
     origem: opcoes.origem || "indefinida",
@@ -34525,8 +34586,63 @@ function reconectarSessaoWhatsAppSeguro(id, opcoes = {}) {
   return iniciarWhatsApp(sessaoId, opcoes.force === true);
 }
 
+async function quiescerSessaoWhatsAppParaSnapshot(id, opcoes = {}) {
+  const sessaoId = String(id || "").trim();
+  if (!sessaoId) return { ok: false, reason: "session_id_required" };
+  return whatsappQuiescence.quiesce(sessaoId, {
+    ...opcoes,
+    endSocket: async () => {
+      const socket = sessoes[sessaoId]?.sock || sessoes[sessaoId] || null;
+      const expectedGeneration = Number(geracoesSocketWhatsapp[sessaoId] || socket?.__optimusSocketGeracao || 0);
+      const closed = await waitForSocketClose(socket, {
+        timeoutMs: opcoes.socketCloseTimeoutMs,
+        expectedGeneration,
+        getCurrentGeneration: () => Number(geracoesSocketWhatsapp[sessaoId] || socket?.__optimusSocketGeracao || 0),
+        logger: event => console.log("[WHATSAPP-QUIESCENCE-CLOSE]", JSON.stringify({
+          target: "claro",
+          ...event
+        }))
+      });
+      try { socket?.ev?.removeAllListeners?.(); } catch { /* old socket is discarded; cleanup is best effort */ }
+      const current = sessoes[sessaoId]?.sock || sessoes[sessaoId] || null;
+      if (!current || current === socket) {
+        delete sessoes[sessaoId];
+        qrCodes[sessaoId] = null;
+        reconectando[sessaoId] = false;
+        inicializandoWhatsApp[sessaoId] = false;
+        statusSessao[sessaoId] = ESTADOS_WHATSAPP.OFFLINE;
+      }
+      return closed;
+    }
+  });
+}
+
+function autorizarSnapshotAuthSessao(sessaoId, epoch) {
+  return whatsappQuiescence.assertSnapshotAllowed(sessaoId, epoch);
+}
+
+function liberarSessaoWhatsAppAposSnapshot(sessaoId, epoch) {
+  return whatsappQuiescence.resume(sessaoId, epoch);
+}
+
+function recuperarSessaoWhatsAppAposFalhaQuiescencia(sessaoId, epoch) {
+  return whatsappQuiescence.recover(sessaoId, epoch);
+}
+
 async function iniciarWhatsApp(id, force = false) {
   console.log("[WHATSAPP] Iniciando sesso:", id, "force:", force);
+
+  const quiescenceEpochAtStart = typeof whatsappQuiescence !== "undefined"
+    ? whatsappQuiescence.status(id).epoch
+    : 0;
+  if (typeof whatsappQuiescence !== "undefined" && whatsappQuiescence.isQuiescing(id)) {
+    console.log("[WHATSAPP-QUIESCENCE-BLOCK]", JSON.stringify({
+      sessaoId: id,
+      operacao: "start",
+      motivo: "sessao_em_quiescencia"
+    }));
+    return null;
+  }
 
   const chaveSessao = id;
   const statusAtual = statusSessao[chaveSessao];
@@ -34602,7 +34718,14 @@ async function iniciarWhatsApp(id, force = false) {
   let sock;
   let socketGeracao = "";
   try {
-    const { state, saveCreds } = await useMultiFileAuthState("/data/auth_" + id);
+    const authState = await useMultiFileAuthState("/data/auth_" + id);
+    const authStateQuiescence = whatsappQuiescence.wrapAuthState(id, authState);
+    const { state, saveCreds } = authStateQuiescence;
+    if (whatsappQuiescence.status(id).epoch !== quiescenceEpochAtStart) {
+      inicializandoWhatsApp[id] = false;
+      statusSessao[id] = ESTADOS_WHATSAPP.OFFLINE;
+      return null;
+    }
     const { version } = await fetchLatestBaileysVersion();
     const socketGeracaoPrevista = Number(geracoesSocketWhatsapp[id] || 0) + 1;
     const contextoSocketBaileys = criarContextoSocketBaileys({
@@ -34642,6 +34765,13 @@ async function iniciarWhatsApp(id, force = false) {
       browser: ["Chrome", "Desktop", "1.0.0"]
     });
 
+    if (whatsappQuiescence.status(id).epoch !== quiescenceEpochAtStart) {
+      try { await sock?.end?.(); } catch { /* close best effort; no auth deletion */ }
+      inicializandoWhatsApp[id] = false;
+      statusSessao[id] = ESTADOS_WHATSAPP.OFFLINE;
+      return null;
+    }
+
     Object.defineProperty(sock, "__optimusBufferRecovery", { value: bufferRecovery });
     const registroSocket = marcarSocketAtual({
       sessoes,
@@ -34653,7 +34783,8 @@ async function iniciarWhatsApp(id, force = false) {
     });
     socketGeracao = registroSocket.socketGeracao || sock.__optimusSocketGeracao || "";
     try { whatsappIngressBoundary.trackSocket({ workspaceId: clienteIdMensageiro, sessionId: id, sock, generation: socketGeracao }); } catch { /* diagnostics only */ }
-    sock.ev.on("creds.update", async () => {
+    sock.ev.on("creds.update", () => {
+      void whatsappQuiescence.run(id, "creds.update", async () => {
       registrarTelemetriaCredsUpdate({
         contexto: contextoSocketBaileys,
         socketAtual: socketEhAtual(sessoes, id, sock),
@@ -34681,6 +34812,12 @@ async function iniciarWhatsApp(id, force = false) {
           erro: e.message || "erro_save_creds"
         }));
       }
+      }).catch(e => {
+        console.log("[WHATSAPP-AUTH-SAVE-ERRO]", JSON.stringify({
+          sessaoId: id,
+          erro: e.message || "erro_save_creds"
+        }));
+      });
     });
   } catch (e) {
     inicializandoWhatsApp[id] = false;
@@ -34723,6 +34860,24 @@ registrarListenerUnicoSocket({
     } catch { /* Optional diagnostics cannot block the shared listener. */ }
   },
   handler: async ({ messages = [], type } = {}) => {
+  if (typeof whatsappQuiescence !== "undefined" && whatsappQuiescence.isQuiescing(id)) {
+    console.log("[WHATSAPP-QUIESCENCE-BLOCK]", JSON.stringify({
+      sessaoId: id,
+      socketGeracao,
+      operacao: "messages.upsert",
+      motivo: "sessao_em_quiescencia"
+    }));
+    return;
+  }
+  let releaseIngressCallback = () => {};
+  if (typeof whatsappQuiescence !== "undefined") {
+    try {
+      releaseIngressCallback = whatsappQuiescence.enter(id, "messages.upsert");
+    } catch {
+      return;
+    }
+  }
+  try {
   try { whatsappIngressBoundary.mark("callback", { workspaceId: clienteIdMensageiro, sessionId: id, sock, emitter: whatsappIngressEmitter, current: socketEhAtual(sessoes, id, sock), messages, upsertType: type }); } catch { /* diagnostics only */ }
   try {
     radarIngressObservation.observeUpsert({
@@ -35016,6 +35171,9 @@ registrarListenerUnicoSocket({
     sessaoId: id,
     totalMensagensLote: messages.length
   });
+  } finally {
+    releaseIngressCallback();
+  }
   }
 });
 
@@ -35084,6 +35242,16 @@ sock.ev.on("group-participants.update", async (evento) => {
 
   sock.ev.on("connection.update", async (update) => {
     const { connection, qr, lastDisconnect } = update;
+    if (whatsappQuiescence.isQuiescing(id)) {
+      console.log("[WHATSAPP-QUIESCENCE-BLOCK]", JSON.stringify({
+        sessaoId: id,
+        socketGeracao,
+        operacao: "connection.update",
+        connection: connection || (qr ? "connection.qr" : "connection.update"),
+        motivo: "sessao_em_quiescencia"
+      }));
+      return;
+    }
     if (update.receivedPendingNotifications === true) {
       sock.__optimusMessengerLiveReady = true;
       sock.__optimusMessengerOnlineSince = Date.now();
@@ -35214,8 +35382,28 @@ salvarSessoesMeta();
         const backoffMs = authNoClose.authValidaParaReconectar
           ? calcularBackoffMs(tentativasReconexaoWhatsApp[id])
           : 0;
+        const reconnectEpochScheduled = whatsappQuiescence.status(id).epoch;
 
         setTimeout(() => {
+          const reconnectState = whatsappQuiescence.status(id);
+          if (reconnectState.epoch !== reconnectEpochScheduled) {
+            reconectando[id] = false;
+            console.log("[WHATSAPP-QUIESCENCE-BLOCK]", JSON.stringify({
+              sessaoId: id,
+              operacao: "stale_reconnect_backoff",
+              motivo: "geracao_de_quiescencia_alterada"
+            }));
+            return;
+          }
+          if (whatsappQuiescence.isQuiescing(id)) {
+            reconectando[id] = false;
+            console.log("[WHATSAPP-QUIESCENCE-BLOCK]", JSON.stringify({
+              sessaoId: id,
+              operacao: "reconnect_backoff",
+              motivo: "sessao_em_quiescencia"
+            }));
+            return;
+          }
           if (!usuarioAtivoOperacional(clienteIdMensageiro)) {
             logUsuarioInativoOperacional(clienteIdMensageiro, "whatsapp_reconexao_automatica");
             reconectando[id] = false;
