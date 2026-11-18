@@ -152,13 +152,37 @@ async function main() {
     assert.equal((await queue.markSendStarted({ pool, destinationId: activeClaim.id,
       leaseToken: activeClaim.leaseToken })).ok, true);
     assert.equal((await fence.confirmDrain({ pool })).reason, "claims_still_open");
+    const persistedActive = (await admin.query(`SELECT workspace_id,queue_item_id,
+        destination_id,target_key,channel
+      FROM engine_universal_queue_destinations WHERE id=$1`, [activeClaim.id])).rows[0];
+    assert.ok(persistedActive);
+    assert.equal(persistedActive.workspace_id, "ws_fence");
+    assert.equal(String(persistedActive.queue_item_id), String(activeQueue.itemId));
+    assert.equal(persistedActive.destination_id, "dest_active");
+    assert.equal(persistedActive.target_key, "group_active");
+    assert.equal(persistedActive.channel, "whatsapp");
+    const factualCheckpoint = {
+      clienteId: persistedActive.workspace_id,
+      filaItemId: `universal_${persistedActive.queue_item_id}`,
+      destinoChave: `${persistedActive.channel}:${persistedActive.destination_id}`,
+      alvoChave: persistedActive.channel === "whatsapp" &&
+        !persistedActive.target_key.startsWith("grupo:")
+        ? `grupo:${persistedActive.target_key}` : persistedActive.target_key
+    };
+    assert.deepEqual(factualCheckpoint, {
+      clienteId: "ws_fence",
+      filaItemId: `universal_${activeClaim.queue_item_id}`,
+      destinoChave: "whatsapp:dest_active",
+      alvoChave: "grupo:group_active"
+    });
     const confirmationKey = crypto.randomUUID();
     await admin.query(`INSERT INTO fila_checkpoints_entrega
       (cliente_id,fila_item_id,destino_chave,alvo_chave,attempt_id,
        estado,provider_message_id,confirmado_em)
       VALUES ($1,$2,$3,$4,$5,'enviado',$6,clock_timestamp())`,
-    ["ws_fence", `universal_${activeQueue.itemId}`, "whatsapp:dest_active",
-      "grupo:group_active", confirmationKey, "provider-fence-ack"]);
+    [factualCheckpoint.clienteId, factualCheckpoint.filaItemId,
+      factualCheckpoint.destinoChave, factualCheckpoint.alvoChave,
+      confirmationKey, "provider-fence-ack"]);
     assert.equal((await queue.confirmSend({ pool, destinationId: activeClaim.id,
       leaseToken: activeClaim.leaseToken, confirmationKey,
       providerMessageId: "provider-fence-ack" })).ok, true);
