@@ -116,6 +116,8 @@ const { discoverSources: discoverGcReferenceSources } =
   require("./modules/engine/auto-clean/gc-reference-index-builder");
 const { readDestinationDailyUsage } =
   require("./modules/engine/universal-queue.repository");
+const { createUniversalClaimFenceAdminCaller } =
+  require("./modules/engine/universal-claim-fence.service");
 const { avaliarSegurancaPublicacao } = require("./modules/inteligencia-universal/foundation-v1.service");
 const { processVitrineProjectionBatch } =
   require("./modules/engine/universal-vitrine-projector");
@@ -15509,6 +15511,11 @@ const whatsappQuiescenceAdminCaller = createSessionQuiescenceAdminCaller({
   logger: (event, payload) => console.log(event, payload)
 });
 
+const universalClaimFenceAdminCaller = createUniversalClaimFenceAdminCaller({
+  getPool: getEnginePool,
+  logger: (event, payload) => console.log(event, payload)
+});
+
 function exigirLoopbackQuiescenciaClaro(req, res, next) {
   const autorizacao = whatsappQuiescenceAdminCaller.authorizeRequest(req);
   if (!autorizacao.ok) {
@@ -15542,6 +15549,39 @@ app.post("/admin/whatsapp/claro-quiescence/resume", exigirAdminMasterEstrito, ex
   responderQuiescenciaClaro(req => whatsappQuiescenceAdminCaller.resume(req.body?.epoch)));
 app.post("/admin/whatsapp/claro-quiescence/recover", exigirAdminMasterEstrito, exigirLoopbackQuiescenciaClaro,
   responderQuiescenciaClaro(req => whatsappQuiescenceAdminCaller.recover(req.body?.epoch)));
+
+function exigirLoopbackUniversalClaimFence(req, res, next) {
+  const autorizacao = universalClaimFenceAdminCaller.authorizeRequest(req);
+  if (!autorizacao.ok) return res.status(403).json({ ok: false, reason: autorizacao.reason });
+  return next();
+}
+
+function responderUniversalClaimFence(operacao) {
+  return async (req, res) => {
+    try {
+      const resultado = await operacao(req);
+      return res.status(resultado.ok === false ? 409 : 200).json(resultado);
+    } catch (erro) {
+      console.log("[UNIVERSAL-CLAIM-FENCE-ADMIN-ERRO]", JSON.stringify({
+        reason: erro.code || erro.message || "operation_failed"
+      }));
+      return res.status(500).json({ ok: false, reason: "claim_fence_operation_failed" });
+    }
+  };
+}
+
+app.get("/admin/universal-claim-fence/status", exigirAdminMasterEstrito,
+  exigirLoopbackUniversalClaimFence,
+  responderUniversalClaimFence(() => universalClaimFenceAdminCaller.status()));
+app.post("/admin/universal-claim-fence/drain", exigirAdminMasterEstrito,
+  exigirLoopbackUniversalClaimFence,
+  responderUniversalClaimFence(req => universalClaimFenceAdminCaller.requestDrain(req.usuario?.id || "admin_master")));
+app.post("/admin/universal-claim-fence/confirm", exigirAdminMasterEstrito,
+  exigirLoopbackUniversalClaimFence,
+  responderUniversalClaimFence(() => universalClaimFenceAdminCaller.confirmDrain()));
+app.post("/admin/universal-claim-fence/release", exigirAdminMasterEstrito,
+  exigirLoopbackUniversalClaimFence,
+  responderUniversalClaimFence(() => universalClaimFenceAdminCaller.release()));
 
 const telegramTeleRadarControlPlane = createTelegramTeleRadarControlPlane({ logger: console });
 

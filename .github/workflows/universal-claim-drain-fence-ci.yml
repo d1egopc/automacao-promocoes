@@ -1,0 +1,61 @@
+name: Universal claim drain fence CI-only
+
+on:
+  push:
+    branches:
+      - validation/universal-claim-drain-fence-20261118
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  claim-fence-node24-pg17:
+    if: github.ref == 'refs/heads/validation/universal-claim-drain-fence-20261118'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: optimus_universal_fixture
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d optimus_universal_fixture"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install declared dependencies over HTTPS
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: ssh://git@github.com/
+        run: npm ci
+      - name: Syntax and administrative authorization gates
+        run: |
+          set -euo pipefail
+          node --check index.js
+          node --check modules/engine/universal-claim-fence.service.js
+          node --check modules/engine/universal-queue.repository.js
+          node --check tests/universal-claim-fence.postgres.js
+          node --test tests/universal-claim-fence.test.cjs
+      - name: PostgreSQL 17 persistent fence, race and rollback gates
+        env:
+          UF_TEST_PG_PORT: '55433'
+          UF_TEST_PG_EXPECTED_SERVER_PORT: '5432'
+          UF_TEST_PG_EXPECTED_DATA_DIR: /var/lib/postgresql/data
+          PGSSLMODE: disable
+        run: |
+          set -euo pipefail
+          export UF_TEST_PG_EXPECTED_SERVER_HOST="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' '${{ job.services.postgres.id }}')"
+          test -n "$UF_TEST_PG_EXPECTED_SERVER_HOST"
+          node tests/universal-claim-fence.postgres.js

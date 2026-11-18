@@ -10,6 +10,7 @@ const { holdForTargetTx, settleConfirmedTx, releaseForTargetTx } =
   require("./universal-credits.repository");
 const { serializarJsonbSeguro } = require("../../utils/jsonb-safe");
 const { projectUniversalTerminalTx } = require("./universal-history.repository");
+const { readClaimFenceForClaim } = require("./universal-claim-fence.service");
 
 const RECOVERY_BATCH = 20;
 const EXPIRED_RETIRE_BATCH = 100;
@@ -378,6 +379,7 @@ async function claimDestination({ pool, workspaceId, leaseMs = 30000 }) {
   const duration = Math.max(1000, Math.min(120000, Math.floor(Number(leaseMs) || 30000)));
   try { return await transaction(pool, async client => {
     const state = await activeEpoch(client);
+    const claimFence = await readClaimFenceForClaim(client, state.operationEpochStartedAt);
     const epoch = state.operationEpochStartedAt;
     const health = (await client.query(`SELECT health,revision,checkpoint_revision
       FROM engine_universal_queue_workspace_state
@@ -415,15 +417,22 @@ async function claimDestination({ pool, workspaceId, leaseMs = 30000 }) {
     await client.query(`UPDATE engine_universal_queue_destinations
       SET status='claimed',lease_token=$2,
           lease_until=clock_timestamp()+($3::integer * interval '1 millisecond'),
+          claim_fence_generation=$4,
           revision=revision+1,updated_at=clock_timestamp()
-      WHERE id=$1 AND status='pending'`, [target.id, token, duration]);
+      WHERE id=$1 AND status='pending'`, [target.id, token, duration,
+      Number(claimFence.generation)]);
     await client.query(`UPDATE engine_universal_queue_workspace_state
       SET revision=revision+1,checkpoint_revision=revision+1,
           updated_at=clock_timestamp()
       WHERE operation_epoch_started_at=$1 AND workspace_id=$2`, [epoch, workspace]);
-    return { ok: true, empty: false, ...target, leaseToken: token,
+    return { ok: true, empty: false, ...target,
+      claimFenceGeneration: Number(claimFence.generation), leaseToken: token,
       operationEpochStartedAt: epoch };
   }); } catch (error) {
+    if (error?.code === "55P03" || error?.code === "universal_claim_fence_active" ||
+        error?.fenceReason === "universal_claim_fence_active") {
+      return { ok: false, empty: true, reason: "universal_claim_fence_active" };
+    }
     if (error?.code === "23505" &&
         error?.constraint === "engine_uq_one_active_destination_idx") {
       return { ok: true, empty: true, contention: true };
