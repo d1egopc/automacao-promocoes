@@ -30,8 +30,10 @@ jobs:
           node --check index.js
           node --check modules/whatsapp/session-quiescence.service.js
           node --check modules/whatsapp/session-quiescence-admin-caller.js
+          node --check tests/whatsapp-quiescence-close-observability.test.cjs
           node tests/whatsapp-session-quiescence.test.cjs
           node tests/whatsapp-session-quiescence-admin-caller.test.cjs
+          node tests/whatsapp-quiescence-close-observability.test.cjs
       - name: WhatsApp and Radar regressions
         run: |
           node tests/whatsapp-reconnect-seguro.test.js

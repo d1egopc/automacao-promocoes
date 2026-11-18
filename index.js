@@ -34577,7 +34577,16 @@ async function quiescerSessaoWhatsAppParaSnapshot(id, opcoes = {}) {
     ...opcoes,
     endSocket: async () => {
       const socket = sessoes[sessaoId]?.sock || sessoes[sessaoId] || null;
-      const closed = await waitForSocketClose(socket, { timeoutMs: opcoes.socketCloseTimeoutMs });
+      const expectedGeneration = Number(geracoesSocketWhatsapp[sessaoId] || socket?.__optimusSocketGeracao || 0);
+      const closed = await waitForSocketClose(socket, {
+        timeoutMs: opcoes.socketCloseTimeoutMs,
+        expectedGeneration,
+        getCurrentGeneration: () => Number(geracoesSocketWhatsapp[sessaoId] || socket?.__optimusSocketGeracao || 0),
+        logger: event => console.log("[WHATSAPP-QUIESCENCE-CLOSE]", JSON.stringify({
+          target: "claro",
+          ...event
+        }))
+      });
       try { socket?.ev?.removeAllListeners?.(); } catch { /* old socket is discarded; cleanup is best effort */ }
       const current = sessoes[sessaoId]?.sock || sessoes[sessaoId] || null;
       if (!current || current === socket) {
