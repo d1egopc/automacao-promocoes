@@ -2083,6 +2083,17 @@ function produtoMercadoLivreCompativelComMlb(produto = {}, mlbEsperado = "") {
   return unicos.length <= 1 && (!unicos.length || unicos[0] === mlbEsperado);
 }
 
+function produtoMercadoLivreCompativelComIdentidadeOficial(produto = {}, identidade = {}) {
+  const catalogo = extrairMlbMercadoLivre(identidade.urlProduto || "");
+  const item = normalizarMlbItemApiMercadoLivre(identidade.mlbItem || "");
+  if (!catalogo && !item) return false;
+
+  const ids = [produto.produtoId, produto.produtoIdDetectado, produto.productId, produto.mlb, produto.itemId, produto.item_id]
+    .map(normalizarProdutoIdMercadoLivre)
+    .filter(Boolean);
+  return [...new Set(ids)].every(id => id === catalogo || id === item);
+}
+
 function tituloProdutoMercadoLivreJaTemProvaOficial(produto = {}) {
   const titulo = textoMercadoLivre(produto.titulo || produto.nome || produto.title || "");
   const fonte = textoMercadoLivre(produto.tituloFonteOficial || "");
@@ -2091,9 +2102,11 @@ function tituloProdutoMercadoLivreJaTemProvaOficial(produto = {}) {
   if (fontesPagina.has(fonte)) return true;
   if (fonte !== "api_mercadolibre.items.title") return false;
   const proof = produto.provaTituloOficial || {};
-  const mlb = normalizarProdutoIdMercadoLivre(produto.produtoId || produto.produtoIdDetectado || produto.productId || produto.mlb);
-  return Boolean(mlb && proof.fonte === fonte && proof.produtoIdCanonico === mlb &&
-    proof.urlApi === `https://api.mercadolibre.com/items/${mlb}`);
+  const ids = [produto.produtoId, produto.produtoIdDetectado, produto.productId, produto.mlb, produto.itemId, produto.item_id]
+    .map(normalizarProdutoIdMercadoLivre)
+    .filter(Boolean);
+  return Boolean(ids.includes(proof.produtoIdCanonico) && proof.fonte === fonte &&
+    proof.urlApi === `https://api.mercadolibre.com/items/${proof.produtoIdCanonico}`);
 }
 
 async function recuperarProdutoOficialShowProduct({ resolucaoProduto, clienteId, integracao,
@@ -2125,6 +2138,103 @@ async function recuperarProdutoOficialShowProduct({ resolucaoProduto, clienteId,
       cupom: extrairCupomClonadorMercadoLivre(evento, job) || extrairCupomRadarMercadoLivre(evento),
       beneficioTexto: extrairBeneficioClonadorMercadoLivre(evento, job) || extrairBeneficioRadarMercadoLivre(evento) };
   } catch { return null; }
+}
+
+async function enriquecerProdutoMercadoLivreComIdentidadeOficial({ produto = {}, resolucaoProduto = {},
+  tituloRadar = "", urlOriginalEngine = "", clienteId = "", integracao = {}, deps = {} } = {}) {
+  if (!isMeliLa(urlOriginalEngine) || tituloProdutoMercadoLivreJaTemProvaOficial(produto)) return { produto, identidade: null };
+
+  const identidade = await resolverIdentidadeTecnicaUrlResolvidaMercadoLivre({
+    urlOriginalEngine,
+    resolucaoProduto,
+    tituloRadar,
+    clienteId,
+    integracao,
+    deps
+  });
+  if (!identidade?.ok || !identidade.mlbItem || !produtoMercadoLivreCompativelComIdentidadeOficial(produto, identidade)) {
+    return { produto, identidade: null };
+  }
+
+  const buscarImagemOficial = typeof deps.buscarImagemOficialMercadoLivrePorMlb === "function"
+    ? deps.buscarImagemOficialMercadoLivrePorMlb
+    : buscarImagemOficialMercadoLivrePorMlb;
+  let oficial = objetoSeguro(identidade.imagemOficial);
+  if (!oficial.tituloOficial || !oficial.provaTituloOficial) {
+    try {
+      oficial = await buscarImagemOficial(identidade.mlbItem, {
+        clienteId,
+        integracao,
+        getIntegracaoCliente: deps.getIntegracaoCliente
+      });
+    } catch {
+      return { produto, identidade: null };
+    }
+  }
+
+  const mlbItem = normalizarMlbItemApiMercadoLivre(oficial?.mlb || identidade.mlbItem);
+  const proof = oficial?.provaTituloOficial;
+  const tituloOficial = textoMercadoLivre(oficial?.tituloOficial || "");
+  if (mlbItem !== normalizarMlbItemApiMercadoLivre(identidade.mlbItem) ||
+      !tituloOficial || tituloTecnicoBloqueadoMercadoLivre(tituloOficial) ||
+      proof?.produtoIdCanonico !== mlbItem ||
+      proof?.fonte !== "api_mercadolibre.items.title" ||
+      proof?.urlApi !== `https://api.mercadolibre.com/items/${mlbItem}` ||
+      !validarMatchRadarCandidatoMercadoLivre(tituloRadar, tituloOficial).ok) {
+    return { produto, identidade: null };
+  }
+
+  const catalogo = extrairMlbMercadoLivre(identidade.urlProduto || "");
+  const produtoIdExistente = textoMercadoLivre(produto.produtoId || produto.produtoIdDetectado || produto.productId || "");
+  let enriquecido = {
+    ...produto,
+    titulo: tituloOficial,
+    nome: tituloOficial,
+    tituloFonteOficial: proof.fonte,
+    provaTituloOficial: proof,
+    ...(oficial.provaCategoriaOficial ? { provaCategoriaOficial: oficial.provaCategoriaOficial } : {}),
+    produtoId: produtoIdExistente || catalogo || mlbItem,
+    produtoIdDetectado: textoMercadoLivre(produto.produtoIdDetectado || produtoIdExistente || catalogo || mlbItem),
+    itemId: mlbItem,
+    urlFinal: identidade.urlProduto,
+    metadata: {
+      ...objetoSeguro(produto.metadata),
+      identidadeTecnicaUrlResolvida: {
+        origem: identidade.origem || "api_items_titulo_radar",
+        urlProduto: identidade.urlProduto,
+        mlbCatalogo: catalogo,
+        mlbItem,
+        provaTituloOficial: proof
+      }
+    }
+  };
+
+  if (oficial.provaCategoriaOficial?.categoria && categoriaGenericaMercadoLivre(enriquecido.categoria || enriquecido.categoriaProduto)) {
+    enriquecido.categoria = oficial.provaCategoriaOficial.categoria;
+  }
+
+  const identidadeParaImagem = {
+    ...identidade,
+    origem: "api_items_titulo_radar",
+    imagemOficial: oficial,
+    mlbItem
+  };
+  if (!textoMercadoLivre(enriquecido.imagem)) {
+    enriquecido = await resolverImagemOficialFallbackMercadoLivre(enriquecido, {
+      clienteId,
+      integracao,
+      deps,
+      resolucaoProduto,
+      urlOriginalEngine,
+      urlImportador: identidade.urlProduto,
+      linkExpandidoEngine: identidade.urlProduto,
+      identidadeTecnicaUrlResolvida: identidadeParaImagem,
+      urlProdutoProvadaParaImagem: identidade.urlProduto,
+      mlbProdutoProvadoParaImagem: mlbItem
+    });
+  }
+
+  return { produto: enriquecido, identidade: identidadeParaImagem };
 }
 
 async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], deps = {} } = {}) {
@@ -2370,6 +2480,21 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
     }
     return { ok: false, motivo: "importador_sem_retorno", marketplace: "mercadolivre", linkOriginal: urlOriginalEngine };
   }
+
+  // A normal importer result can have the same canonical catalog/variant URL as the
+  // resolved OneLink but still lack technical title proof (and image). Reuse the
+  // already validated anchor/API path before the canonical identity gate; only
+  // technical fields are enriched and the captured commercial fields remain intact.
+  const enriquecimentoIdentidade = await enriquecerProdutoMercadoLivreComIdentidadeOficial({
+    produto,
+    resolucaoProduto,
+    tituloRadar: tituloRadarIdentidade,
+    urlOriginalEngine,
+    clienteId,
+    integracao,
+    deps
+  });
+  produto = enriquecimentoIdentidade.produto;
 
   const identidadeCanonicaMl = avaliarIdentidadeCanonicaMercadoLivre({
     urlOriginalEngine,
@@ -2635,6 +2760,7 @@ module.exports = {
     extrairMlbMercadoLivre,
     motivoIdentidadeMeliClonadorNaoComprovada,
     resolverUrlTransporteAfiliadoFallbackPuroMercadoLivre,
-    similaridadeTituloMercadoLivre
+    similaridadeTituloMercadoLivre,
+    enriquecerProdutoMercadoLivreComIdentidadeOficial
   }
 };
