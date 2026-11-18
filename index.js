@@ -13110,6 +13110,9 @@ const {
   createSessionQuiescenceRegistry,
   waitForSocketClose
 } = require("./modules/whatsapp/session-quiescence.service");
+const {
+  createSessionQuiescenceAdminCaller
+} = require("./modules/whatsapp/session-quiescence-admin-caller");
 whatsappQuiescence = createSessionQuiescenceRegistry();
 const {
   marcarSocketAtual,
@@ -15394,6 +15397,49 @@ const exigirAdminMasterEstrito = criarAdminMasterEstrito({
   getUsuarios: () => usuarios,
   usuarioEhAdminMaster
 });
+
+const whatsappQuiescenceAdminCaller = createSessionQuiescenceAdminCaller({
+  registry: whatsappQuiescence,
+  quiesceSession: quiescerSessaoWhatsAppParaSnapshot,
+  resumeSession: liberarSessaoWhatsAppAposSnapshot,
+  recoverSession: recuperarSessaoWhatsAppAposFalhaQuiescencia,
+  startSession: sessaoId => reconectarSessaoWhatsAppSeguro(sessaoId, { origem: "admin_quiescence_resume" }),
+  logger: (event, payload) => console.log(event, payload)
+});
+
+function exigirLoopbackQuiescenciaClaro(req, res, next) {
+  const autorizacao = whatsappQuiescenceAdminCaller.authorizeRequest(req);
+  if (!autorizacao.ok) {
+    return res.status(403).json({ ok: false, reason: autorizacao.reason });
+  }
+  return next();
+}
+
+function responderQuiescenciaClaro(operacao) {
+  return async (req, res) => {
+    try {
+      const resultado = await operacao(req);
+      return res.status(resultado.ok === false ? 409 : 200).json(resultado);
+    } catch (erro) {
+      console.log("[WHATSAPP-QUIESCENCE-ADMIN-ERRO]", JSON.stringify({
+        operation: operacao.name || "unknown",
+        reason: erro.code || erro.message || "operation_failed"
+      }));
+      return res.status(500).json({ ok: false, reason: "quiescence_operation_failed" });
+    }
+  };
+}
+
+app.get("/admin/whatsapp/claro-quiescence/status", exigirAdminMasterEstrito, exigirLoopbackQuiescenciaClaro,
+  responderQuiescenciaClaro(() => whatsappQuiescenceAdminCaller.status()));
+app.post("/admin/whatsapp/claro-quiescence/pause", exigirAdminMasterEstrito, exigirLoopbackQuiescenciaClaro,
+  responderQuiescenciaClaro(() => whatsappQuiescenceAdminCaller.pause()));
+app.post("/admin/whatsapp/claro-quiescence/snapshot", exigirAdminMasterEstrito, exigirLoopbackQuiescenciaClaro,
+  responderQuiescenciaClaro(req => whatsappQuiescenceAdminCaller.snapshot(req.body?.epoch)));
+app.post("/admin/whatsapp/claro-quiescence/resume", exigirAdminMasterEstrito, exigirLoopbackQuiescenciaClaro,
+  responderQuiescenciaClaro(req => whatsappQuiescenceAdminCaller.resume(req.body?.epoch)));
+app.post("/admin/whatsapp/claro-quiescence/recover", exigirAdminMasterEstrito, exigirLoopbackQuiescenciaClaro,
+  responderQuiescenciaClaro(req => whatsappQuiescenceAdminCaller.recover(req.body?.epoch)));
 
 const telegramTeleRadarControlPlane = createTelegramTeleRadarControlPlane({ logger: console });
 
