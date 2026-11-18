@@ -899,6 +899,7 @@ jobs:
           node --version
           node --check modules/engine/importer/adapters/mercadolivre.adapter.js
           node --test \
+            tests/mercadolivre-official-recovery-trace.test.cjs \
             tests/mercadolivre-pesca-official-recovery.test.cjs \
             tests/mercadolivre-radar-fallback.test.js \
             tests/mercadolivre-identidade-canonica.test.js \

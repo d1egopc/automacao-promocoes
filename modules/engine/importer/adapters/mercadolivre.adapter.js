@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const { queryEngine } = require("../../database");
 const { classificarCategoriaOferta } = require("../../../../marketplaces/inteligencia/classificador-categorias");
 const { avaliarOfertaUniversal } = require("../../../../modules/inteligencia-universal");
@@ -228,6 +229,46 @@ function resolverCategoriaMercadoLivre(produto = {}) {
 
 function textoMercadoLivre(valor = "") {
   return String(valor ?? "").trim();
+}
+
+function hashTelemetriaMercadoLivre(valor = "") {
+  const texto = textoMercadoLivre(valor);
+  return texto ? crypto.createHash("sha256").update(texto).digest("hex").slice(0, 12) : "";
+}
+
+function emitirTelemetriaRecuperacaoOficialMercadoLivre({ deps = {}, payload = {} } = {}) {
+  const evento = {
+    version: 1,
+    stage: textoMercadoLivre(payload.stage),
+    outcome: textoMercadoLivre(payload.outcome),
+    reasonCode: textoMercadoLivre(payload.reasonCode),
+    jobKey: hashTelemetriaMercadoLivre(payload.jobId),
+    eventKey: hashTelemetriaMercadoLivre(payload.eventId),
+    workspaceKey: hashTelemetriaMercadoLivre(payload.workspaceId),
+    originalAnchorPresent: Boolean(payload.urlOriginalEngine),
+    originalAnchorIsMeliLa: isMeliLa(payload.urlOriginalEngine),
+    transportProofPresent: Boolean(payload.transportProofPresent),
+    canonicalPresent: Boolean(payload.canonicalPresent),
+    itemPresent: Boolean(payload.itemPresent),
+    variantPresent: Boolean(payload.variantPresent),
+    officialApiAttempted: Boolean(payload.officialApiAttempted),
+    officialApiCompleted: Boolean(payload.officialApiCompleted),
+    identityProofPresent: Boolean(payload.identityProofPresent),
+    titleProofPresent: Boolean(payload.titleProofPresent),
+    imageProofPresent: Boolean(payload.imageProofPresent),
+    commercialFieldsPreserved: payload.commercialFieldsPreserved !== false,
+    finalGateStatus: textoMercadoLivre(payload.finalGateStatus)
+  };
+  try {
+    if (typeof deps.onMercadoLivreOfficialRecoveryTrace === "function") {
+      deps.onMercadoLivreOfficialRecoveryTrace(evento);
+    } else {
+      console.log("[ML-OFFICIAL-RECOVERY]", JSON.stringify(evento));
+    }
+  } catch (_) {
+    // Observability must never change the adapter decision.
+  }
+  return evento;
 }
 
 function extrairMlbMercadoLivre(valor = "") {
@@ -616,38 +657,74 @@ async function resolverIdentidadeTecnicaUrlResolvidaMercadoLivre({
   resolucaoProduto = {},
   tituloRadar = "",
   clienteId = "",
+  jobId = "",
+  eventId = "",
   integracao = {},
   deps = {}
 } = {}) {
-  if (!isMeliLa(urlOriginalEngine)) return null;
+  const baseTelemetry = {
+    deps,
+    payload: {
+      stage: "resolver_entry",
+      outcome: "started",
+      jobId,
+      eventId,
+      workspaceId: clienteId,
+      urlOriginalEngine,
+      transportProofPresent: Boolean(provaTransporteShowProductMercadoLivre(resolucaoProduto)?.ok),
+      canonicalPresent: Boolean(resolucaoProduto?.urlProduto || resolucaoProduto?.linkResolvido),
+      itemPresent: Boolean(provaTransporteShowProductMercadoLivre(resolucaoProduto)?.mlbItem)
+    }
+  };
+  emitirTelemetriaRecuperacaoOficialMercadoLivre(baseTelemetry);
+  if (!isMeliLa(urlOriginalEngine)) {
+    emitirTelemetriaRecuperacaoOficialMercadoLivre({ ...baseTelemetry, payload: { ...baseTelemetry.payload, stage: "resolver_exit", outcome: "rejected", reasonCode: "anchor_not_meli_la" } });
+    return null;
+  }
   const provaTransporte = provaTransporteShowProductMercadoLivre(resolucaoProduto);
   if (provaTransporte?.mlbItem) {
-    return {
+    const resultado = {
       ok: true,
       origem: "social_action_links_show_product",
       urlProduto: provaTransporte.linkResolvidoTecnico,
       mlbItem: provaTransporte.mlbItem,
       provaTransporteShowProduct: provaTransporte
     };
+    emitirTelemetriaRecuperacaoOficialMercadoLivre({ ...baseTelemetry, payload: {
+      ...baseTelemetry.payload, stage: "resolver_exit", outcome: "accepted", reasonCode: "transport_identity_proof",
+      transportProofPresent: true, canonicalPresent: Boolean(resultado.urlProduto), itemPresent: true
+    } });
+    return resultado;
   }
 
-  if (!textoMercadoLivre(tituloRadar)) return null;
+  if (!textoMercadoLivre(tituloRadar)) {
+    emitirTelemetriaRecuperacaoOficialMercadoLivre({ ...baseTelemetry, payload: { ...baseTelemetry.payload, stage: "resolver_exit", outcome: "rejected", reasonCode: "title_anchor_missing" } });
+    return null;
+  }
 
   const candidatos = urlsDiretasProdutoResolvidoMercadoLivre(resolucaoProduto);
-  if (candidatos.length !== 1) return null;
+  if (candidatos.length !== 1) {
+    emitirTelemetriaRecuperacaoOficialMercadoLivre({ ...baseTelemetry, payload: { ...baseTelemetry.payload, stage: "resolver_exit", outcome: "rejected", reasonCode: "canonical_candidate_count_invalid", canonicalPresent: candidatos.length > 0, itemPresent: candidatos.length > 0 } });
+    return null;
+  }
 
   const candidato = candidatos[0];
   const slug = slugUrlDiretaProdutoMercadoLivre(candidato.url);
   if (slugInformativoProdutoMercadoLivre(slug)) {
     const matchSlug = validarMatchRadarCandidatoMercadoLivre(tituloRadar, slug);
-    if (!matchSlug.ok) return null;
-    return {
+    if (!matchSlug.ok) {
+      emitirTelemetriaRecuperacaoOficialMercadoLivre({ ...baseTelemetry, payload: { ...baseTelemetry.payload, stage: "resolver_exit", outcome: "rejected", reasonCode: "radar_slug_mismatch", canonicalPresent: true, itemPresent: true } });
+      return null;
+    }
+    const resultado = {
       ok: true,
       origem: "url_resolvida_slug_radar",
       urlProduto: candidato.url,
       mlbItem: candidato.mlb,
       matchRadar: matchSlug
     };
+    emitirTelemetriaRecuperacaoOficialMercadoLivre({ ...baseTelemetry, payload: { ...baseTelemetry.payload, stage: "resolver_exit", outcome: "accepted", reasonCode: "canonical_slug_proof", canonicalPresent: true, itemPresent: true } });
+    return resultado;
   }
 
   const buscarImagemOficial = typeof deps.buscarImagemOficialMercadoLivrePorMlb === "function"
@@ -655,6 +732,7 @@ async function resolverIdentidadeTecnicaUrlResolvidaMercadoLivre({
     : buscarImagemOficialMercadoLivrePorMlb;
 
   let oficial;
+  emitirTelemetriaRecuperacaoOficialMercadoLivre({ ...baseTelemetry, payload: { ...baseTelemetry.payload, stage: "official_api", outcome: "started", reasonCode: "api_items_title_attempt", canonicalPresent: true, itemPresent: true, officialApiAttempted: true } });
   try {
     oficial = await buscarImagemOficial(candidato.mlb, {
       clienteId,
@@ -662,16 +740,23 @@ async function resolverIdentidadeTecnicaUrlResolvidaMercadoLivre({
       getIntegracaoCliente: deps.getIntegracaoCliente
     });
   } catch {
+    emitirTelemetriaRecuperacaoOficialMercadoLivre({ ...baseTelemetry, payload: { ...baseTelemetry.payload, stage: "official_api", outcome: "rejected", reasonCode: "official_api_error", canonicalPresent: true, itemPresent: true, officialApiAttempted: true } });
     return null;
   }
 
   const mlbOficial = normalizarMlbItemApiMercadoLivre(oficial?.mlb || candidato.mlb);
-  if (mlbOficial !== candidato.mlb) return null;
+  if (mlbOficial !== candidato.mlb) {
+    emitirTelemetriaRecuperacaoOficialMercadoLivre({ ...baseTelemetry, payload: { ...baseTelemetry.payload, stage: "official_api", outcome: "rejected", reasonCode: "official_item_mismatch", canonicalPresent: true, itemPresent: true, officialApiAttempted: true, officialApiCompleted: true } });
+    return null;
+  }
 
   const matchApi = validarMatchRadarCandidatoMercadoLivre(tituloRadar, oficial?.tituloOficial || "");
-  if (!matchApi.ok) return null;
+  if (!matchApi.ok) {
+    emitirTelemetriaRecuperacaoOficialMercadoLivre({ ...baseTelemetry, payload: { ...baseTelemetry.payload, stage: "official_api", outcome: "rejected", reasonCode: "official_title_mismatch", canonicalPresent: true, itemPresent: true, officialApiAttempted: true, officialApiCompleted: true, titleProofPresent: false, imageProofPresent: false } });
+    return null;
+  }
 
-  return {
+  const resultado = {
     ok: true,
     origem: "api_items_titulo_radar",
     urlProduto: candidato.url,
@@ -680,6 +765,8 @@ async function resolverIdentidadeTecnicaUrlResolvidaMercadoLivre({
     imagemOficial: oficial,
     matchRadar: matchApi
   };
+  emitirTelemetriaRecuperacaoOficialMercadoLivre({ ...baseTelemetry, payload: { ...baseTelemetry.payload, stage: "official_api", outcome: "accepted", reasonCode: "official_identity_proof", canonicalPresent: true, itemPresent: true, officialApiAttempted: true, officialApiCompleted: true, identityProofPresent: true, titleProofPresent: true, imageProofPresent: Boolean(oficial?.imagem) } });
+  return resultado;
 }
 
 function resolverMlbItemImagemOficialFallbackMercadoLivre({
@@ -2141,18 +2228,41 @@ async function recuperarProdutoOficialShowProduct({ resolucaoProduto, clienteId,
 }
 
 async function enriquecerProdutoMercadoLivreComIdentidadeOficial({ produto = {}, resolucaoProduto = {},
-  tituloRadar = "", urlOriginalEngine = "", clienteId = "", integracao = {}, deps = {} } = {}) {
-  if (!isMeliLa(urlOriginalEngine) || tituloProdutoMercadoLivreJaTemProvaOficial(produto)) return { produto, identidade: null };
+  tituloRadar = "", urlOriginalEngine = "", clienteId = "", jobId = "", eventId = "", integracao = {}, deps = {} } = {}) {
+  const trace = (payload = {}) => emitirTelemetriaRecuperacaoOficialMercadoLivre({ deps, payload: {
+    jobId, eventId, workspaceId: clienteId, urlOriginalEngine, ...payload
+  } });
+  if (!isMeliLa(urlOriginalEngine)) {
+    trace({ stage: "enrichment_exit", outcome: "rejected", reasonCode: "anchor_not_meli_la" });
+    return { produto, identidade: null };
+  }
+  if (tituloProdutoMercadoLivreJaTemProvaOficial(produto)) {
+    trace({ stage: "enrichment_exit", outcome: "skipped", reasonCode: "title_proof_already_present", titleProofPresent: true });
+    return { produto, identidade: null };
+  }
+  trace({ stage: "enrichment_entry", outcome: "eligible", reasonCode: "missing_technical_proof", canonicalPresent: Boolean(resolucaoProduto?.urlProduto || resolucaoProduto?.linkResolvido), variantPresent: Boolean(produto?.variationId || produto?.variacaoId) });
 
   const identidade = await resolverIdentidadeTecnicaUrlResolvidaMercadoLivre({
     urlOriginalEngine,
     resolucaoProduto,
     tituloRadar,
     clienteId,
+    jobId,
+    eventId,
     integracao,
     deps
   });
-  if (!identidade?.ok || !identidade.mlbItem || !produtoMercadoLivreCompativelComIdentidadeOficial(produto, identidade)) {
+  const identidadeCompativel = identidade?.ok && Boolean(identidade.mlbItem) && produtoMercadoLivreCompativelComIdentidadeOficial(produto, identidade);
+  if (!identidadeCompativel) {
+    trace({
+      stage: "enrichment_exit",
+      outcome: "rejected",
+      reasonCode: !identidade?.ok ? "identity_resolver_rejected" : (!identidade.mlbItem ? "official_item_missing" : "identity_product_mismatch"),
+      canonicalPresent: Boolean(identidade?.urlProduto),
+      itemPresent: Boolean(identidade?.mlbItem),
+      transportProofPresent: Boolean(identidade?.provaTransporteShowProduct),
+      officialApiCompleted: Boolean(identidade?.origem === "api_items_titulo_radar")
+    });
     return { produto, identidade: null };
   }
 
@@ -2161,13 +2271,16 @@ async function enriquecerProdutoMercadoLivreComIdentidadeOficial({ produto = {},
     : buscarImagemOficialMercadoLivrePorMlb;
   let oficial = objetoSeguro(identidade.imagemOficial);
   if (!oficial.tituloOficial || !oficial.provaTituloOficial) {
+    trace({ stage: "official_api", outcome: "started", reasonCode: "api_items_title_attempt", canonicalPresent: true, itemPresent: true, officialApiAttempted: true });
     try {
       oficial = await buscarImagemOficial(identidade.mlbItem, {
         clienteId,
         integracao,
         getIntegracaoCliente: deps.getIntegracaoCliente
       });
+      trace({ stage: "official_api", outcome: "completed", reasonCode: "api_items_title_completed", canonicalPresent: true, itemPresent: true, officialApiAttempted: true, officialApiCompleted: true, titleProofPresent: Boolean(oficial?.provaTituloOficial), imageProofPresent: Boolean(oficial?.imagem) });
     } catch {
+      trace({ stage: "enrichment_exit", outcome: "rejected", reasonCode: "official_api_error", canonicalPresent: true, itemPresent: true, officialApiAttempted: true, officialApiCompleted: false });
       return { produto, identidade: null };
     }
   }
@@ -2181,6 +2294,7 @@ async function enriquecerProdutoMercadoLivreComIdentidadeOficial({ produto = {},
       proof?.fonte !== "api_mercadolibre.items.title" ||
       proof?.urlApi !== `https://api.mercadolibre.com/items/${mlbItem}` ||
       !validarMatchRadarCandidatoMercadoLivre(tituloRadar, tituloOficial).ok) {
+    trace({ stage: "enrichment_exit", outcome: "rejected", reasonCode: mlbItem !== normalizarMlbItemApiMercadoLivre(identidade.mlbItem) ? "official_item_mismatch" : (!tituloOficial ? "official_title_missing" : (!proof ? "official_title_proof_missing" : "official_proof_rejected")), canonicalPresent: true, itemPresent: true, officialApiAttempted: true, officialApiCompleted: true, identityProofPresent: false, titleProofPresent: false, imageProofPresent: false });
     return { produto, identidade: null };
   }
 
@@ -2234,6 +2348,7 @@ async function enriquecerProdutoMercadoLivreComIdentidadeOficial({ produto = {},
     });
   }
 
+  trace({ stage: "enrichment_exit", outcome: "accepted", reasonCode: "official_recovery_accepted", canonicalPresent: true, itemPresent: true, variantPresent: Boolean(enriquecido.variationId || enriquecido.variacaoId), officialApiAttempted: true, officialApiCompleted: true, identityProofPresent: true, titleProofPresent: true, imageProofPresent: Boolean(enriquecido.imagem), commercialFieldsPreserved: true });
   return { produto: enriquecido, identidade: identidadeParaImagem };
 }
 
@@ -2491,6 +2606,8 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
     tituloRadar: tituloRadarIdentidade,
     urlOriginalEngine,
     clienteId,
+    jobId: job.id,
+    eventId: job.evento_id,
     integracao,
     deps
   });
@@ -2503,6 +2620,29 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
     produto,
     evento
   });
+  const mlbFinalGate = textoMercadoLivre(identidadeCanonicaMl.mlbRevalidado || "").toUpperCase();
+  const identityCanonicalProof = identidadeCanonicaMl.status === "consistente" &&
+    /^MLB\d+$/.test(mlbFinalGate) &&
+    identidadeCanonicaMl.mlbProduto === mlbFinalGate &&
+    extrairMlbMercadoLivre(identidadeCanonicaMl.urlCanonicaRevalidada || "") === mlbFinalGate &&
+    (identidadeCanonicaMl.mlbForteConfirmado === true || identidadeCanonicaMl.transporteShowProductConfirmado === true);
+  emitirTelemetriaRecuperacaoOficialMercadoLivre({ deps, payload: {
+    stage: "final_gate",
+    outcome: identidadeCanonicaMl.status === "consistente" ? "accepted" : "rejected",
+    reasonCode: identidadeCanonicaMl.motivo || identidadeCanonicaMl.status || "identity_gate_unknown",
+    jobId: job.id,
+    eventId: job.evento_id,
+    workspaceId: clienteId,
+    urlOriginalEngine,
+    canonicalPresent: Boolean(identidadeCanonicaMl.urlCanonicaRevalidada),
+    itemPresent: Boolean(identidadeCanonicaMl.mlbProduto || identidadeCanonicaMl.mlbRevalidado),
+    variantPresent: Boolean(produto?.variationId || produto?.variacaoId),
+    identityProofPresent: identityCanonicalProof,
+    titleProofPresent: Boolean(produto?.provaTituloOficial || produto?.tituloFonteOficial),
+    imageProofPresent: Boolean(produto?.imagem),
+    finalGateStatus: identidadeCanonicaMl.status,
+    commercialFieldsPreserved: true
+  } });
 
   if (identidadeCanonicaMl.status === "inconsistente") {
     console.log("[ENGINE-ML-IDENTIDADE-INCONSISTENTE]", JSON.stringify({
