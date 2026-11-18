@@ -5,6 +5,7 @@ on:
     branches:
       - validation/radar-claro-quiescence-local-20261117
       - validation/radar-claro-caller-pr-20261118
+      - validation/whatsapp-delete-contract-20261117
   workflow_dispatch:
 
 permissions:
@@ -30,9 +31,12 @@ jobs:
         run: |
           node --check index.js
           node --check modules/whatsapp/session-quiescence.service.js
+          node --check modules/whatsapp/session-delete.service.js
           node --check modules/whatsapp/session-quiescence-admin-caller.js
           node tests/whatsapp-session-quiescence.test.cjs
           node tests/whatsapp-session-quiescence-admin-caller.test.cjs
+          node tests/whatsapp-quiescence-close-on-off.test.cjs
+          node tests/whatsapp-session-delete-contract.test.cjs
       - name: WhatsApp and Radar regressions
         run: |
           node tests/whatsapp-reconnect-seguro.test.js
