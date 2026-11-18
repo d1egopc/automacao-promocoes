@@ -157,9 +157,12 @@ async function main() {
       FROM engine_universal_queue_destinations WHERE id=$1`, [activeClaim.id])).rows[0];
     assert.ok(persistedActive);
     assert.equal(persistedActive.workspace_id, "ws_fence");
-    assert.equal(String(persistedActive.queue_item_id), String(activeQueue.itemId));
-    assert.equal(persistedActive.destination_id, "dest_active");
-    assert.equal(persistedActive.target_key, "group_active");
+    // releaseUnstarted returns the first item to eligibility. The production
+    // scheduler retains FIFO fairness (available_at,id), so this claim is for
+    // that earlier item, not necessarily the activeQueue inserted below it.
+    assert.equal(String(persistedActive.queue_item_id), String(firstQueue.itemId));
+    assert.equal(persistedActive.destination_id, "dest_fence");
+    assert.equal(persistedActive.target_key, "group_fence");
     assert.equal(persistedActive.channel, "whatsapp");
     const factualCheckpoint = {
       clienteId: persistedActive.workspace_id,
@@ -172,8 +175,8 @@ async function main() {
     assert.deepEqual(factualCheckpoint, {
       clienteId: "ws_fence",
       filaItemId: `universal_${activeClaim.queue_item_id}`,
-      destinoChave: "whatsapp:dest_active",
-      alvoChave: "grupo:group_active"
+      destinoChave: "whatsapp:dest_fence",
+      alvoChave: "grupo:group_fence"
     });
     const confirmationKey = crypto.randomUUID();
     await admin.query(`INSERT INTO fila_checkpoints_entrega
