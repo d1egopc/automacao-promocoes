@@ -16,7 +16,7 @@ mkdir "$infra"
 project=optimus-maintenance-e2e
 compose=(docker compose -p "$project" -f "$infra/compose.yml" -f "$infra/backend-release.yml")
 cleanup() {
-  "${compose[@]}" down >/dev/null 2>&1 || true
+  sudo "${compose[@]}" down >/dev/null 2>&1 || true
   docker rm -f v1-fixture-registry >/dev/null 2>&1 || true
   if test -s "$lab/sshd.pid"; then sudo kill "$(cat "$lab/sshd.pid")" || true; fi
 }
@@ -180,7 +180,7 @@ echo "PASS real SSH interruption, concurrent deploy denial, same-generation reco
 
 deploy_ssh "deploy release-good" | jq -e '.ok and .phase == "open" and .generation == 2'
 test "$(docker inspect -f '{{.Config.Image}}' v1-fixture-backend)" = "$good_ref"
-grep -Fx "    image: $good_ref" "$infra/backend-release.yml"
+sudo grep -Fx "    image: $good_ref" "$infra/backend-release.yml"
 echo "PASS backend-only Compose switch and OPEN"
 
 denied deploy_ssh "deploy release-bad"
