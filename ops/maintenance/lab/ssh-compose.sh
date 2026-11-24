@@ -24,7 +24,7 @@ trap cleanup EXIT
 on_error() {
   echo "Fixture failed at line $1"
   sudo journalctl -t optimus-maintenance-v1 -n 35 --no-pager || true
-  test ! -r "$lab/sshd.log" || tail -n 15 "$lab/sshd.log"
+  sudo tail -n 25 "$lab/sshd.log" 2>/dev/null || true
 }
 trap 'on_error $LINENO' ERR
 
@@ -86,7 +86,7 @@ test "$(product_sql -c "SELECT current_setting('server_version_num')::int / 1000
 echo "PASS PostgreSQL 17 synthetic database"
 
 sudo install -m 0755 "$(command -v node)" /usr/local/bin/node
-sudo install -d -m 0755 /run/sshd /etc/optimus-maintenance /etc/optimus-maintenance/audit \
+sudo install -d -m 0755 /run/sshd /etc/optimus-maintenance /etc/optimus-maintenance/audit /etc/optimus-maintenance/ssh \
   /opt/optimus-maintenance/ops/maintenance /opt/optimus-maintenance/node_modules
 sudo install -d -m 0700 /etc/optimus-maintenance/releases /var/lib/optimus-maintenance
 sudo install -m 0644 ops/maintenance/{entry,broker,deploy*,docker-host,audit}.cjs /opt/optimus-maintenance/ops/maintenance/
@@ -99,7 +99,7 @@ for user in fixtureaudit fixturerelease; do
   sudo useradd -m -s /bin/sh "$user"
   # Short-lived lab keypairs are generated and kept only within this hosted runner.
   ssh-keygen -q -t ed25519 -N '' -f "$lab/$user.key"
-  sudo install -o root -g root -m 0644 "$lab/$user.key.pub" "$lab/$user.authorized"
+  sudo install -o root -g root -m 0644 "$lab/$user.key.pub" "/etc/optimus-maintenance/ssh/$user.authorized"
 done
 ssh-keygen -q -t ed25519 -N '' -f "$lab/host.key"
 printf '[127.0.0.1]:12291 %s\n' "$(cut -d' ' -f1,2 "$lab/host.key.pub")" > "$lab/known_hosts"
@@ -112,7 +112,7 @@ Port 12291
 ListenAddress 127.0.0.1
 HostKey $lab/host.key
 PidFile $lab/sshd.pid
-AuthorizedKeysFile $lab/%u.authorized
+AuthorizedKeysFile /etc/optimus-maintenance/ssh/%u.authorized
 AllowUsers fixtureaudit fixturerelease
 AuthenticationMethods publickey
 PasswordAuthentication no
@@ -121,6 +121,7 @@ UsePAM yes
 PermitUserEnvironment no
 PermitTTY no
 DisableForwarding yes
+LogLevel VERBOSE
 Match User fixtureaudit
   ForceCommand /usr/local/bin/node -- /opt/optimus-maintenance/ops/maintenance/entry.cjs audit
 Match User fixturerelease
@@ -135,11 +136,12 @@ sudo install -m 0600 "$lab/fence-url" /etc/optimus-maintenance/fence-url
 sudo install -m 0600 "$lab"/release-*.json /etc/optimus-maintenance/releases/
 sudo install -o root -g fixtureaudit -m 0640 "$lab/audit.json" /etc/optimus-maintenance/audit/fixtureaudit.json
 
-ssh_opts=(-o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
+ssh_opts=(-F /dev/null -o BatchMode=yes -o ConnectTimeout=5 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
   -o UserKnownHostsFile="$lab/known_hosts" -p 12291 -T)
 audit_ssh() { ssh "${ssh_opts[@]}" -i "$lab/fixtureaudit.key" fixtureaudit@127.0.0.1 "$@"; }
 deploy_ssh() { ssh "${ssh_opts[@]}" -i "$lab/fixturerelease.key" fixturerelease@127.0.0.1 "$@"; }
 denied() { if "$@" > "$lab/denied.log" 2>&1; then echo "Unexpected command success"; return 1; fi; }
+audit_ssh "jobs alpha 60 20" | jq -e '.rows | length == 1 and .[0].id == "1" and .[0].motivo_final == "other"'
 denied audit_ssh "id"
 denied deploy_ssh "docker ps"
 denied audit_ssh "deploy release-good"
@@ -147,7 +149,6 @@ denied deploy_ssh "jobs alpha 60 20"
 denied audit_ssh "jobs beta 60 20"
 denied ssh "${ssh_opts[@]}" -i "$lab/fixtureaudit.key" fixturerelease@127.0.0.1 "status current"
 denied ssh "${ssh_opts[@]}" -i "$lab/fixtureaudit.key" -W 127.0.0.1:18080 fixtureaudit@127.0.0.1
-audit_ssh "jobs alpha 60 20" | jq -e '.rows | length == 1 and .[0].id == "1" and .[0].motivo_final == "other"'
 audit_ssh "acks alpha 60 20" | jq -e '.rows | length == 1 and .[0].factual == 1'
 echo "PASS OpenSSH forced commands, no shell or forwarding, separate keys, workspace isolation and sanitized evidence"
 
