@@ -1,0 +1,24 @@
+name: Optimus VPS Maintenance V1 lab
+
+on:
+  push:
+    branches: [validation/optimus-vps-maintenance-v1]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lab:
+    if: github.ref == 'refs/heads/validation/optimus-vps-maintenance-v1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Run only the disposable Compose lab
+        run: docker compose -p optimus-maintenance-lab -f ops/maintenance/lab/compose.yml up --abort-on-container-exit --exit-code-from tests
+      - name: Remove disposable containers
+        if: always()
+        run: docker compose -p optimus-maintenance-lab -f ops/maintenance/lab/compose.yml down

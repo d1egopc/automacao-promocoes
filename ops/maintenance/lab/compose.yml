@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: optimus_universal_fixture
+      POSTGRES_HOST_AUTH_METHOD: trust
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "optimus_universal_fixture"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    tmpfs:
+      - /var/lib/postgresql/data
+  tests:
+    image: node:24-bookworm
+    depends_on:
+      postgres:
+        condition: service_healthy
+    network_mode: service:postgres
+    working_dir: /lab
+    volumes:
+      - ../../../modules:/lab/modules:ro
+      - ../../../utils:/lab/utils:ro
+      - ../../../tests:/lab/tests:ro
+      - ..:/lab/ops/maintenance:ro
+    environment:
+      UF_TEST_PG_PORT: "5432"
+      UF_TEST_PG_EXPECTED_SERVER_PORT: "5432"
+      UF_TEST_PG_EXPECTED_DATA_DIR: /var/lib/postgresql/data
+      PGSSLMODE: disable
+      OPTIMUS_MAINTENANCE_LAB: "1"
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        npm install --no-save --ignore-scripts --no-audit --no-fund pg@8.22.0
+        node --test ops/maintenance/maintenance.test.cjs tests/universal-claim-fence.test.cjs
+        node tests/universal-claim-fence.postgres.js
+        node --test ops/maintenance/lab/postgres.test.cjs

@@ -19,6 +19,8 @@ Leia [PLATFORM-TOPOLOGY.md](docs/contracts/PLATFORM-TOPOLOGY.md), [PRODUCTION-DE
 
 ## Entrada para uma nova sessao Codex
 
+- [Optimus VPS Maintenance V1](docs/contracts/OPTIMUS-VPS-MAINTENANCE-V1.md) descreve os perfis SSH, os comandos e o lab descartável. A V1 só substitui um caminho produtivo depois de homologação e ativação específicas. Até lá, siga os contratos produtivos existentes.
+
 1. Abra esta pasta oficial, leia este `AGENTS.md` e os contratos do modulo antes de usar uma worktree, backup ou candidata como referencia.
 2. Confirme repositorio, branch, HEAD, `origin/main` e alteracoes locais; verifique o SHA ativo de producao por canal autorizado antes de equiparar codigo local a runtime.
 3. Para operacao, siga [PLATFORM-TOPOLOGY.md](docs/contracts/PLATFORM-TOPOLOGY.md), [PRODUCTION-DEPLOYMENT.md](docs/contracts/PRODUCTION-DEPLOYMENT.md) e, para WhatsApp, [MESSENGER.md](docs/contracts/MESSENGER.md). Nao presuma SSH funcional nem reutilize workflows de deploy para diagnostico.

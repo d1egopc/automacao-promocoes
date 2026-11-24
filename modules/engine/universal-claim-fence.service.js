@@ -97,6 +97,20 @@ function publicState(fence, epoch, counts, extra = {}) {
   };
 }
 
+function requireMaintenanceState(fence, epoch, expected) {
+  if (expected === undefined) {
+    if (fence.state !== STATES.OPEN && /^maintenance:[0-9a-f-]{36}$/.test(fence.requested_by || "")) {
+      throw fenceError("maintenance_fence_owned");
+    }
+    return;
+  }
+  if (!expected || fence.state !== expected.state || Number(fence.generation) !== expected.generation ||
+      new Date(epoch).toISOString() !== expected.epoch ||
+      (expected.owner !== undefined && fence.requested_by !== expected.owner)) {
+    throw fenceError("maintenance_fence_state_changed");
+  }
+}
+
 // Called inside the same claim transaction. The shared row lock makes the
 // requestDrain UPDATE wait for an already-admitted claim, while a drain that
 // acquired the row first makes this read observe DRAINING/DRAINED.
@@ -125,10 +139,11 @@ async function status({ pool }) {
   });
 }
 
-async function requestDrain({ pool, requestedBy = "admin_master" }) {
+async function requestDrain({ pool, requestedBy = "admin_master", expected }) {
   return transaction(pool, async client => {
     const epoch = await readUniversalEpoch(client);
     const fence = await readFence(client, "update");
+    requireMaintenanceState(fence, epoch, expected);
     if (fence.operation_epoch_started_at &&
         String(fence.operation_epoch_started_at.toISOString?.() || fence.operation_epoch_started_at) !== String(epoch)) {
       throw fenceError("claim_fence_epoch_mismatch");
@@ -149,10 +164,11 @@ async function requestDrain({ pool, requestedBy = "admin_master" }) {
   });
 }
 
-async function confirmDrain({ pool }) {
+async function confirmDrain({ pool, expected }) {
   return transaction(pool, async client => {
     const epoch = await readUniversalEpoch(client);
     const fence = await readFence(client, "update");
+    requireMaintenanceState(fence, epoch, expected);
     if (fence.operation_epoch_started_at &&
         String(fence.operation_epoch_started_at.toISOString?.() || fence.operation_epoch_started_at) !== String(epoch)) {
       throw fenceError("claim_fence_epoch_mismatch");
@@ -172,10 +188,11 @@ async function confirmDrain({ pool }) {
   });
 }
 
-async function releaseAdmission({ pool }) {
+async function releaseAdmission({ pool, expected }) {
   return transaction(pool, async client => {
     const epoch = await readUniversalEpoch(client);
     const fence = await readFence(client, "update");
+    requireMaintenanceState(fence, epoch, expected);
     if (fence.operation_epoch_started_at &&
         String(fence.operation_epoch_started_at.toISOString?.() || fence.operation_epoch_started_at) !== String(epoch)) {
       throw fenceError("claim_fence_epoch_mismatch");
