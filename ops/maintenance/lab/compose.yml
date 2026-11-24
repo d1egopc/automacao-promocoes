@@ -20,6 +20,7 @@ services:
     working_dir: /lab
     volumes:
       - ../../../modules:/lab/modules:ro
+      - ../../../marketplaces:/lab/marketplaces:ro
       - ../../../utils:/lab/utils:ro
       - ../../../tests:/lab/tests:ro
       - ..:/lab/ops/maintenance:ro
